@@ -1,19 +1,7 @@
 #ifndef ZENGL_PIXMAP_H
 #define ZENGL_PIXMAP_H
 
-// pixmap.h — buffer de pixels manipulavel em CPU.
-//
-// Portado de Radion/runtime/core/include/Pixmap.h de forma AUTO-CONTIDA:
-// o original depende de PCH.h (que arrasta glm), FileSystem.h (singleton
-// com search paths), Log.h e Math.h (template Rectangle<T>). Aqui trazemos
-// so o que o Pixmap realmente usa - um Color minimo (ctor + 4 getters, era
-// o unico subconjunto usado) e um IntRect de 4 ints - e substituimos
-// FileSystem por stdio e Log por fprintf.
-//
-// Puro CPU: nao toca em OpenGL. O upload de textura e' feito pelo script
-// via pixels() -> Uint8Array + glTexImage2D (ver pixmap_module.cpp), o
-// que mantem o Pixmap utilizavel sem contexto GL (gerar e gravar em disco
-// sem janela, por exemplo).
+ 
 
 #include <cstdint>
 
@@ -78,10 +66,6 @@ public:
     Pixmap(const Pixmap& other) = delete;
     Pixmap& operator=(const Pixmap& other) = delete;
 
-    // Move: transfers ownership of `pixels` and resets the source to an
-    // empty (is_valid() == false) buffer, so its destructor is a no-op —
-    // needed to keep Pixmap directly in a container (engine::Image) instead
-    // of behind an owning pointer.
     Pixmap(Pixmap&& other) noexcept;
     Pixmap& operator=(Pixmap&& other) noexcept;
 

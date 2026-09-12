@@ -52,6 +52,10 @@ namespace kx
       if (mInFrame)
         mGpu->endRenderPass();
       mInFrame = false;
+      if (mScreenTexture.valid())
+        mGpu->destroy(mScreenTexture);
+      mScreenTexture = gpu::TextureHandle();
+      mScreenTextureWidth = mScreenTextureHeight = 0;
       gpu::destroyDevice(mGpu);
       mGpu = nullptr;
     }
@@ -62,6 +66,25 @@ namespace kx
   void Graphics::refreshSize()
   {
     mWindow->getSurface().drawableSize(mWidth, mHeight);
+  }
+
+  bool Graphics::ensureScreenTexture()
+  {
+    if (mScreenTexture.valid() && mScreenTextureWidth == mWidth && mScreenTextureHeight == mHeight)
+      return true;
+    if (mScreenTexture.valid())
+      mGpu->destroy(mScreenTexture);
+
+    gpu::TextureDesc desc;
+    desc.width = mWidth;
+    desc.height = mHeight;
+    desc.format = gpu::Format::RGBA8;
+    desc.usage = gpu::TextureUsageRenderTarget | gpu::TextureUsageSampled | gpu::TextureUsageCopySource;
+    desc.debugName = "screen";
+    mScreenTexture = mGpu->createTexture(desc);
+    mScreenTextureWidth = mWidth;
+    mScreenTextureHeight = mHeight;
+    return mScreenTexture.valid();
   }
 
   bool Graphics::logErrors(const char *where)
@@ -94,10 +117,13 @@ namespace kx
     }
     if (mGpu->surfaceState() != gpu::SurfaceState::Ready || mWidth == 0 || mHeight == 0)
       return false;
+    if (!ensureScreenTexture())
+      return false;
 
     gpu::RenderPassDesc pass;
     pass.colorCount = 1;
-    pass.colors[0].surface = true;
+    pass.colors[0].target.texture = mScreenTexture;
+    pass.colors[0].surface = false;
     pass.colors[0].loadOp = gpu::LoadOp::Clear;
     pass.colors[0].storeOp = gpu::StoreOp::Store;
     pass.colors[0].clearColor[0] = r;
@@ -132,11 +158,59 @@ namespace kx
       mGpu->endRenderPass();
     }
     mInFrame = false;
+    logErrors("Graphics::endFrame");
+  }
+
+  bool Graphics::reopenScreenPass()
+  {
+    if (!mGpu || mInFrame)
+      return false;
+    if (!mScreenTexture.valid())
+      return false;
+
+    gpu::RenderPassDesc pass;
+    pass.colorCount = 1;
+    pass.colors[0].target.texture = mScreenTexture;
+    pass.colors[0].surface = false;
+    pass.colors[0].loadOp = gpu::LoadOp::Load;
+    pass.colors[0].storeOp = gpu::StoreOp::Store;
+    pass.hasDepthStencil = mSurfaceDepth;
+    pass.depthStencil.depthLoadOp = gpu::LoadOp::Load;
+    pass.depthStencil.stencilLoadOp = gpu::LoadOp::Load;
+
+    if (!mGpu->beginRenderPass(pass))
+    {
+      logErrors("Graphics::reopenScreenPass");
+      return false;
+    }
+    mInFrame = true;
+    return true;
+  }
+
+  bool Graphics::beginSurfaceBlit()
+  {
+    if (!mGpu) return false;
+    gpu::RenderPassDesc pass;
+    pass.colorCount = 1;
+    pass.colors[0].surface = true;
+    pass.colors[0].loadOp = gpu::LoadOp::Clear;
+    pass.colors[0].storeOp = gpu::StoreOp::Store;
+    pass.hasDepthStencil = false;
+    return mGpu->beginRenderPass(pass);
+  }
+
+  void Graphics::endSurfaceBlit()
+  {
+    if (!mGpu) return;
+    {
+      KX_PROFILE_SCOPE("Graphics/EndSurfacePass");
+      mGpu->endRenderPass();
+    }
     {
       KX_PROFILE_SCOPE("Graphics/Present");
       mGpu->present();
     }
-    logErrors("Graphics::endFrame");
+    logErrors("Graphics::endSurfaceBlit");
   }
 
 } // namespace kx

@@ -1,15 +1,5 @@
 /*
-** bb_cmds_canvas.cpp — Marco 2 (start): Color, Plot, Line, Rect, Oval.
-**
-** These draw through engine::Platform::batch() (kx::BatchRenderer), which
-** queues vertices; Platform::endFrame() is what actually issues them to
-** the GPU, between Graphics::beginFrame() and endFrame() (see Platform.cpp
-** — getting that ordering right was most of today's Marco 2 work).
-**
-** Fiel to Blitz3D's own bbgraphics.cpp: Plot is a 1x1 filled rect (the
-** original's gxCanvas::plot does a 1x1 colour-fill blit), Oval takes the
-** same corner+size parameters (not centre+radii, which is what the Batch
-** itself takes — converted here).
+** bb_cmds_canvas.cpp — Color, Plot, Line, Rect, Oval.
 */
 #include "runtime.h"
 #include "vm.h"
@@ -40,7 +30,6 @@ namespace bb3d
     {
         (void)nargs;
         float x = (float)arg_int(args[0]), y = (float)arg_int(args[1]);
-        /* a 1x1 filled rect, same as the original's colour-fill blit */
         platform_for(vm)->batch().drawRect(x, y, 1.0f, 1.0f, true);
         return 0;
     }
@@ -70,8 +59,6 @@ namespace bb3d
         float x = (float)arg_int(args[0]), y = (float)arg_int(args[1]);
         float w = (float)arg_int(args[2]), h = (float)arg_int(args[3]);
         bool solid = arg_int(args[4]) != 0;
-        /* Blitz3D's Oval takes a bounding box (corner + size); the Batch's
-           drawEllipse takes centre + radii. */
         platform_for(vm)->batch().drawEllipse(x + w * 0.5f, y + h * 0.5f, w * 0.5f, h * 0.5f, solid);
         return 0;
     }

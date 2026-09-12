@@ -11,9 +11,6 @@ namespace engine
         ImageFrame &f = mFrames[(size_t)clampFrame(i)];
         if (!f.dirty && f.texture.valid()) return true;
 
-        /* the GPU texture path is always RGBA8 — convert_to_rgba() copies
-           when the source is already 4-channel, so this costs nothing extra
-           for the common case (LoadImage's stb_image decode is RGBA already). */
         zengl::Pixmap *rgba = f.pixels.components == 4 ? nullptr : f.pixels.convert_to_rgba();
         const zengl::Pixmap *src = rgba ? rgba : &f.pixels;
 

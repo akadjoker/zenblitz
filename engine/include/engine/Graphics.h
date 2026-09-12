@@ -35,14 +35,21 @@ namespace kx
     bool beginFrame(float r, float g, float b, float a = 1.0f);
     void endFrame();
     bool inFrame() const { return mInFrame; }
+    bool reopenScreenPass();
+
+    bool beginSurfaceBlit();
+    void endSurfaceBlit();
 
     std::uint32_t width() const { return mWidth; }
     std::uint32_t height() const { return mHeight; }
+
+    gpu::TextureHandle screenTexture() const { return mScreenTexture; }
 
     bool logErrors(const char *where);
 
   private:
     void refreshSize();
+    bool ensureScreenTexture();
 
     Device *mWindow = nullptr;
     gpu::Device *mGpu = nullptr;
@@ -51,6 +58,8 @@ namespace kx
     std::uint32_t mHeight = 0;
     bool mInFrame = false;
     bool mSurfaceDepth = true;
+    gpu::TextureHandle mScreenTexture;
+    std::uint32_t mScreenTextureWidth = 0, mScreenTextureHeight = 0;
   };
 
 } // namespace kx

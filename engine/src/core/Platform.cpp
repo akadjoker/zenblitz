@@ -11,7 +11,7 @@ namespace engine
     Platform::Platform() {}
     Platform::~Platform() { close(); }
 
-    bool Platform::open(int width, int height, const char *title, bool fullscreen)
+    bool Platform::open(int width, int height, const char *title, bool fullscreen, bool visible)
     {
         if (mOpen) close();
 
@@ -22,7 +22,7 @@ namespace engine
 #endif
         mDevice.setBackend(backend);
         if (!mDevice.create(title ? title : "zenblitz3d", width, height,
-                            0, /*resizable*/ true, fullscreen))
+                            0, /*resizable*/ true, fullscreen, visible))
         {
             kx::Log::error("Platform: could not create the window");
             return false;
@@ -61,12 +61,14 @@ namespace engine
 
     void Platform::beginFrame()
     {
+        /* Cls: (re)open the screen pass with a clear. */
+        if (mGraphics.inFrame()) mGraphics.endFrame();
         mGraphics.beginFrame(mClearR, mClearG, mClearB, 1.0f);
         int gw = (int)mGraphics.width(), gh = (int)mGraphics.height();
         int bw, bh;
         mBatch.getWindowSize(bw, bh);
         if (gw > 0 && gh > 0 && (gw != bw || gh != bh)) mBatch.resize(gw, gh);
-        mBatch.update(); /* resets per-frame stats; drawing itself can start now */
+        mBatch.update();
     }
 
     void Platform::handleEvent(const void *sdlEventPtr)
@@ -107,28 +109,39 @@ namespace engine
 
     void Platform::pumpEvents()
     {
-        mDevice.update(); /* timing + window-resize bookkeeping; no longer polls itself */
+        mDevice.update();
         SDL_Event e;
         while (SDL_PollEvent(&e))
         {
-            mDevice.handleEvent(e); /* close request, close key, minimize/restore/resize */
-            handleEvent(&e);        /* DIK keyboard, mouse */
+            mDevice.handleEvent(e);
+            handleEvent(&e);
         }
         if (!mDevice.isOpen()) mOpen = false;
     }
 
     void Platform::endFrame()
     {
-        /* mBatch's draw calls (mGpu->draw/drawIndexed) are only valid while
-           Graphics's render pass is open — draw() has to run between
-           beginFrame() and endFrame(), not after. flip() finalises whatever
-           the program queued this frame (Plot/DrawImage/drawTriangle3D...)
-           and draw() actually issues it; skipping either meant nothing the
-           Batch drew ever reached the screen, though Cls's clear colour
-           still would have (Graphics::beginFrame does that directly). */
+        /* Flip: close the Cls pass, upload, reopen with Load, draw, close. */
+        if (mGraphics.inFrame()) mGraphics.endFrame();
         mBatch.flip();
-        mBatch.draw();
-        mGraphics.endFrame();
+        if (mGraphics.reopenScreenPass())
+        {
+            mBatch.draw();
+            mGraphics.endFrame();
+        }
+
+        mBatch.loadIdentity();
+        mBatch.setColor((unsigned char)255, (unsigned char)255, (unsigned char)255);
+        mBatch.drawTexture(mGraphics.screenTexture(), 0.0f, 0.0f,
+                           (float)mGraphics.width(), (float)mGraphics.height());
+        mBatch.flip();
+
+        if (mGraphics.beginSurfaceBlit())
+        {
+            mBatch.draw();
+            mGraphics.endSurfaceBlit();
+        }
+
         mDevice.flip();
         pumpEvents();
     }
@@ -159,5 +172,19 @@ namespace engine
     double Platform::milliSecs() const
     {
         return (double)mDevice.getTicks();
+    }
+
+    unsigned Platform::readScreenPixel(int x, int y)
+    {
+        if (x < 0 || y < 0 || x >= mGraphics.width() || y >= mGraphics.height()) return 0;
+        gpu::TextureRegion region;
+        region.x = (std::uint32_t)x;
+        region.y = (std::uint32_t)y;
+        region.width = 1;
+        region.height = 1;
+        unsigned char pixel[4] = {0, 0, 0, 0};
+        gpu::MutableDataView data{pixel, sizeof(pixel)};
+        if (!mGraphics.device().readTexture(mGraphics.screenTexture(), region, data)) return 0;
+        return ((unsigned)pixel[3] << 24) | ((unsigned)pixel[0] << 16) | ((unsigned)pixel[1] << 8) | pixel[2];
     }
 }

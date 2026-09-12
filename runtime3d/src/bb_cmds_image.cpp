@@ -1,13 +1,6 @@
 /*
-** bb_cmds_image.cpp — Marco 2: LoadImage, LoadAnimImage, DrawImage,
-** MaskImage, FreeImage, ImageWidth/Height, HandleImage/MidHandle.
-**
-** Fiel to bbruntime/bbgraphics.cpp: LoadImage is one frame; LoadAnimImage
-** cuts a cellwidth x cellheight grid out of the sheet, `first` frames per
-** row (fpr = sheet width / cellwidth), matching the original's own maths.
-** Handle defaults to (0,0) — Blitz3D only auto-mid-handles when the
-** (rarely used) AutoMidHandle flag is set, not by default, so this
-** doesn't either.
+** bb_cmds_image.cpp — LoadImage, LoadAnimImage, DrawImage, MaskImage,
+** FreeImage, ImageWidth/Height, HandleImage/MidHandle.
 */
 #include "runtime.h"
 #include "vm.h"
@@ -75,7 +68,6 @@ namespace bb3d
         zengl::Pixmap sheet;
         if (!sheet.load(path)) { args[0] = val_int(0); return 1; }
 
-        /* frames per row, per sheet — the same division the original does */
         int fpr = sheet.width / cellW;
         int fpp = fpr > 0 ? (sheet.height / cellH) * fpr : 0;
         if (fpr <= 0 || first + count > fpp) { args[0] = val_int(0); return 1; }
@@ -169,7 +161,6 @@ namespace bb3d
         return 0;
     }
 
-    /* ================= table ================= */
     extern const zen::CommandDecl bb3d_cmds_image[] = {
         {"%LoadImage$file", c_LoadImage},
         {"%LoadAnimImage$file%cellwidth%cellheight%first%count", c_LoadAnimImage},

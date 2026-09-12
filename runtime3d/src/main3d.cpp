@@ -1,7 +1,5 @@
 /*
-** main3d.cpp — zenblitz3d entry point. Marco 1: compiles and runs a .bb
-** file with the window/input commands installed; no --dis/--build/--dump
-** yet (those stay in zenblitz for now — this is a "does it run" CLI).
+** main3d.cpp — zenblitz3d entry point: compiles and runs a .bb file.
 */
 #include "vm.h"
 #include "compiler.h"
