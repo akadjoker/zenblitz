@@ -195,7 +195,7 @@ namespace engine
             mBoneTforms[k] = -bones[k]->getWorldTform();
     }
 
-    bool MeshModel::render(const RenderContext &rc, gpu::Device &dev)
+    bool MeshModel::render(const RenderContext &rc)
     {
         const Box &b = getCullBox();
         if (b.empty()) return false;
@@ -221,7 +221,7 @@ namespace engine
             for (size_t k = 0; k < mSurfaces.size(); ++k)
             {
                 Surface *s = mSurfaces[k];
-                if (s->numTriangles() && s->ensureGpu(dev))
+                if (s->numTriangles())
                     enqueue(s, 0, s->numVertices(), 0, s->numTriangles(), mBrushes[k]);
             }
             return false;
@@ -241,7 +241,7 @@ namespace engine
             Surface *s = mSurfaces[k];
             if (mBrushes[k].getBlend() == BlendReplace)
             {
-                if (s->numTriangles() && s->ensureGpuSkinned(dev, mSurfBones))
+                if (s->numTriangles())
                     enqueue(s, 0, s->numVertices(), 0, s->numTriangles(), mBrushes[k]);
             }
             else
@@ -252,7 +252,7 @@ namespace engine
         return trans;
     }
 
-    void MeshModel::renderQueue(int type, gpu::Device &dev)
+    void MeshModel::renderQueue(int type)
     {
         if (type == QueueTransparent && !mSurfBones.empty())
         {
@@ -261,10 +261,22 @@ namespace engine
                 Surface *s = mSurfaces[k];
                 if (mBrushes[k].getBlend() != BlendReplace)
                 {
-                    if (s->numTriangles() && s->ensureGpuSkinned(dev, mSurfBones))
+                    if (s->numTriangles())
                         enqueue(s, 0, s->numVertices(), 0, s->numTriangles(), mBrushes[k]);
                 }
             }
+        }
+    }
+
+    void MeshModel::uploadQueue(gpu::Device &dev, int type)
+    {
+        ct::Vector<QueueEntry> &q = queue(type);
+        for (size_t k = 0; k < q.size(); ++k)
+        {
+            if (mSurfBones.empty())
+                q[k].surface->ensureGpu(dev);
+            else
+                q[k].surface->ensureGpuSkinned(dev, mSurfBones);
         }
     }
 }

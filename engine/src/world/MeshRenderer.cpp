@@ -131,11 +131,9 @@ namespace engine
     {
         mGpu = &dev;
 
-        gpu::BufferDesc uboDesc;
-        uboDesc.size = sizeof(Uniforms);
-        uboDesc.usage = gpu::BufferUsageUniform;
-        uboDesc.debugName = "meshrenderer.uniforms";
-        mUniformBuffer = dev.createBuffer(uboDesc);
+        std::uint32_t align = dev.capabilities().uniformBufferOffsetAlignment;
+        if (align == 0) align = 1;
+        mUniformStride = ((std::uint32_t)sizeof(Uniforms) + align - 1) / align * align;
 
         gpu::SamplerDesc samplerDesc;
         samplerDesc.minFilter = gpu::Filter::Linear;
@@ -155,7 +153,26 @@ namespace engine
         texDesc.debugName = "meshrenderer.white";
         mWhiteTexture = dev.createTexture(texDesc);
 
-        return mUniformBuffer.valid() && mSampler.valid() && mWhiteTexture.valid();
+        return mSampler.valid() && mWhiteTexture.valid();
+    }
+
+    bool MeshRenderer::ensureUniformBuffer(gpu::Device &dev, std::uint32_t count)
+    {
+        std::uint64_t needed = (std::uint64_t)mUniformStride * count;
+        if (needed <= mUniformBufferCapacity && mUniformBuffer.valid()) return true;
+
+        if (mUniformBuffer.valid()) dev.destroy(mUniformBuffer);
+
+        std::uint64_t capacity = mUniformBufferCapacity ? mUniformBufferCapacity : mUniformStride * 64;
+        while (capacity < needed) capacity *= 2;
+
+        gpu::BufferDesc desc;
+        desc.size = capacity;
+        desc.usage = gpu::BufferUsageUniform;
+        desc.debugName = "meshrenderer.uniforms";
+        mUniformBuffer = dev.createBuffer(desc);
+        mUniformBufferCapacity = mUniformBuffer.valid() ? capacity : 0;
+        return mUniformBuffer.valid();
     }
 
     void MeshRenderer::shutdown()
@@ -171,28 +188,12 @@ namespace engine
 
     void MeshRenderer::setLights(const ct::Vector<Light *> &lights)
     {
-        int count = (int)lights.size();
-        if (count > kMaxRenderLights) count = kMaxRenderLights;
-        mUniforms.lightCount = count;
-        for (int i = 0; i < count; ++i)
-        {
-            Light *l = lights[i];
-            const Vector &pos = l->getRenderPosition();
-            const Vector &dir = l->getRenderDirection();
-            mUniforms.lightPosType[i][0] = pos.x;
-            mUniforms.lightPosType[i][1] = pos.y;
-            mUniforms.lightPosType[i][2] = pos.z;
-            mUniforms.lightPosType[i][3] = (float)(l->getType() - 1);
-            mUniforms.lightColorRange[i][0] = l->getColor().x;
-            mUniforms.lightColorRange[i][1] = l->getColor().y;
-            mUniforms.lightColorRange[i][2] = l->getColor().z;
-            mUniforms.lightColorRange[i][3] = l->getRange();
-            float innerCos = std::cos(l->getInnerAngle() * blitz::PI / 180.0f);
-            mUniforms.lightDir[i][0] = dir.x;
-            mUniforms.lightDir[i][1] = dir.y;
-            mUniforms.lightDir[i][2] = dir.z;
-            mUniforms.lightDir[i][3] = innerCos;
-        }
+        mLights = lights;
+    }
+
+    void MeshRenderer::beginFrame()
+    {
+        mStaged.clear();
     }
 
     gpu::PipelineHandle MeshRenderer::pipelineFor(const PipelineKey &pk)
@@ -257,32 +258,66 @@ namespace engine
     void MeshRenderer::prepare(const Surface *surface, const Brush &brush, const Matrix4 &model)
     {
         (void)surface;
-        Matrix4 mvp = mViewProjection * model;
-        std::memcpy(mUniforms.mvp, mvp.data(), sizeof(mUniforms.mvp));
-        std::memcpy(mUniforms.model, model.data(), sizeof(mUniforms.model));
-        mUniforms.color[0] = brush.getColor().x;
-        mUniforms.color[1] = brush.getColor().y;
-        mUniforms.color[2] = brush.getColor().z;
-        mUniforms.color[3] = brush.getAlpha();
-        mUniforms.ambient[0] = mAmbient.x;
-        mUniforms.ambient[1] = mAmbient.y;
-        mUniforms.ambient[2] = mAmbient.z;
-        mUniforms.ambient[3] = 1.0f;
-        mUniforms.fogColor[0] = mFogColor.x;
-        mUniforms.fogColor[1] = mFogColor.y;
-        mUniforms.fogColor[2] = mFogColor.z;
-        mUniforms.fogColor[3] = 1.0f;
-        mUniforms.fogMode = mFogMode;
-        mUniforms.fogNear = mFogNear;
-        mUniforms.fogFar = mFogFar;
-        mUniforms.flags = brush.getFX();
+        Uniforms u;
+        Matrix4 mvp = mPending.viewProjection * model;
+        std::memcpy(u.mvp, mvp.data(), sizeof(u.mvp));
+        std::memcpy(u.model, model.data(), sizeof(u.model));
+        u.color[0] = brush.getColor().x;
+        u.color[1] = brush.getColor().y;
+        u.color[2] = brush.getColor().z;
+        u.color[3] = brush.getAlpha();
+        u.ambient[0] = mPending.ambient.x;
+        u.ambient[1] = mPending.ambient.y;
+        u.ambient[2] = mPending.ambient.z;
+        u.ambient[3] = 1.0f;
+        u.fogColor[0] = mPending.fogColor.x;
+        u.fogColor[1] = mPending.fogColor.y;
+        u.fogColor[2] = mPending.fogColor.z;
+        u.fogColor[3] = 1.0f;
+        u.fogMode = mPending.fogMode;
+        u.fogNear = mPending.fogNear;
+        u.fogFar = mPending.fogFar;
+        u.flags = brush.getFX();
 
-        mGpu->updateBuffer(mUniformBuffer, 0, {&mUniforms, sizeof(Uniforms)});
+        int count = (int)mLights.size();
+        if (count > kMaxRenderLights) count = kMaxRenderLights;
+        u.lightCount = count;
+        for (int i = 0; i < count; ++i)
+        {
+            Light *l = mLights[i];
+            const Vector &pos = l->getRenderPosition();
+            const Vector &dir = l->getRenderDirection();
+            u.lightPosType[i][0] = pos.x;
+            u.lightPosType[i][1] = pos.y;
+            u.lightPosType[i][2] = pos.z;
+            u.lightPosType[i][3] = (float)(l->getType() - 1);
+            u.lightColorRange[i][0] = l->getColor().x;
+            u.lightColorRange[i][1] = l->getColor().y;
+            u.lightColorRange[i][2] = l->getColor().z;
+            u.lightColorRange[i][3] = l->getRange();
+            float innerCos = std::cos(l->getInnerAngle() * blitz::PI / 180.0f);
+            u.lightDir[i][0] = dir.x;
+            u.lightDir[i][1] = dir.y;
+            u.lightDir[i][2] = dir.z;
+            u.lightDir[i][3] = innerCos;
+        }
+
+        mStaged.push_back(u);
     }
 
-    void MeshRenderer::draw(gpu::Device &dev, const Surface *surface, const Brush &brush)
+    void MeshRenderer::flushUniforms(gpu::Device &dev)
+    {
+        if (mStaged.empty()) return;
+        if (!ensureUniformBuffer(dev, (std::uint32_t)mStaged.size())) return;
+
+        for (size_t i = 0; i < mStaged.size(); ++i)
+            dev.updateBuffer(mUniformBuffer, i * mUniformStride, {&mStaged[i], sizeof(Uniforms)});
+    }
+
+    void MeshRenderer::draw(gpu::Device &dev, int index, const Surface *surface, const Brush &brush)
     {
         if (surface->gpuIndexCount() <= 0) return;
+        if (index < 0 || (size_t)index >= mStaged.size()) return;
 
         PipelineKey pk;
         pk.blend = brush.getBlend();
@@ -296,7 +331,7 @@ namespace engine
         if (!tex.valid()) tex = mWhiteTexture;
 
         dev.setPipeline(pipeline);
-        dev.bindUniformBuffer(0, mUniformBuffer, 0, sizeof(Uniforms));
+        dev.bindUniformBuffer(0, mUniformBuffer, (std::uint64_t)index * mUniformStride, sizeof(Uniforms));
         dev.bindTexture(0, tex, mSampler);
         dev.bindVertexBuffer(0, surface->vertexBuffer(), 0);
         dev.bindIndexBuffer(surface->indexBuffer(), gpu::IndexFormat::Uint16, 0);

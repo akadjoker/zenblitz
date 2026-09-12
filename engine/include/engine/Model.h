@@ -45,8 +45,12 @@ namespace engine
         virtual MeshModel *getMeshModel() { return nullptr; }
 
         virtual void setRenderBrush(const Brush &b) { mRenderBrush = b; }
-        virtual bool render(const RenderContext &rc, gpu::Device &dev) { (void)rc; (void)dev; return false; }
-        virtual void renderQueue(int type, gpu::Device &dev) { (void)type; (void)dev; }
+        virtual bool render(const RenderContext &rc) { (void)rc; return false; }
+        virtual void renderQueue(int type) { (void)type; }
+        // Uploads whatever geometry queue(type) references to the GPU
+        // (Surface::ensureGpu/ensureGpuSkinned) - call with no render pass
+        // open, after render()/renderQueue() have filled the queue.
+        virtual void uploadQueue(gpu::Device &dev, int type) { (void)dev; (void)type; }
 
         void capture() override
         {

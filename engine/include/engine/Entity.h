@@ -15,6 +15,8 @@ namespace engine
     class Camera;
     class Light;
     class Model;
+    class Mirror;
+    class Listener;
 
     class Entity
     {
@@ -29,6 +31,8 @@ namespace engine
         virtual Camera *getCamera() { return nullptr; }
         virtual Light *getLight() { return nullptr; }
         virtual Model *getModel() { return nullptr; }
+        virtual Mirror *getMirror() { return nullptr; }
+        virtual Listener *getListener() { return nullptr; }
 
         void setName(const std::string &t) { mName = t; }
         void setParent(Entity *parent);

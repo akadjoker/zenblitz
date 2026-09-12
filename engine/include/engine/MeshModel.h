@@ -24,8 +24,9 @@ namespace engine
         bool collide(const Line &line, float radius, Collision *currColl, const Transform &t) override;
 
         void setRenderBrush(const Brush &b) override;
-        bool render(const RenderContext &rc, gpu::Device &dev);
-        void renderQueue(int type, gpu::Device &dev);
+        bool render(const RenderContext &rc) override;
+        void renderQueue(int type) override;
+        void uploadQueue(gpu::Device &dev, int type) override;
 
         void createBones();
 
