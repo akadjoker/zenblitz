@@ -1,6 +1,3 @@
 [submodule "extern/GPU"]
 	path = extern/GPU
 	url = https://github.com/akadjoker/GPU.git
-[submodule "extern/math"]
-	path = extern/math
-	url = https://github.com/akadjoker/math.git
