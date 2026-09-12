@@ -175,6 +175,9 @@ jobs:
         run: |
           set -e
           printf 'Print "msvc ok"\n' > smoke.bb
+          echo "--- disassembly ---"
+          ./bin/Release/zenblitz.exe --dis-only smoke.bb || true
+          echo "--- run ---"
           out=$(./bin/Release/zenblitz.exe smoke.bb | tr -d '\r')
           [ "$out" = "msvc ok" ] || { echo "::error::got '$out'"; exit 1; }
 
