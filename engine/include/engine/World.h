@@ -27,7 +27,7 @@ namespace engine
 
         struct DrawCall
         {
-            Surface *surface;
+            GpuGeometry geom;
             Brush brush;
             int vpX, vpY, vpW, vpH;
             int boneSlot;

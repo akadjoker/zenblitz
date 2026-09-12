@@ -222,7 +222,7 @@ namespace engine
             {
                 Surface *s = mSurfaces[k];
                 if (s->numTriangles())
-                    enqueue(s, 0, s->numVertices(), 0, s->numTriangles(), mBrushes[k]);
+                    enqueue(s, mBrushes[k]);
             }
             return false;
         }
@@ -244,7 +244,7 @@ namespace engine
             if (mBrushes[k].getBlend() == BlendReplace)
             {
                 if (s->numTriangles())
-                    enqueue(s, 0, s->numVertices(), 0, s->numTriangles(), mBrushes[k]);
+                    enqueue(s, mBrushes[k]);
             }
             else
             {
@@ -264,7 +264,7 @@ namespace engine
                 if (mBrushes[k].getBlend() != BlendReplace)
                 {
                     if (s->numTriangles())
-                        enqueue(s, 0, s->numVertices(), 0, s->numTriangles(), mBrushes[k]);
+                        enqueue(s, mBrushes[k]);
                 }
             }
         }
@@ -282,6 +282,7 @@ namespace engine
                 q[k].surface->ensureGpu(dev);
             else
                 q[k].surface->ensureGpuSkinned(dev, mSurfBones);
+            q[k].geom = q[k].surface->geometry();
         }
     }
 }

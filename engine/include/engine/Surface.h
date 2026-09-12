@@ -2,6 +2,7 @@
 #define ENGINE_SURFACE_H
 
 #include "engine/Brush.h"
+#include "engine/GpuGeometry.h"
 #include "gpu/GPU.h"
 #include <ct/vector.hpp>
 #include <string>
@@ -79,6 +80,17 @@ namespace engine
         gpu::BufferHandle indexBuffer() const { return mIndexBuffer; }
         int gpuIndexCount() const { return mValidTs * 3; }
         void freeGpu(gpu::Device &dev);
+
+        // what to draw after ensureGpu*() - valid only after an upload
+        GpuGeometry geometry() const
+        {
+            GpuGeometry g;
+            g.vb = mVertexBuffer;
+            g.ib = mIndexBuffer;
+            g.indexCount = (std::uint32_t)gpuIndexCount();
+            g.layout = GpuGeometry::LayoutSurface;
+            return g;
+        }
 
     private:
         Brush mBrush;

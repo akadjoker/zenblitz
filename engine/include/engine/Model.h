@@ -11,6 +11,7 @@
 namespace engine
 {
     class MeshModel;
+    class MD2Model;
 
     class Model : public Object
     {
@@ -28,10 +29,14 @@ namespace engine
             QueueOpaque = 0, QueueTransparent = 1
         };
 
+        // surface, when set, is the CPU-side owner uploadQueue() must
+        // push to the GPU first (and then refresh geom from); geometry
+        // that is already static on the GPU (MD2 frames) sets geom
+        // directly with surface null.
         struct QueueEntry
         {
+            GpuGeometry geom;
             Surface *surface = nullptr;
-            int firstVertex = 0, vertexCount = 0, firstTri = 0, triCount = 0;
             Brush brush;
         };
 
@@ -44,6 +49,7 @@ namespace engine
         Entity *clone() override { return new Model(*this); }
 
         virtual MeshModel *getMeshModel() { return nullptr; }
+        virtual MD2Model *getMD2Model() { return nullptr; }
 
         virtual void setRenderBrush(const Brush &b) { mRenderBrush = b; }
         virtual bool render(const RenderContext &rc) { (void)rc; return false; }
@@ -121,13 +127,19 @@ namespace engine
 
         void setAutoFade(float nr, float fr) { mAutoFadeNr = nr; mAutoFadeFr = fr; mAutoFade = true; }
 
-        void enqueue(Surface *surface, int fv, int vc, int ft, int tc)
+        void enqueue(Surface *surface, const Brush &brush)
         {
-            enqueue(surface, fv, vc, ft, tc, mRenderBrush);
+            QueueEntry e;
+            e.surface = surface;
+            e.brush = brush;
+            int type = brush.getBlend() == BlendReplace ? QueueOpaque : QueueTransparent;
+            mQueues[type].push_back(e);
         }
-        void enqueue(Surface *surface, int fv, int vc, int ft, int tc, const Brush &brush)
+        void enqueue(const GpuGeometry &geom, const Brush &brush)
         {
-            QueueEntry e{surface, fv, vc, ft, tc, brush};
+            QueueEntry e;
+            e.geom = geom;
+            e.brush = brush;
             int type = brush.getBlend() == BlendReplace ? QueueOpaque : QueueTransparent;
             mQueues[type].push_back(e);
         }

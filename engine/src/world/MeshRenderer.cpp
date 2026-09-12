@@ -19,6 +19,7 @@ namespace engine
         "  int u_fogMode;\n"
         "  float u_fogNear;\n"
         "  float u_fogFar;\n"
+        "  float u_morph;\n"
         "  vec4 u_lightPosType[4];\n"
         "  vec4 u_lightColorRange[4];\n"
         "  vec4 u_lightDir[4];\n"
@@ -27,20 +28,32 @@ namespace engine
     static const char kVertexBody[] =
         "layout(location=0) in vec3 a_pos;\n"
         "layout(location=1) in vec3 a_normal;\n"
+        "#ifndef MORPH\n"
         "layout(location=2) in vec4 a_color;\n"
+        "#endif\n"
         "layout(location=3) in vec2 a_uv;\n"
         "#ifdef SKINNED\n"
         "layout(location=4) in vec4 a_bones;\n"
         "layout(location=5) in vec4 a_weights;\n"
         "layout(std140) uniform Bones { mat4 u_bones[128]; };\n"
         "#endif\n"
+        "#ifdef MORPH\n"
+        "layout(location=6) in vec3 a_posB;\n"
+        "layout(location=7) in vec3 a_normalB;\n"
+        "#endif\n"
         "out vec3 v_worldPos;\n"
         "out vec3 v_normal;\n"
         "out vec4 v_color;\n"
         "out vec2 v_uv;\n"
         "void main(){\n"
+        "#ifdef MORPH\n"
+        "  vec4 lp = vec4(mix(a_pos, a_posB, u_morph),1.0);\n"
+        "  vec3 ln = mix(a_normal, a_normalB, u_morph);\n"
+        "  vec4 a_color = vec4(1.0);\n"
+        "#else\n"
         "  vec4 lp = vec4(a_pos,1.0);\n"
         "  vec3 ln = a_normal;\n"
+        "#endif\n"
         "#ifdef SKINNED\n"
         "  int b0 = int(a_bones.x*255.0+0.5);\n"
         "  if (b0 == 255) {\n"
@@ -138,7 +151,7 @@ namespace engine
         "  o_color = vec4(litColor, alpha);\n"
         "}\n";
 
-    static std::string shaderSource(kx::ShaderDialect dialect, bool fragment, bool skinned)
+    static std::string shaderSource(kx::ShaderDialect dialect, bool fragment, bool skinned, bool morph)
     {
         std::string s;
         if (dialect == kx::ShaderDialect::GLSLES300)
@@ -152,6 +165,7 @@ namespace engine
             s += "#version 330 core\n";
         }
         if (skinned) s += "#define SKINNED 1\n";
+        if (morph) s += "#define MORPH 1\n";
         s += kUniformBlock;
         s += fragment ? kFragmentBody : kVertexBody;
         return s;
@@ -293,27 +307,48 @@ namespace engine
         for (size_t i = 0; i < mPipelines.size(); ++i)
             if (mPipelines[i].key == key) return &mPipelines[i];
 
-        std::string vs = shaderSource(mDialect, false, pk.skinned);
-        std::string fs = shaderSource(mDialect, true, pk.skinned);
+        const bool morph = pk.layout == GpuGeometry::LayoutMd2Morph;
+        std::string vs = shaderSource(mDialect, false, pk.skinned, morph);
+        std::string fs = shaderSource(mDialect, true, pk.skinned, morph);
 
         gpu::PipelineDesc desc;
         desc.vertex.source = {vs.data(), vs.size()};
         desc.fragment.source = {fs.data(), fs.size()};
-        desc.vertex.debugName = pk.skinned ? "mesh.skinned.vs" : "mesh.vs";
+        desc.vertex.debugName = morph ? "mesh.morph.vs" : pk.skinned ? "mesh.skinned.vs" : "mesh.vs";
         desc.fragment.debugName = "mesh.fs";
-        desc.debugName = pk.skinned ? "mesh.skinned" : "mesh";
-        desc.vertexBufferCount = 1;
-        desc.vertexBuffers[0].stride = sizeof(Surface::Vertex);
-        desc.vertexBuffers[0].attributeCount = pk.skinned ? 6 : 4;
-        desc.vertexBuffers[0].attributes[0] = {gpu::VertexFormat::Float32x3, (std::uint32_t)offsetof(Surface::Vertex, coords), 0};
-        desc.vertexBuffers[0].attributes[1] = {gpu::VertexFormat::Float32x3, (std::uint32_t)offsetof(Surface::Vertex, normal), 1};
-        desc.vertexBuffers[0].attributes[2] = {gpu::VertexFormat::Unorm8x4, (std::uint32_t)offsetof(Surface::Vertex, color), 2};
-        desc.vertexBuffers[0].attributes[3] = {gpu::VertexFormat::Float32x2, (std::uint32_t)offsetof(Surface::Vertex, texCoords), 3};
-        if (pk.skinned)
+        desc.debugName = morph ? "mesh.morph" : pk.skinned ? "mesh.skinned" : "mesh";
+        if (morph)
         {
-            // bone indices as Unorm8x4: the shader decodes int(x*255+0.5)
-            desc.vertexBuffers[0].attributes[4] = {gpu::VertexFormat::Unorm8x4, (std::uint32_t)offsetof(Surface::Vertex, boneBones), 4};
-            desc.vertexBuffers[0].attributes[5] = {gpu::VertexFormat::Float32x4, (std::uint32_t)offsetof(Surface::Vertex, boneWeights), 5};
+            // MD2: stream 0 = frame A, stream 1 = frame B (same Md2Vert
+            // layout, selected by buffer offset), stream 2 = uv
+            desc.vertexBufferCount = 3;
+            desc.vertexBuffers[0].stride = sizeof(Md2Vert);
+            desc.vertexBuffers[0].attributeCount = 2;
+            desc.vertexBuffers[0].attributes[0] = {gpu::VertexFormat::Float32x3, (std::uint32_t)offsetof(Md2Vert, x), 0};
+            desc.vertexBuffers[0].attributes[1] = {gpu::VertexFormat::Float32x3, (std::uint32_t)offsetof(Md2Vert, nx), 1};
+            desc.vertexBuffers[1].stride = sizeof(Md2Vert);
+            desc.vertexBuffers[1].attributeCount = 2;
+            desc.vertexBuffers[1].attributes[0] = {gpu::VertexFormat::Float32x3, (std::uint32_t)offsetof(Md2Vert, x), 6};
+            desc.vertexBuffers[1].attributes[1] = {gpu::VertexFormat::Float32x3, (std::uint32_t)offsetof(Md2Vert, nx), 7};
+            desc.vertexBuffers[2].stride = sizeof(Md2Uv);
+            desc.vertexBuffers[2].attributeCount = 1;
+            desc.vertexBuffers[2].attributes[0] = {gpu::VertexFormat::Float32x2, (std::uint32_t)offsetof(Md2Uv, u), 3};
+        }
+        else
+        {
+            desc.vertexBufferCount = 1;
+            desc.vertexBuffers[0].stride = sizeof(Surface::Vertex);
+            desc.vertexBuffers[0].attributeCount = pk.skinned ? 6 : 4;
+            desc.vertexBuffers[0].attributes[0] = {gpu::VertexFormat::Float32x3, (std::uint32_t)offsetof(Surface::Vertex, coords), 0};
+            desc.vertexBuffers[0].attributes[1] = {gpu::VertexFormat::Float32x3, (std::uint32_t)offsetof(Surface::Vertex, normal), 1};
+            desc.vertexBuffers[0].attributes[2] = {gpu::VertexFormat::Unorm8x4, (std::uint32_t)offsetof(Surface::Vertex, color), 2};
+            desc.vertexBuffers[0].attributes[3] = {gpu::VertexFormat::Float32x2, (std::uint32_t)offsetof(Surface::Vertex, texCoords), 3};
+            if (pk.skinned)
+            {
+                // bone indices as Unorm8x4: the shader decodes int(x*255+0.5)
+                desc.vertexBuffers[0].attributes[4] = {gpu::VertexFormat::Unorm8x4, (std::uint32_t)offsetof(Surface::Vertex, boneBones), 4};
+                desc.vertexBuffers[0].attributes[5] = {gpu::VertexFormat::Float32x4, (std::uint32_t)offsetof(Surface::Vertex, boneWeights), 5};
+            }
         }
         desc.topology = gpu::Topology::Triangles;
         desc.colorTargetCount = 1;
@@ -374,10 +409,11 @@ namespace engine
         return &mPipelines[mPipelines.size() - 1];
     }
 
-    void MeshRenderer::prepare(const Surface *surface, const Brush &brush, const Matrix4 &model)
+    void MeshRenderer::prepare(const Brush &brush, const Matrix4 &model, float morph)
     {
-        (void)surface;
         Uniforms u;
+        u.morph = morph;
+        u.pad[0] = u.pad[1] = 0;
         Matrix4 mvp = mPending.viewProjection * model;
         std::memcpy(u.mvp, mvp.data(), sizeof(u.mvp));
         std::memcpy(u.model, model.data(), sizeof(u.model));
@@ -457,12 +493,12 @@ namespace engine
 
         const CachedPipeline *cp = pipelineFor(pk);
         if (!cp->pipeline.valid()) return;
-        bindAndDraw(dev, cp, index, &mClearQuad, mWhiteTexture, -1);
+        bindAndDraw(dev, cp, index, mClearQuad.geometry(), mWhiteTexture, -1);
     }
 
-    void MeshRenderer::draw(gpu::Device &dev, int index, const Surface *surface, const Brush &brush, int boneSlot)
+    void MeshRenderer::draw(gpu::Device &dev, int index, const GpuGeometry &geom, const Brush &brush, int boneSlot)
     {
-        if (surface->gpuIndexCount() <= 0) return;
+        if (!geom.valid()) return;
         if (index < 0 || (std::uint32_t)index >= mStagedCount) return;
         if (boneSlot >= 0 && (std::uint32_t)boneSlot >= mBoneStagedCount) return;
 
@@ -470,7 +506,8 @@ namespace engine
         pk.blend = brush.getBlend();
         pk.doubleSided = (brush.getFX() & FxDoubleSided) != 0;
         pk.hasTexture = brush.getTextureCount() > 0;
-        pk.skinned = boneSlot >= 0;
+        pk.skinned = boneSlot >= 0 && geom.layout == GpuGeometry::LayoutSurface;
+        pk.layout = geom.layout;
 
         const CachedPipeline *cp = pipelineFor(pk);
         if (!cp->pipeline.valid()) return;
@@ -478,10 +515,10 @@ namespace engine
         gpu::TextureHandle tex = pk.hasTexture ? brush.getTexture(0).handle : mWhiteTexture;
         if (!tex.valid()) tex = mWhiteTexture;
 
-        bindAndDraw(dev, cp, index, surface, tex, boneSlot);
+        bindAndDraw(dev, cp, index, geom, tex, pk.skinned ? boneSlot : -1);
     }
 
-    void MeshRenderer::bindAndDraw(gpu::Device &dev, const CachedPipeline *cp, int index, const Surface *surface,
+    void MeshRenderer::bindAndDraw(gpu::Device &dev, const CachedPipeline *cp, int index, const GpuGeometry &geom,
                                    gpu::TextureHandle tex, int boneSlot)
     {
         const bool skinned = boneSlot >= 0;
@@ -503,16 +540,31 @@ namespace engine
             dev.bindTexture(0, tex, mSampler);
             mBound.texture = tex.value();
         }
-        if (surface->vertexBuffer().value() != mBound.vertexBuffer)
+        if (geom.vb.value() != mBound.vb || geom.vbOffset != mBound.vbOffset)
         {
-            dev.bindVertexBuffer(0, surface->vertexBuffer(), 0);
-            mBound.vertexBuffer = surface->vertexBuffer().value();
+            dev.bindVertexBuffer(0, geom.vb, geom.vbOffset);
+            mBound.vb = geom.vb.value();
+            mBound.vbOffset = geom.vbOffset;
         }
-        if (surface->indexBuffer().value() != mBound.indexBuffer)
+        if (geom.layout == GpuGeometry::LayoutMd2Morph)
         {
-            dev.bindIndexBuffer(surface->indexBuffer(), gpu::IndexFormat::Uint16, 0);
-            mBound.indexBuffer = surface->indexBuffer().value();
+            if (geom.vb2.value() != mBound.vb2 || geom.vb2Offset != mBound.vb2Offset)
+            {
+                dev.bindVertexBuffer(1, geom.vb2, geom.vb2Offset);
+                mBound.vb2 = geom.vb2.value();
+                mBound.vb2Offset = geom.vb2Offset;
+            }
+            if (geom.uvb.value() != mBound.uvb)
+            {
+                dev.bindVertexBuffer(2, geom.uvb, 0);
+                mBound.uvb = geom.uvb.value();
+            }
         }
-        dev.drawIndexed((std::uint32_t)surface->gpuIndexCount(), 1, 0, 0, 0);
+        if (geom.ib.value() != mBound.indexBuffer)
+        {
+            dev.bindIndexBuffer(geom.ib, gpu::IndexFormat::Uint16, 0);
+            mBound.indexBuffer = geom.ib.value();
+        }
+        dev.drawIndexed(geom.indexCount, 1, 0, 0, 0);
     }
 }

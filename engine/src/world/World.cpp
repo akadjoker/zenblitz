@@ -349,7 +349,6 @@ namespace engine
             {
                 mRenderer.prepareClear(cam->getClsColor());
                 DrawCall dc;
-                dc.surface = nullptr;
                 cam->getViewport(&dc.vpX, &dc.vpY, &dc.vpW, &dc.vpH);
                 dc.boneSlot = -1;
                 dc.clear = clear;
@@ -447,10 +446,10 @@ namespace engine
         ct::Vector<Model::QueueEntry> &q = mod->queue(queueType);
         for (size_t k = 0; k < q.size(); ++k)
         {
-            mRenderer.prepare(q[k].surface, q[k].brush, model);
+            mRenderer.prepare(q[k].brush, model, q[k].geom.morph);
 
             DrawCall dc;
-            dc.surface = q[k].surface;
+            dc.geom = q[k].geom;
             dc.brush = q[k].brush;
             dc.vpX = mPendingCamera.vpX; dc.vpY = mPendingCamera.vpY;
             dc.vpW = mPendingCamera.vpW; dc.vpH = mPendingCamera.vpH;
@@ -506,7 +505,7 @@ namespace engine
             if (dc.clear)
                 mRenderer.drawClear(dev, (int)k, (dc.clear & 1) != 0, (dc.clear & 2) != 0);
             else
-                mRenderer.draw(dev, (int)k, dc.surface, dc.brush, dc.boneSlot);
+                mRenderer.draw(dev, (int)k, dc.geom, dc.brush, dc.boneSlot);
         }
     }
 }

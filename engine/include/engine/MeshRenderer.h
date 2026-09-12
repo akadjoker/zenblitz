@@ -40,15 +40,18 @@ namespace engine
         // Stages one draw call's uniforms (reads the current
         // viewProjection/ambient/fog/lights) - call with no render pass
         // open, any number of times between beginFrame() and flushUniforms().
-        void prepare(const Surface *surface, const Brush &brush, const Matrix4 &model);
+        // morph is the frame A->B blend for LayoutMd2Morph geometry (0 for
+        // everything else).
+        void prepare(const Brush &brush, const Matrix4 &model, float morph = 0.0f);
         // Uploads every staged uniform and bone block in one buffer each -
         // call once, with no render pass open, after all prepare() calls.
         void flushUniforms(gpu::Device &dev);
         // Issues the Nth prepared draw call - call inside a render pass,
         // index matching prepare() call order since the last beginFrame().
         // boneSlot from stageBones() selects the skinned pipeline; -1 draws
-        // the vertex buffer as is.
-        void draw(gpu::Device &dev, int index, const Surface *surface, const Brush &brush, int boneSlot);
+        // the geometry as is. The geometry's layout selects the vertex
+        // format/streams (Surface, or MD2 two-frame morph).
+        void draw(gpu::Device &dev, int index, const GpuGeometry &geom, const Brush &brush, int boneSlot);
 
         // Camera viewport clear (CameraClsColor/CameraClsMode): stages a
         // draw of a full-viewport quad at far depth in the given colour.
@@ -67,11 +70,12 @@ namespace engine
             bool hasTexture = false;
             bool skinned = false;
             bool clear = false, clearColor = false, clearDepth = false;
+            GpuGeometry::Layout layout = GpuGeometry::LayoutSurface;
             std::uint32_t key() const
             {
                 return (std::uint32_t)blend | (doubleSided ? 0x100u : 0u) | (hasTexture ? 0x200u : 0u) |
                        (skinned ? 0x400u : 0u) | (clear ? 0x800u : 0u) | (clearColor ? 0x1000u : 0u) |
-                       (clearDepth ? 0x2000u : 0u);
+                       (clearDepth ? 0x2000u : 0u) | ((std::uint32_t)layout << 16);
             }
         };
         struct CachedPipeline
@@ -128,7 +132,8 @@ namespace engine
             std::int32_t fogMode;
             float fogNear;
             float fogFar;
-            std::int32_t pad[3];
+            float morph;
+            std::int32_t pad[2];
             float lightPosType[kMaxRenderLights][4];
             float lightColorRange[kMaxRenderLights][4];
             float lightDir[kMaxRenderLights][4];
@@ -141,10 +146,13 @@ namespace engine
         ct::Vector<unsigned char> mBoneStaged;
         std::uint32_t mBoneStagedCount = 0;
 
-        // last handles bound by draw() this frame (0 = nothing bound yet)
+        // last handles/offsets bound by draw() this frame (0 = nothing
+        // bound yet); vertex streams track their offset too since MD2
+        // frames select by offset into one buffer
         struct BoundState
         {
-            std::uint64_t pipeline = 0, texture = 0, vertexBuffer = 0, indexBuffer = 0;
+            std::uint64_t pipeline = 0, texture = 0, indexBuffer = 0;
+            std::uint64_t vb = 0, vbOffset = 0, vb2 = 0, vb2Offset = 0, uvb = 0;
         };
         BoundState mBound;
 
@@ -153,7 +161,7 @@ namespace engine
         Surface mClearQuad;
 
         const CachedPipeline *pipelineFor(const PipelineKey &pk);
-        void bindAndDraw(gpu::Device &dev, const CachedPipeline *cp, int index, const Surface *surface,
+        void bindAndDraw(gpu::Device &dev, const CachedPipeline *cp, int index, const GpuGeometry &geom,
                          gpu::TextureHandle tex, int boneSlot);
         bool ensureBuffer(gpu::Device &dev, gpu::BufferHandle &buffer, std::uint64_t &capacity,
                           std::uint64_t needed, const char *debugName);
