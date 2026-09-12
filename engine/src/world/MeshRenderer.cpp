@@ -23,7 +23,12 @@ namespace engine
         "  vec4 u_texMatrix;\n" // xy = scale, zw = position
         "  float u_texRotation;\n"
         "  int u_texMatrixUsed;\n"
-        "  int u_pad2[2];\n"
+        // no explicit padding here: std140 already rounds up to the next
+        // 16-byte boundary before a vec4 array. An `int u_pad2[2]` would
+        // take 32 bytes in std140 (every array element is 16-aligned),
+        // not the 8 the C++ struct spends, and push every light array
+        // 32 bytes out of step with what the CPU writes.
+
         "  vec4 u_lightPosType[4];\n"
         "  vec4 u_lightColorRange[4];\n"
         "  vec4 u_lightDir[4];\n"
@@ -462,7 +467,7 @@ namespace engine
             u.texRotation = bt.rotation;
             u.texMatrixUsed = (bt.uScale != 1.0f || bt.vScale != 1.0f || bt.uPos != 0.0f || bt.vPos != 0.0f || bt.rotation != 0.0f) ? 1 : 0;
         }
-        u.pad2[0] = u.pad2[1] = 0;
+
 
         u.lightCount = mLightBlock.count;
         std::memcpy(u.lightPosType, mLightBlock.posType, sizeof(u.lightPosType));

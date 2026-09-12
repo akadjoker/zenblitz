@@ -7,6 +7,7 @@
 #include "engine/Matrix4.h"
 #include "engine/ShaderDialect.h"
 #include <ct/vector.hpp>
+#include <cstddef>
 
 namespace engine
 {
@@ -135,14 +136,28 @@ namespace engine
             float fogFar;
             float morph;
             std::int32_t pad[2];
-            float texMatrix[4]; // xy = scale, zw = position
+            alignas(16) float texMatrix[4]; // xy = scale, zw = position
             float texRotation;
             std::int32_t texMatrixUsed;
-            std::int32_t pad2[2];
-            float lightPosType[kMaxRenderLights][4];
-            float lightColorRange[kMaxRenderLights][4];
-            float lightDir[kMaxRenderLights][4];
+            // std140 starts a vec4 array on the next 16-byte boundary
+            // (232 -> 240), but C++ only needs 4-byte alignment for a
+            // float array and would pack it at 232 - alignas(16) makes
+            // the struct follow the same rule. Getting this wrong shifts
+            // every light value by 8 bytes and the lighting silently
+            // reads garbage (which is exactly what happened: an
+            // `int u_pad2[2]` used to sit here, 8 bytes in C++ against
+            // std140's 32, hiding the same class of mismatch).
+            alignas(16) float lightPosType[kMaxRenderLights][4];
+            alignas(16) float lightColorRange[kMaxRenderLights][4];
+            alignas(16) float lightDir[kMaxRenderLights][4];
         };
+        // The shader reads this block as std140; if the C++ layout ever
+        // drifts from it again the lighting goes silently wrong rather
+        // than failing loudly, so pin the offsets that matter here.
+        static_assert(offsetof(Uniforms, lightPosType) == 240, "std140 mismatch: lightPosType");
+        static_assert(offsetof(Uniforms, lightColorRange) == 304, "std140 mismatch: lightColorRange");
+        static_assert(offsetof(Uniforms, lightDir) == 368, "std140 mismatch: lightDir");
+        static_assert(sizeof(Uniforms) == 432, "std140 mismatch: Uniforms size");
         // Staged blocks laid out at their GPU stride (not tightly packed)
         // so flushUniforms uploads each buffer in one updateBuffer and
         // draw() binds any entry by offset.
