@@ -98,13 +98,50 @@ natives are re-registered by the loader.
 
 ```bash
 ./bin/zenblitz --build game game.bb          # Linux binary: runtime + bytecode
-./bin/zenblitz --build game.exe --stub zenblitz.exe game.bb   # with a Windows runtime
+./bin/zenblitz --build game.exe --stub zenblitz-rt.exe game.bb   # with a Windows runtime
 ./game arg1 arg2                             # CommandLine$() = "arg1 arg2"
 ```
 
 Like the original Blitz3D (runtime + program), but with bytecode appended to
 the runtime binary instead of x86 code linked into it. The program never
 needs the compiler. `--debug` adds per-dimension array bounds checks.
+
+`--build` appends the program to `zenblitz-rt`, the runtime-only executable
+next to the compiler (about a third of its size, since it carries no
+compiler); `--stub` picks a different one, which is how you build for
+another platform. A runtime for a platform is that same `cli/rt_main.cpp`
+built there — nothing in the build is host-specific.
+
+## Platforms
+
+`libzen` contains no operating-system calls. Everything a program needs from
+the platform — text output, logging, console input, files, directories,
+time, dynamic libraries — goes through `zen::Backend` (`zen/backend.h`),
+which the host fills in before starting the VM:
+
+```cpp
+VM vm;
+vm.set_backend(stdio_backend());   // cli/backend_stdio.cpp
+install_runtime(&vm);
+```
+
+`cli/backend_stdio.cpp` is the console backend (stdio, POSIX and Win32); an
+engine plugs in an SDL one instead, and a browser or Android build its own.
+Commands that would block — `Delay`, `WaitTimer` — do not sleep: they
+suspend the VM with a wake-up deadline (`VM::wake_at()`) and let the host
+decide how to wait, so a browser or Android host returns to its event loop
+rather than freezing. `cli/host_loop.h` is the console version of that loop.
+
+The library builds in two shapes: `zen_vm` is the runtime alone (what a game
+or a web/Android host links), `zen_static` adds the compiler.
+
+## User libraries
+
+Blitz3D-style `.decls` files in a `userlibs/` directory beside the
+executable declare functions from a shared library and make them available
+as commands. See [userlibs/README.md](userlibs/README.md). Desktop only:
+web and Android have no dynamic loading, and calling such a function there
+reports it as unavailable.
 
 ## Known differences from Blitz3D
 
@@ -117,8 +154,12 @@ needs the compiler. `--debug` adds per-dimension array bounds checks.
 - `libzen/src/bb_toker.*`, `bb_parser.*`, `bb_semant.cpp` — Blitz front-end
   (tokens, AST, type checking, constant folding).
 - `libzen/src/bb_codegen.*` — bytecode generation through the `Emitter`.
-- `libzen/src/bb_runtime.*`, `bb_cmds.cpp` — Type lists, Data, conversions,
-  and the Blitz command set registered as natives.
+- `libzen/src/bb_runtime.*`, `bb_cmds.cpp`, `bb_cmds_io.cpp` — Type lists,
+  Data, conversions, and the Blitz command set registered as natives.
+- `libzen/src/bb_userlibs.cpp` — `.decls` parsing and the call thunk for
+  user libraries.
+- `libzen/include/zen/backend.h` — the platform services a program needs;
+  `cli/backend_stdio.cpp` is the console implementation.
 - `libzen/src/compiler.cpp` — `zen::Compiler::compile()` entry point.
 - `libzen/src/vm.cpp`, `vm_dispatch.cpp`, `memory.cpp`, `emitter.cpp`,
   `bytecode.cpp` — the VM (about 3 300 lines).

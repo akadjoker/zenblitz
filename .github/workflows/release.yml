@@ -1,13 +1,14 @@
 name: release
 
-# Builds the same headless binaries as ci.yml, packages each with a platform
-# suffix, and publishes them to a GitHub Release when a vX.Y.Z tag is pushed.
-# workflow_dispatch does the same dry: it ends in a DRAFT prerelease you can
-# inspect and delete, and creates no tag.
+# Builds the binaries for each platform, packages them with the sample
+# programs, and publishes them to a GitHub Release when a vX.Y.Z tag is
+# pushed. workflow_dispatch does the same dry: it ends in a DRAFT prerelease
+# you can inspect and delete, and creates no tag.
 #
-# These are the core-only `zen` binaries. Runners with native/graphics
-# modules (zen_game, zen_gl, batteries-included zen) are zenvm-modules'
-# to release.
+# Each archive is a complete, ready-to-use distribution: both executables —
+# `zenblitz` (compiler + runtime) and `zenblitz-rt` (runtime only), which
+# `--build` looks for next to itself as the stub for standalone programs —
+# plus the sample programs and the userlibs directory.
 on:
   push:
     tags:
@@ -26,17 +27,33 @@ jobs:
       - name: Configure
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release
       - name: Build
-        run: cmake --build build --target zen -j"$(nproc)"
+        run: cmake --build build -j"$(nproc)"
       - name: Snapshot tests
-        run: ZEN_TEST_VERBOSE=1 tests/run_zen_tests.sh bin/zen
+        run: tests/run_tests.sh bin/zenblitz
       - name: Package
-        run: |
-          mkdir -p dist
-          cp bin/zen dist/zen-linux-x86_64
+        run: tools/package.sh linux-x86_64
       - uses: actions/upload-artifact@v4
         with:
-          name: zen-linux-x86_64
-          path: dist/zen-linux-x86_64
+          name: zenblitz-linux-x86_64
+          path: zenblitz-linux-x86_64.tar.gz
+
+  macos:
+    name: macos-arm64
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build build -j"$(sysctl -n hw.ncpu)"
+      - name: Snapshot tests
+        run: tests/run_tests.sh bin/zenblitz
+      - name: Package
+        run: tools/package.sh macos-arm64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zenblitz-macos-arm64
+          path: zenblitz-macos-arm64.tar.gz
 
   windows-mingw:
     name: windows-mingw-x64
@@ -46,7 +63,6 @@ jobs:
         shell: msys2 {0}
     steps:
       - uses: actions/checkout@v4
-
       - uses: msys2/setup-msys2@v2
         with:
           msystem: UCRT64
@@ -55,35 +71,29 @@ jobs:
             mingw-w64-ucrt-x86_64-gcc
             mingw-w64-ucrt-x86_64-cmake
             mingw-w64-ucrt-x86_64-ninja
-
+            zip
       - name: Configure
         run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
-
       - name: Build
-        run: cmake --build build --target zen -j"$(nproc)"
-
+        run: cmake --build build -j"$(nproc)"
       - name: Snapshot tests
         run: |
           set +e
-          ZEN_TEST_VERBOSE=1 tests/run_zen_tests.sh bin/zen.exe | tee test_out.txt
+          tests/run_tests.sh bin/zenblitz.exe | tee test_out.txt
           rc=${PIPESTATUS[0]}
           fails=$(grep '\[FAIL\]' test_out.txt | paste -sd'|' -)
           [ -n "$fails" ] && echo "::error::snapshot failures: $fails"
           exit $rc
-
       - name: Package
-        run: |
-          mkdir -p dist
-          cp bin/zen.exe dist/zen-windows-mingw-x64.exe
-
+        run: tools/package.sh windows-x64 .exe
       - uses: actions/upload-artifact@v4
         with:
-          name: zen-windows-mingw-x64
-          path: dist/zen-windows-mingw-x64.exe
+          name: zenblitz-windows-x64
+          path: zenblitz-windows-x64.zip
 
   publish:
     name: publish release
-    needs: [linux, windows-mingw]
+    needs: [linux, macos, windows-mingw]
     runs-on: ubuntu-latest
     steps:
       - name: Download all artifacts
@@ -99,7 +109,7 @@ jobs:
         run: |
           gh release create "$GITHUB_REF_NAME" dist/* \
             --repo "$GITHUB_REPOSITORY" \
-            --title "zen $GITHUB_REF_NAME" --generate-notes
+            --title "zenblitz $GITHUB_REF_NAME" --generate-notes
       - name: Draft prerelease (manual dry run)
         if: github.event_name == 'workflow_dispatch'
         env: { GH_TOKEN: '${{ github.token }}' }

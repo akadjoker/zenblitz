@@ -12,6 +12,14 @@
 *.a
 *.so
 
+# ...except user libraries, which are shipped rather than built here
+!/userlibs/**
+
+# Release packaging (tools/package.sh)
+/stage/
+/zenblitz-*.tar.gz
+/zenblitz-*.zip
+
 # Scratch files the test scripts write next to the repo
 /zen_tmp_*
 

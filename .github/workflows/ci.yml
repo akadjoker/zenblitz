@@ -2,13 +2,16 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, master]
   pull_request:
   workflow_dispatch:
 
-# This repo is the core only (libzen + the plain zen CLI), so every job is
-# headless by construction. Native/graphics modules and their runners are
-# built and tested in the zenvm-modules repository.
+# zenblitz builds two executables: `zenblitz` (compiler + runtime) and
+# `zenblitz-rt` (runtime only, the stub `--build` appends programs to).
+# Everything platform-specific lives in cli/backend_stdio.cpp behind the
+# zen::Backend interface, so these jobs are what proves libzen itself stays
+# free of OS calls: a break in that rule shows up here as a build failure on
+# a platform other than Linux.
 
 jobs:
   linux:
@@ -16,58 +19,118 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - name: Configure
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release
-
       - name: Build
-        run: cmake --build build --target zen -j"$(nproc)"
-
+        run: cmake --build build -j"$(nproc)"
       - name: Snapshot tests
-        run: ZEN_TEST_VERBOSE=1 tests/run_zen_tests.sh bin/zen
+        run: tests/run_tests.sh bin/zenblitz
+      - name: Standalone executable (zenblitz-rt as stub)
+        run: |
+          set -e
+          printf 'Print "standalone ok"\n' > /tmp/smoke.bb
+          ./bin/zenblitz --build /tmp/smoke /tmp/smoke.bb
+          out=$(/tmp/smoke)
+          [ "$out" = "standalone ok" ] || { echo "::error::got '$out'"; exit 1; }
+      - name: Runtime-only executable (.zbc)
+        run: |
+          set -e
+          ./bin/zenblitz --dump /tmp/smoke.zbc /tmp/smoke.bb
+          out=$(./bin/zenblitz-rt /tmp/smoke.zbc)
+          [ "$out" = "standalone ok" ] || { echo "::error::got '$out'"; exit 1; }
+      # Covers the whole userlib path: .decls parsing, dlopen, and the
+      # thunk that turns Values into C arguments for each declared type.
+      - name: Userlibs (.decls + shared library)
+        run: |
+          set -e
+          mkdir -p bin/userlibs
+          cat > /tmp/ul.c <<'EOF'
+          #include <stdio.h>
+          #include <string.h>
+          int add_ints(long long a, long long b) { return (int)(a + b); }
+          double scale(double x, double k) { return x * k; }
+          const char *greet(const char *n) {
+              static char b[256];
+              snprintf(b, sizeof(b), "hello, %s!", n);
+              return b;
+          }
+          int mixed(long long n, double f, const char *s) {
+              return (int)(n + (long long)f + (long long)strlen(s));
+          }
+          EOF
+          gcc -shared -fPIC -o bin/userlibs/libul.so /tmp/ul.c
+          cat > bin/userlibs/ul.decls <<'EOF'
+          .lib "libul.so"
+          AddInts%(a%, b%) : "add_ints"
+          Scale#(x#, k#) : "scale"
+          Greet$(n$) : "greet"
+          Mixed%(n%, f#, s$) : "mixed"
+          EOF
+          cat > /tmp/ul.bb <<'EOF'
+          Print AddInts(3, 4)
+          Print Scale(2.5, 4.0)
+          Print Greet$("blitz")
+          Print Mixed(10, 2.7, "abc")
+          EOF
+          got=$(./bin/zenblitz /tmp/ul.bb | tr '\n' '|')
+          want='7|10.0|hello, blitz!|15|'
+          [ "$got" = "$want" ] || { echo "::error::userlibs: got '$got' want '$want'"; exit 1; }
+          # and the same through precompiled bytecode
+          ./bin/zenblitz --dump /tmp/ul.zbc /tmp/ul.bb
+          got=$(./bin/zenblitz-rt /tmp/ul.zbc | tr '\n' '|')
+          [ "$got" = "$want" ] || { echo "::error::userlibs via .zbc: got '$got'"; exit 1; }
+          # a program whose userlib is missing must say so, not crash
+          ./bin/zenblitz --build /tmp/ulgame /tmp/ul.bb
+          mkdir -p /tmp/noul && cp /tmp/ulgame /tmp/noul/
+          if out=$(/tmp/noul/ulgame 2>&1); then
+            echo "::error::expected a failure without the userlib, got: $out"; exit 1
+          fi
+          case "$out" in
+            *"not available"*) ;;
+            *) echo "::error::unclear message without the userlib: $out"; exit 1 ;;
+          esac
+          rm -rf bin/userlibs
+
+  linux-clang:
+    name: Linux (clang, Release)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=clang++
+      - name: Build
+        run: cmake --build build -j"$(nproc)"
+      - name: Snapshot tests
+        run: tests/run_tests.sh bin/zenblitz
 
   linux-sanitize:
     name: Linux (gcc, ASan+UBSan)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       # Debug build type enables -fsanitize=address,undefined (see CMakeLists)
       - name: Configure
         run: cmake -B build -DCMAKE_BUILD_TYPE=Debug
-
       - name: Build
-        run: cmake --build build --target zen -j"$(nproc)"
-
+        run: cmake --build build -j"$(nproc)"
       - name: Snapshot tests (sanitized)
         run: |
           export ASAN_OPTIONS=detect_leaks=0
-          ZEN_TEST_VERBOSE=1 tests/run_zen_tests.sh bin/zen
+          tests/run_tests.sh bin/zenblitz
 
-  # Feeds arbitrary bytes to the compiler + VM under ASan+UBSan, with GC
-  # forced on every allocation (ZEN_DEBUG_STRESS_GC) so marking bugs surface
-  # immediately instead of waiting for a real threshold-triggered collection.
-  # Bounded to a smoke run — deep fuzzing is a local/scheduled concern, not
-  # every PR's.
-  linux-fuzz:
-    name: Linux (clang, fuzz + stress-GC)
-    runs-on: ubuntu-latest
-    env:
-      ASAN_OPTIONS: halt_on_error=1:detect_leaks=0
-      UBSAN_OPTIONS: halt_on_error=1
+  macos:
+    name: macOS (clang, Release)
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-
       - name: Configure
-        run: cmake -B build -DCMAKE_CXX_COMPILER=clang++ -DZEN_BUILD_FUZZ=ON
-
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
       - name: Build
-        run: cmake --build build --target fuzz_zen -j"$(nproc)"
+        run: cmake --build build -j"$(sysctl -n hw.ncpu)"
+      - name: Snapshot tests
+        run: tests/run_tests.sh bin/zenblitz
 
-      - name: Fuzz the compiler + VM (bounded)
-        run: ./bin/fuzz_zen -max_total_time=60 -max_len=4096 -timeout=5
-
-  windows:
+  windows-mingw:
     name: Windows (MinGW, Release)
     runs-on: windows-latest
     defaults:
@@ -75,7 +138,6 @@ jobs:
         shell: msys2 {0}
     steps:
       - uses: actions/checkout@v4
-
       - uses: msys2/setup-msys2@v2
         with:
           msystem: UCRT64
@@ -84,28 +146,67 @@ jobs:
             mingw-w64-ucrt-x86_64-gcc
             mingw-w64-ucrt-x86_64-cmake
             mingw-w64-ucrt-x86_64-ninja
-
       - name: Configure
         run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
-
       - name: Build
-        run: cmake --build build --target zen -j"$(nproc)"
-
+        run: cmake --build build -j"$(nproc)"
       # Failures are re-emitted as ::error:: annotations so they are visible
       # through the public API (job logs need authentication).
       - name: Snapshot tests
         run: |
           set +e
-          ZEN_TEST_VERBOSE=1 tests/run_zen_tests.sh bin/zen.exe | tee test_out.txt
+          tests/run_tests.sh bin/zenblitz.exe | tee test_out.txt
           rc=${PIPESTATUS[0]}
           fails=$(grep '\[FAIL\]' test_out.txt | paste -sd'|' -)
           [ -n "$fails" ] && echo "::error::snapshot failures: $fails"
-          # one annotation per failing test with its ACTUAL output on this
-          # platform (verbose diffs don't surface reliably under msys2)
-          grep '\[FAIL\]' test_out.txt | awk '{print $2}' | head -8 | while read -r t; do
-            out=$(timeout 30 bin/zen.exe "tests/$t.zen" </dev/null 2>&1 | head -12 | sed 's/%/%25/g' | sed ':a;N;$!ba;s/\n/%0A/g')
-            echo "::error::ACTUAL $t:%0A$out"
-          done
-          summary=$(tail -n 12 test_out.txt | sed ':a;N;$!ba;s/\n/%0A/g')
-          echo "::notice::summary:%0A$summary"
           exit $rc
+
+  windows-msvc:
+    name: Windows (MSVC, Release)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build build --config Release
+      - name: Smoke test
+        shell: bash
+        run: |
+          set -e
+          printf 'Print "msvc ok"\n' > smoke.bb
+          out=$(./bin/Release/zenblitz.exe smoke.bb | tr -d '\r')
+          [ "$out" = "msvc ok" ] || { echo "::error::got '$out'"; exit 1; }
+
+  android:
+    name: Android (NDK arm64, runtime only)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Proves the runtime cross-compiles for Android. Only zen_vm is built:
+      # an Android app links that into its own .so with an SDL backend, so
+      # there is no zenblitz-rt executable to produce here.
+      - name: Configure (NDK toolchain)
+        run: |
+          cmake -B build-android \
+            -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_ROOT/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM=android-24 \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DZEN_BUILD_CLI=OFF
+      - name: Build the runtime
+        run: cmake --build build-android -j"$(nproc)" --target zen_vm
+
+  web:
+    name: Web (Emscripten, runtime only)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mymindstorm/setup-emsdk@v14
+      # Same as Android: the browser host links zen_vm and drives resume()
+      # from its own event loop (see cli/host_loop.h).
+      - name: Configure
+        run: |
+          emcmake cmake -B build-web -DCMAKE_BUILD_TYPE=Release -DZEN_BUILD_CLI=OFF
+      - name: Build the runtime
+        run: cmake --build build-web -j"$(nproc)" --target zen_vm
