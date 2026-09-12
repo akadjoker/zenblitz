@@ -558,7 +558,7 @@ namespace zen
         int32_t i = 0;
         for (; i + 8 <= n; i += 8)
         {
-            __builtin_prefetch(data + i + 16, 0, 1);
+            ZEN_PREFETCH(data + i + 16);
             if (data[i + 0].as.integer == target)
                 return i + 0;
             if (data[i + 1].as.integer == target)

@@ -19,14 +19,17 @@
 #define ZEN_LIKELY(x) __builtin_expect(!!(x), 1)
 #define ZEN_UNLIKELY(x) __builtin_expect(!!(x), 0)
 #define ZEN_UNREACHABLE() __builtin_unreachable()
+#define ZEN_PREFETCH(addr) __builtin_prefetch(addr, 0, 1)
 #elif defined(_MSC_VER)
 #define ZEN_LIKELY(x) (x)
 #define ZEN_UNLIKELY(x) (x)
 #define ZEN_UNREACHABLE() __assume(0)
+#define ZEN_PREFETCH(addr) ((void)0) /* no portable equivalent worth the intrinsic header */
 #else
 #define ZEN_LIKELY(x) (x)
 #define ZEN_UNLIKELY(x) (x)
 #define ZEN_UNREACHABLE() ((void)0)
+#define ZEN_PREFETCH(addr) ((void)0)
 #endif
 
 namespace zen
