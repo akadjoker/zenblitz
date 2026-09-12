@@ -9,10 +9,13 @@ namespace bb3d
     extern const int bb3d_cmds_graphics_count;
     extern const CommandDecl bb3d_cmds_canvas[];
     extern const int bb3d_cmds_canvas_count;
+    extern const CommandDecl bb3d_cmds_image[];
+    extern const int bb3d_cmds_image_count;
 
     void install_graphics_commands(VM *vm)
     {
         install_commands(vm, bb3d_cmds_graphics, bb3d_cmds_graphics_count);
         install_commands(vm, bb3d_cmds_canvas, bb3d_cmds_canvas_count);
+        install_commands(vm, bb3d_cmds_image, bb3d_cmds_image_count);
     }
 }
