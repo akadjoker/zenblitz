@@ -29,6 +29,8 @@ namespace engine
         int height() const { return mDevice.getHeight(); }
 
         void setTargetFPS(int fps) { mDevice.setTargetFPS(fps); }
+        void setVSync(bool on) { mDevice.setVSync(on); }
+        bool isVSync() const { return mDevice.isVSync(); }
 
         void setClearColor(float r, float g, float b);
         void beginFrame();

@@ -172,17 +172,24 @@ namespace bb3d
         zen::backend_log(vm->backend(), zen::LOG_INFO, line);
 
         snprintf(line, sizeof(line),
-                 "[profile] per frame: 3D draws %u tris %u | switches: pipeline %u texture %u vb %u ib %u | uniform binds %u | 2D draws %zu tex-switches %zu",
+                 "[profile] per frame: 3D draws %u tris %u | switches: pipeline %u texture %u vb %u ib %u | uniform binds %u | 2D draws %zu tex-switches %zu | vsync %s",
                  r3.drawCalls, r3.triangles, r3.pipelineSwitches, r3.textureSwitches,
                  r3.vertexBufferSwitches, r3.indexBufferSwitches, r3.uniformBinds,
-                 draws2D, texSwitches2D);
+                 draws2D, texSwitches2D, platform_for(vm)->isVSync() ? "on" : "off");
         zen::backend_log(vm->backend(), zen::LOG_INFO, line);
     }
 
     static int c_Flip(VM *vm, Value *args, int nargs)
     {
-        (void)args; (void)nargs;
-        platform_for(vm)->endFrame();
+        (void)nargs;
+        engine::Platform *p = platform_for(vm);
+        // Flip's vwait argument (default 1) is Blitz3D's vsync switch:
+        // "Flip 0" presents without waiting for the vertical blank. It maps
+        // straight onto the swap interval; only touched when it actually
+        // changes so a frame doesn't pay a SwapInterval call for nothing.
+        const bool vwait = arg_int(args[0]) != 0;
+        if (p->isVSync() != vwait) p->setVSync(vwait);
+        p->endFrame();
         profile_dump(vm);
         vm->request_suspend(0);
         return 0;
