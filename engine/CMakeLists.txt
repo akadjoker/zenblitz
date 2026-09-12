@@ -18,6 +18,11 @@ add_library(zenblitz_engine STATIC
     src/pixmap/Dds.cpp
     src/pixmap/StbImpl.cpp
     src/pixmap/Image.cpp
+    src/world/Entity.cpp
+    src/world/Object.cpp
+    src/world/Collision.cpp
+    src/world/Frustum.cpp
+    src/world/Camera.cpp
 )
 
 target_include_directories(zenblitz_engine PUBLIC
