@@ -41,6 +41,11 @@ using namespace zen;
 namespace bb3d
 {
     static ct::HashMap<long long, engine::Entity *> g_entities;
+    // reverse index: World::collide only ever hands back an Object*, not
+    // the handle a .bb script already holds for it - a collision command
+    // needs the existing handle back (EntityCollided, CollisionEntity),
+    // not a fresh one minted every time the same entity collides again.
+    static ct::HashMap<engine::Entity *, long long> g_handles;
     static long long g_next_entity = 0;
 
     engine::Entity *entity_of(long long h)
@@ -49,16 +54,42 @@ namespace bb3d
         return found ? *found : nullptr;
     }
 
-    static long long store_entity(engine::Entity *e)
+    long long store_entity(engine::Entity *e)
     {
         long long h = ++g_next_entity;
         g_entities.put(h, e);
+        g_handles.put(e, h);
         return h;
+    }
+
+    // extern: looks up a handle a script already holds for an entity
+    // World::collide gave us as a raw pointer, instead of minting a new
+    // one - 0 if the entity was never stored under a handle (shouldn't
+    // happen for anything World::collide can reach, but never assume).
+    long long handle_of(engine::Entity *e)
+    {
+        long long *found = e ? g_handles.find(e) : nullptr;
+        return found ? *found : 0;
     }
 
     static void insert_entity(engine::Entity *e, engine::Entity *parent)
     {
         if (parent) e->setParent(parent);
+    }
+
+    static int c_CopyEntity(VM *vm, Value *args, int nargs)
+    {
+        (void)vm; (void)nargs;
+        engine::Entity *src = entity_of(arg_int(args[0]));
+        engine::Entity *parent = entity_of(arg_int(args[1]));
+        if (!src || !src->getObject()) { args[0] = val_int(0); return 1; }
+        // Object::copy() clones the whole subtree (children + animator);
+        // reparent the copy the same way every other Create* does rather
+        // than duplicate that logic here.
+        engine::Object *cpy = src->getObject()->copy();
+        insert_entity(cpy, parent);
+        args[0] = val_int(store_entity(cpy));
+        return 1;
     }
 
     static int c_CreateCube(VM *vm, Value *args, int nargs)
@@ -146,7 +177,7 @@ namespace bb3d
     {
         (void)vm; (void)nargs;
         engine::Entity *e = entity_of(arg_int(args[0]));
-        if (e) { g_entities.erase(arg_int(args[0])); delete e; }
+        if (e) { g_entities.erase(arg_int(args[0])); g_handles.erase(e); delete e; }
         return 0;
     }
 
@@ -518,6 +549,7 @@ namespace bb3d
     }
 
     extern const zen::CommandDecl bb3d_cmds_world[] = {
+        {"%CopyEntity%entity%parent=0", c_CopyEntity},
         {"%CreateCube%parent=0", c_CreateCube},
         {"%CreateSphere%segments=8%parent=0", c_CreateSphere},
         {"%CreateCylinder%segments=8%solid=1%parent=0", c_CreateCylinder},
