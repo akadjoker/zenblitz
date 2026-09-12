@@ -3,6 +3,7 @@
 
 #include "engine/Entity.h"
 #include "engine/Collision.h"
+#include "engine/Animation.h"
 #include <ct/vector.hpp>
 
 namespace engine
@@ -10,6 +11,7 @@ namespace engine
     using blitz::Box;
 
     class Object;
+    class Animator;
 
     struct ObjCollision
     {
@@ -30,6 +32,8 @@ namespace engine
         Object *getObject() override { return this; }
         Entity *clone() override { return new Object(*this); }
 
+        Object *copy();
+
         void reset();
         void setCollisionType(int type) { mCollType = type; }
         void setCollisionRadii(const Vector &radii) { mCollRadii = radii; }
@@ -37,6 +41,8 @@ namespace engine
         void setOrder(int n) { mOrder = n; }
         void setPickGeometry(int n) { mPickGeom = n; }
         void setObscurer(bool t) { mObscurer = t; }
+        void setAnimation(const Animation &t) { mAnim = t; }
+        void setAnimator(Animator *t);
 
         virtual bool collide(const Line &line, float radius, Collision *currColl, const Transform &t)
         {
@@ -44,7 +50,7 @@ namespace engine
             return false;
         }
         virtual void capture();
-        virtual void animate(float elapsed) { (void)elapsed; }
+        virtual void animate(float elapsed);
         virtual bool beginRender(float tween);
         virtual void endRender() {}
 
@@ -62,6 +68,9 @@ namespace engine
         const Transform &getPrevWorldTform() const { return mPrevTform; }
         int getPickGeometry() const { return mPickGeom; }
         bool getObscurer() const { return mObscurer; }
+        Animation getAnimation() const { return mAnim; }
+        Animator *getAnimator() const { return mAnimator; }
+        Object *getLastCopy() const { return mLastCopy; }
 
     private:
         int mCollType = 0;
@@ -74,12 +83,16 @@ namespace engine
         bool mObscurer = false;
         float mElapsed = 0.0f;
         Vector mVelocity;
+        mutable Object *mLastCopy = nullptr;
 
         Transform mPrevTform;
         Transform mCapturedTform;
         Transform mTweenTform;
         mutable Transform mRenderTform;
         mutable bool mRenderTformValid = false;
+
+        Animation mAnim;
+        Animator *mAnimator = nullptr;
     };
 }
 

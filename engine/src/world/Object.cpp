@@ -1,4 +1,5 @@
 #include "engine/Object.h"
+#include "engine/Animator.h"
 
 namespace engine
 {
@@ -16,7 +17,31 @@ namespace engine
 
     Object::~Object()
     {
+        delete mAnimator;
         mVelocity = Vector();
+    }
+
+    Object *Object::copy()
+    {
+        mLastCopy = clone()->getObject();
+        for (Entity *e = children(); e; e = e->successor())
+        {
+            Object *cpy = e->getObject()->copy();
+            cpy->setParent(mLastCopy);
+        }
+        if (mAnimator) mLastCopy->setAnimator(new Animator(mAnimator));
+        return mLastCopy;
+    }
+
+    void Object::setAnimator(Animator *t)
+    {
+        if (mAnimator) delete mAnimator;
+        mAnimator = t;
+    }
+
+    void Object::animate(float e)
+    {
+        if (mAnimator) mAnimator->update(e);
     }
 
     void Object::reset()
