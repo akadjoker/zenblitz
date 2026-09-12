@@ -78,6 +78,13 @@ public:
     Pixmap(const Pixmap& other) = delete;
     Pixmap& operator=(const Pixmap& other) = delete;
 
+    // Move: transfers ownership of `pixels` and resets the source to an
+    // empty (is_valid() == false) buffer, so its destructor is a no-op —
+    // needed to keep Pixmap directly in a container (engine::Image) instead
+    // of behind an owning pointer.
+    Pixmap(Pixmap&& other) noexcept;
+    Pixmap& operator=(Pixmap&& other) noexcept;
+
     // Pixel operations
     void set_pixel(u32 x, u32 y, u8 r, u8 g, u8 b, u8 a);
     void set_pixel(u32 x, u32 y, u32 rgba);

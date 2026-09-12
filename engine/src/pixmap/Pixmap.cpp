@@ -276,6 +276,26 @@ Pixmap::~Pixmap()
         free(pixels);
 }
 
+Pixmap::Pixmap(Pixmap&& other) noexcept
+    : pixels(other.pixels), components(other.components), width(other.width), height(other.height)
+{
+    other.pixels = nullptr;
+    other.components = other.width = other.height = 0;
+}
+
+Pixmap& Pixmap::operator=(Pixmap&& other) noexcept
+{
+    if (this == &other) return *this;
+    if (pixels) free(pixels);
+    pixels = other.pixels;
+    components = other.components;
+    width = other.width;
+    height = other.height;
+    other.pixels = nullptr;
+    other.components = other.width = other.height = 0;
+    return *this;
+}
+
 Pixmap::Pixmap(const Pixmap& img, const IntRect& crop)
 {
     width = crop.width;

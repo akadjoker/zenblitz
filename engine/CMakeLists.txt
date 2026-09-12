@@ -17,6 +17,7 @@ add_library(zenblitz_engine STATIC
     src/pixmap/Pixmap.cpp
     src/pixmap/Dds.cpp
     src/pixmap/StbImpl.cpp
+    src/pixmap/Image.cpp
 )
 
 target_include_directories(zenblitz_engine PUBLIC
