@@ -123,6 +123,55 @@ namespace bb3d
         return 1;
     }
 
+    // VWait/WaitKey/MouseWait block the calling native until the next
+    // frame / a key / a mouse click, pumping events (and pacing to
+    // setTargetFPS, same as Flip) each iteration ourselves rather than
+    // suspending the fiber - main3d.cpp's resume() loop does nothing else
+    // meanwhile, so there's no host-side work being starved by blocking
+    // here the way there would be in an embedding that shares the thread.
+    static int c_VWait(VM *vm, Value *args, int nargs)
+    {
+        (void)args; (void)nargs;
+        platform_for(vm)->pumpEvents();
+        return 0;
+    }
+    static int c_WaitKey(VM *vm, Value *args, int nargs)
+    {
+        (void)nargs;
+        engine::Platform *p = platform_for(vm);
+        p->flushKeyHits();
+        int dik = 0;
+        while (p->isOpen() && !dik)
+        {
+            p->pumpEvents();
+            for (int k = 1; k < 256; ++k)
+                if (p->keyHit(k)) { dik = k; break; }
+        }
+        args[0] = val_int(dik);
+        return 1;
+    }
+    static int c_MouseWait(VM *vm, Value *args, int nargs)
+    {
+        (void)args; (void)nargs;
+        engine::Platform *p = platform_for(vm);
+        bool wasDown[4] = {false, false, false, false};
+        for (int b = 1; b <= 3; ++b) wasDown[b] = p->mouseDown(b);
+        for (;;)
+        {
+            p->pumpEvents();
+            if (!p->isOpen()) break;
+            bool clicked = false;
+            for (int b = 1; b <= 3; ++b)
+            {
+                bool down = p->mouseDown(b);
+                if (down && !wasDown[b]) clicked = true;
+                wasDown[b] = down;
+            }
+            if (clicked) break;
+        }
+        return 0;
+    }
+
     /* extern: without it, a const array at namespace scope has internal
        linkage and runtime3d.cpp's extern declaration fails to link. */
     extern const zen::CommandDecl bb3d_cmds_graphics[] = {
@@ -142,6 +191,10 @@ namespace bb3d
         {"%MouseX", c_MouseX},
         {"%MouseY", c_MouseY},
         {"%MouseDown%button", c_MouseDown},
+
+        {"VWait", c_VWait},
+        {"%WaitKey", c_WaitKey},
+        {"MouseWait", c_MouseWait},
     };
     extern const int bb3d_cmds_graphics_count = (int)(sizeof(bb3d_cmds_graphics) / sizeof(bb3d_cmds_graphics[0]));
 }

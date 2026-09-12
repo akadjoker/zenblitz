@@ -1,5 +1,5 @@
 /*
-** bb_cmds_canvas.cpp — Color, Plot, Line, Rect, Oval, Text.
+** bb_cmds_canvas.cpp — Color, Plot, Line, Rect, Oval, Text, fonts.
 */
 #include "runtime.h"
 #include "vm.h"
@@ -9,8 +9,22 @@
 
 namespace bb3d { extern engine::Platform *platform_for(zen::VM *vm); }
 
+namespace
+{
+    // Blitz3D's LoadFont/SetFont pick a system TrueType font by family
+    // name and point size. This runtime only ships the one embedded
+    // bitmap font BatchRenderer draws (see Batch.h/drawText), so a "font"
+    // here is just the point size to pass through to drawText - the
+    // family name is accepted (so real Blitz3D programs still load) and
+    // otherwise ignored rather than pretending to support arbitrary
+    // TrueType families we don't actually have.
+    struct Bb3dFont { float size; };
+}
+
 namespace { inline long long arg_int(zen::Value v) { return zen::is_int(v) ? v.as.integer
     : zen::is_float(v) ? (long long)v.as.number : 0; }
+    inline float arg_float(zen::Value v) { return zen::is_float(v) ? (float)v.as.number
+        : zen::is_int(v) ? (float)v.as.integer : 0.0f; }
     inline const char *arg_cstr(zen::Value v) { return zen::is_string(v) ? zen::as_cstring(v) : ""; } }
 
 using namespace zen;
@@ -64,11 +78,38 @@ namespace bb3d
         return 0;
     }
 
+    static ct::HashMap<VM *, float> g_fontSize;
+
     static int c_Text(VM *vm, Value *args, int nargs)
     {
         (void)nargs;
         float x = (float)arg_int(args[0]), y = (float)arg_int(args[1]);
-        platform_for(vm)->batch().drawText(x, y, 16.0f, arg_cstr(args[2]));
+        float *size = g_fontSize.find(vm);
+        platform_for(vm)->batch().drawText(x, y, size ? *size : 16.0f, arg_cstr(args[2]));
+        return 0;
+    }
+
+    static int c_LoadFont(VM *vm, Value *args, int nargs)
+    {
+        (void)vm; (void)nargs;
+        float size = arg_float(args[1]);
+        if (size <= 0.0f) size = 16.0f;
+        Bb3dFont *f = new Bb3dFont{size};
+        args[0] = val_int((long long)(std::intptr_t)f);
+        return 1;
+    }
+    static int c_SetFont(VM *vm, Value *args, int nargs)
+    {
+        (void)nargs;
+        Bb3dFont *f = (Bb3dFont *)(std::intptr_t)arg_int(args[0]);
+        if (f) g_fontSize.put(vm, f->size);
+        return 0;
+    }
+    static int c_FreeFont(VM *vm, Value *args, int nargs)
+    {
+        (void)vm; (void)nargs;
+        Bb3dFont *f = (Bb3dFont *)(std::intptr_t)arg_int(args[0]);
+        delete f;
         return 0;
     }
 
@@ -111,6 +152,10 @@ namespace bb3d
         {"Rect%x%y%width%height%solid=1", c_Rect},
         {"Oval%x%y%width%height%solid=1", c_Oval},
         {"Text%x%y$text%centerx=0%centery=0", c_Text},
+
+        {"%LoadFont$name%height=12%bold=0%italic=0%underline=0", c_LoadFont},
+        {"SetFont%font", c_SetFont},
+        {"FreeFont%font", c_FreeFont},
 
         {"%BackBuffer", c_BackBuffer},
         {"%FrontBuffer", c_FrontBuffer},
