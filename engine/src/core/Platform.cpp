@@ -62,6 +62,11 @@ namespace engine
     void Platform::beginFrame()
     {
         mGraphics.beginFrame(mClearR, mClearG, mClearB, 1.0f);
+        int gw = (int)mGraphics.width(), gh = (int)mGraphics.height();
+        int bw, bh;
+        mBatch.getWindowSize(bw, bh);
+        if (gw > 0 && gh > 0 && (gw != bw || gh != bh)) mBatch.resize(gw, gh);
+        mBatch.update(); /* resets per-frame stats; drawing itself can start now */
     }
 
     void Platform::handleEvent(const void *sdlEventPtr)
@@ -114,6 +119,15 @@ namespace engine
 
     void Platform::endFrame()
     {
+        /* mBatch's draw calls (mGpu->draw/drawIndexed) are only valid while
+           Graphics's render pass is open — draw() has to run between
+           beginFrame() and endFrame(), not after. flip() finalises whatever
+           the program queued this frame (Plot/DrawImage/drawTriangle3D...)
+           and draw() actually issues it; skipping either meant nothing the
+           Batch drew ever reached the screen, though Cls's clear colour
+           still would have (Graphics::beginFrame does that directly). */
+        mBatch.flip();
+        mBatch.draw();
         mGraphics.endFrame();
         mDevice.flip();
         pumpEvents();

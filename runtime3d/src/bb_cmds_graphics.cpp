@@ -27,7 +27,10 @@ namespace bb3d
 {
     static ct::HashMap<VM *, engine::Platform *> g_platforms;
 
-    static engine::Platform *platform_for(VM *vm)
+    /* shared with bb_cmds_canvas.cpp and later runtime3d files — one
+       Platform per VM, same per_vm pattern bb_runtime.cpp uses internally
+       for BBRuntime. */
+    engine::Platform *platform_for(VM *vm)
     {
         engine::Platform **found = g_platforms.find(vm);
         if (found) return *found;
