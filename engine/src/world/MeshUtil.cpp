@@ -1,4 +1,5 @@
 #include "engine/MeshUtil.h"
+#include <cmath>
 
 namespace engine
 {
@@ -249,6 +250,41 @@ namespace engine
                         s->setColor(j, s->getColor(j) + rgb);
                 }
             }
+        }
+
+        void scaleMesh(MeshModel *m, const Vector &scale)
+        {
+            m->transform(Transform(blitz::scaleMatrix(scale), Vector()));
+        }
+
+        // FitMesh: rescale+translate the mesh's own vertices (not its
+        // entity transform - it edits the mesh data itself, same as
+        // ScaleMesh) so its current bounding box exactly fills the given
+        // box, per the original's semantics ("do not use a width/height/
+        // depth of 0 ... your mesh will not be displayed").
+        void fitMesh(MeshModel *m, const Vector &pos, const Vector &size, bool uniform)
+        {
+            const Box &box = m->getBox();
+            Vector ext = box.b - box.a;
+            if (ext.x == 0) ext.x = 1;
+            if (ext.y == 0) ext.y = 1;
+            if (ext.z == 0) ext.z = 1;
+
+            Vector scale(size.x / ext.x, size.y / ext.y, size.z / ext.z);
+            if (uniform)
+            {
+                float s = scale.x;
+                if (std::fabs(scale.y) < std::fabs(s)) s = scale.y;
+                if (std::fabs(scale.z) < std::fabs(s)) s = scale.z;
+                scale = Vector(s, s, s);
+            }
+
+            Vector centre = box.centre();
+            // move the box centre to the origin, scale, then move it to
+            // the requested position + half the requested size (FitMesh
+            // takes the box's near corner like Box(pos,pos+size) would)
+            Transform t(blitz::scaleMatrix(scale), pos + Vector(size.x, size.y, size.z) * 0.5f - centre * scale);
+            m->transform(t);
         }
     }
 }
