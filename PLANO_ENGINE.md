@@ -168,6 +168,13 @@ registado.
    do Batch serve de *fallback* quando o programa não carregou nenhuma
    (`Text` antes de qualquer `LoadFont` deve continuar a desenhar algo).
 
+## Editor (depois do engine, não bloqueia nada acima)
+
+O Blitz3D original tinha o BlitzIDE (Qt). Recriar um editor próprio, mais
+tarde, usando `https://github.com/akadjoker/iGUI` como submodule
+(`extern/iGUI`) — a decidir nessa altura como se liga ao `zenblitz3d`
+(processo separado que invoca o compilador, ou GUI própria embutida).
+
 ## Bug MSVC em aberto (não bloqueia o engine)
 
 `zenblitz.exe` no CI do MSVC dá `[runtime error] APPEND expected array, got
