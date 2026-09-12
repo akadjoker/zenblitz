@@ -70,6 +70,7 @@ static const char *g_dump_path = nullptr;
 static bool g_strip_debug = false;
 static bool g_debug_checks = false;
 static const char *g_build_path = nullptr;
+static const char *g_stub_path = nullptr;
 static const char *g_search_paths[16];
 static int g_num_search_paths = 0;
 
@@ -130,13 +131,18 @@ static char *self_path(char *buf, size_t size)
 static int build_executable(const char *bytecode_path, const char *out_path)
 {
     char self[4096];
-    if (!self_path(self, sizeof(self)))
+    const char *base = g_stub_path;
+    if (!base)
     {
-        fprintf(stderr, "zenblitz: cannot locate the runtime executable\n");
-        return 1;
+        if (!self_path(self, sizeof(self)))
+        {
+            fprintf(stderr, "zenblitz: cannot locate the runtime executable (use --stub)\n");
+            return 1;
+        }
+        base = self;
     }
     long rt_size = 0, bc_size = 0;
-    char *rt = read_file(self, &rt_size);
+    char *rt = read_file(base, &rt_size);
     if (!rt) return 1;
     char *bc = read_file(bytecode_path, &bc_size);
     if (!bc) { free(rt); return 1; }
@@ -277,7 +283,6 @@ static int run_bytecode(const uint8_t *data, size_t size, const char *filename,
 {
     VM vm;
     register_default_libs(vm);
-    install_args(vm, script_argc, script_argv);
 
     char err[256] = {0};
     ObjFunc *fn = load_bytecode_buffer(&vm, data, size, err, sizeof(err));
@@ -286,6 +291,8 @@ static int run_bytecode(const uint8_t *data, size_t size, const char *filename,
         fprintf(stderr, "zenblitz: bytecode load failed: %s\n", err[0] ? err : "unknown error");
         return 1;
     }
+    /* after the load: the file carries the (empty) args array it was compiled with */
+    install_args(vm, script_argc, script_argv);
 
     if (g_disassemble)
     {
@@ -400,6 +407,10 @@ int main(int argc, char **argv)
         else if (strcmp(argv[i], "--build") == 0 && i + 1 < argc)
         {
             g_build_path = argv[++i];
+        }
+        else if (strcmp(argv[i], "--stub") == 0 && i + 1 < argc)
+        {
+            g_stub_path = argv[++i];
         }
         else if (strcmp(argv[i], "-v") == 0 || strcmp(argv[i], "--verbose") == 0)
         {
