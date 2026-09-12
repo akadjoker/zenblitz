@@ -11,6 +11,24 @@
 #include <cstring>
 #include <cstdlib>
 
+/* Branch hints and unreachable markers: GCC and Clang builtins, with no
+** equivalent on MSVC, where they compile away to nothing (__assume(0) for
+** unreachable, which is the same promise). The interpreter's hot paths are
+** written with these, so they have to exist everywhere it builds. */
+#if defined(__GNUC__) || defined(__clang__)
+#define ZEN_LIKELY(x) __builtin_expect(!!(x), 1)
+#define ZEN_UNLIKELY(x) __builtin_expect(!!(x), 0)
+#define ZEN_UNREACHABLE() __builtin_unreachable()
+#elif defined(_MSC_VER)
+#define ZEN_LIKELY(x) (x)
+#define ZEN_UNLIKELY(x) (x)
+#define ZEN_UNREACHABLE() __assume(0)
+#else
+#define ZEN_LIKELY(x) (x)
+#define ZEN_UNLIKELY(x) (x)
+#define ZEN_UNREACHABLE() ((void)0)
+#endif
+
 namespace zen
 {
     /* VM limits */

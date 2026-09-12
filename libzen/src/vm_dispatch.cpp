@@ -10,10 +10,6 @@
 #include <cmath>
 #include <ctime>
 
-#ifdef _MSC_VER
-#define __builtin_expect(expr, val) (expr)
-#endif
-
 namespace zen
 {
     static inline void copy_native_results(Value *dst, Value *src, int nret, int nresults)
@@ -136,7 +132,7 @@ namespace zen
 #define CHECK_SUSPEND()                        \
     do                                         \
     {                                          \
-        if (__builtin_expect(suspend_requested_, 0)) \
+        if (ZEN_UNLIKELY(suspend_requested_)) \
         {                                      \
             suspend_requested_ = false;        \
             SAVE_IP();                         \
@@ -243,7 +239,7 @@ namespace zen
         {
             uint32_t i = *ip;
             Value vb = R[ZEN_B(i)], vc = R[ZEN_C(i)];
-            if (__builtin_expect(!is_obj(vb) && !is_obj(vc), 1))
+            if (ZEN_LIKELY(!is_obj(vb) && !is_obj(vc)))
             {
                 NUM_BINOP(+);
             }
@@ -303,7 +299,7 @@ namespace zen
             else
             {
                 double a = to_number(vb), b = to_number(vc);
-                R[ZEN_A(i)] = val_float(b == 0.0 ? __builtin_nan("") : fmod(a, b));
+                R[ZEN_A(i)] = val_float(b == 0.0 ? NAN : fmod(a, b));
             }
             NEXT();
         }
@@ -656,7 +652,7 @@ namespace zen
             uint32_t i = *ip;
             Value obj = R[ZEN_B(i)];
             const int field_idx = ZEN_C(i);
-            if (__builtin_expect(is_struct(obj), 1))
+            if (ZEN_LIKELY(is_struct(obj)))
             {
                 ObjStruct *st = as_struct(obj);
                 if (field_idx >= st->def->num_fields)
@@ -671,7 +667,7 @@ namespace zen
             uint32_t i = *ip;
             Value obj = R[ZEN_A(i)];
             const int field_idx = ZEN_B(i);
-            if (__builtin_expect(is_struct(obj), 1))
+            if (ZEN_LIKELY(is_struct(obj)))
             {
                 ObjStruct *st = as_struct(obj);
                 if (field_idx >= st->def->num_fields)

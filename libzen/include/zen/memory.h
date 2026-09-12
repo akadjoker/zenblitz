@@ -104,10 +104,10 @@ namespace zen
 
     inline void array_push(GC *gc, ObjArray *arr, Value val)
     {
-        if (__builtin_expect(arr->end != arr->cap_end, 1))
+        if (ZEN_LIKELY(arr->end != arr->cap_end))
         {
             *arr->end++ = val;
-            if (__builtin_expect(val.type == VAL_OBJ, 0))
+            if (ZEN_UNLIKELY(val.type == VAL_OBJ))
                 gc_write_barrier(gc, (Obj *)arr, val.as.obj);
         }
         else
@@ -121,7 +121,7 @@ namespace zen
         Value v;
         v.type = VAL_INT;
         v.as.integer = n;
-        if (__builtin_expect(arr->end != arr->cap_end, 1))
+        if (ZEN_LIKELY(arr->end != arr->cap_end))
             *arr->end++ = v;
         else
             array_push_slow(gc, arr, v);
@@ -129,7 +129,7 @@ namespace zen
 
     inline Value array_get(ObjArray *arr, int32_t index)
     {
-        if (__builtin_expect((uint32_t)index < (uint32_t)arr_count(arr), 1))
+        if (ZEN_LIKELY((uint32_t)index < (uint32_t)arr_count(arr)))
             return arr->data[index];
         return val_nil();
     }

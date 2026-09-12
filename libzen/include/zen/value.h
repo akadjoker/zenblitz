@@ -138,7 +138,7 @@ namespace zen
     inline bool values_equal(Value a, Value b)
     {
         if (a.type == b.type) {
-            if (__builtin_expect(a.type == VAL_INT, 1))
+            if (ZEN_LIKELY(a.type == VAL_INT))
                 return a.as.integer == b.as.integer;
             switch (a.type)
             {
@@ -147,7 +147,7 @@ namespace zen
             case VAL_BOOL:
                 return a.as.boolean == b.as.boolean;
             case VAL_INT:
-                __builtin_unreachable();
+                ZEN_UNREACHABLE();
             case VAL_FLOAT:
                 return a.as.number == b.as.number;
             case VAL_OBJ:

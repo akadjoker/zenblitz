@@ -468,7 +468,7 @@ namespace zen
         arr->end = arr->data + count;
         arr->cap_end = arr->data + new_cap;
         *arr->end++ = val;
-        if (__builtin_expect(val.type == VAL_OBJ, 0))
+        if (ZEN_UNLIKELY(val.type == VAL_OBJ))
             gc_write_barrier(gc, (Obj *)arr, val.as.obj);
     }
 
@@ -716,7 +716,7 @@ namespace zen
         int32_t count = arr_count(arr);
         int32_t new_count = count + n;
         int32_t cur_cap = arr_capacity(arr);
-        if (__builtin_expect(new_count > cur_cap, 0))
+        if (ZEN_UNLIKELY(new_count > cur_cap))
         {
             int32_t new_cap = grow_capacity(cur_cap, new_count);
             arr->data = (Value *)zen_realloc(gc, arr->data,
@@ -728,7 +728,7 @@ namespace zen
         memcpy(arr->end, vals, (size_t)n * sizeof(Value));
         arr->end += n;
         for (int32_t i = 0; i < n; i++)
-            if (__builtin_expect(vals[i].type == VAL_OBJ, 0))
+            if (ZEN_UNLIKELY(vals[i].type == VAL_OBJ))
                 gc_write_barrier(gc, (Obj *)arr, vals[i].as.obj);
     }
 
