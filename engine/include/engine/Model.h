@@ -8,6 +8,8 @@
 
 namespace engine
 {
+    class MeshModel;
+
     class Model : public Object
     {
     public:
@@ -38,6 +40,10 @@ namespace engine
 
         Model *getModel() override { return this; }
         Entity *clone() override { return new Model(*this); }
+
+        virtual MeshModel *getMeshModel() { return nullptr; }
+
+        virtual void setRenderBrush(const Brush &b) { mRenderBrush = b; }
 
         void capture() override
         {
