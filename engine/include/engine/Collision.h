@@ -8,6 +8,7 @@ namespace engine
     using blitz::Vector;
     using blitz::Line;
     using blitz::Box;
+    using blitz::Transform;
 
     extern const float COLLISION_EPSILON;
 

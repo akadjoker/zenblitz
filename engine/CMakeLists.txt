@@ -23,6 +23,8 @@ add_library(zenblitz_engine STATIC
     src/world/Collision.cpp
     src/world/Frustum.cpp
     src/world/Camera.cpp
+    src/world/Surface.cpp
+    src/world/MeshCollider.cpp
 )
 
 target_include_directories(zenblitz_engine PUBLIC

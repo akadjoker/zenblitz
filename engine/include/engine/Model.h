@@ -3,12 +3,11 @@
 
 #include "engine/Object.h"
 #include "engine/Brush.h"
+#include "engine/Surface.h"
 #include <ct/vector.hpp>
 
 namespace engine
 {
-    class Mesh;
-
     class Model : public Object
     {
     public:
@@ -27,7 +26,7 @@ namespace engine
 
         struct QueueEntry
         {
-            Mesh *mesh = nullptr;
+            Surface *surface = nullptr;
             int firstVertex = 0, vertexCount = 0, firstTri = 0, triCount = 0;
             Brush brush;
         };
@@ -95,13 +94,13 @@ namespace engine
 
         void setAutoFade(float nr, float fr) { mAutoFadeNr = nr; mAutoFadeFr = fr; mAutoFade = true; }
 
-        void enqueue(Mesh *mesh, int fv, int vc, int ft, int tc)
+        void enqueue(Surface *surface, int fv, int vc, int ft, int tc)
         {
-            enqueue(mesh, fv, vc, ft, tc, mRenderBrush);
+            enqueue(surface, fv, vc, ft, tc, mRenderBrush);
         }
-        void enqueue(Mesh *mesh, int fv, int vc, int ft, int tc, const Brush &brush)
+        void enqueue(Surface *surface, int fv, int vc, int ft, int tc, const Brush &brush)
         {
-            QueueEntry e{mesh, fv, vc, ft, tc, brush};
+            QueueEntry e{surface, fv, vc, ft, tc, brush};
             int type = brush.getBlend() == BlendReplace ? QueueOpaque : QueueTransparent;
             mQueues[type].push_back(e);
         }
