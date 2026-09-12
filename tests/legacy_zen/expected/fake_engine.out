@@ -1,5 +1,0 @@
-File "tests/fake_engine.zen", line 1
-  class Player : ScriptComponent {
-                                 ^
-Error at '{': Parent class not found.
-zen: compilation failed.

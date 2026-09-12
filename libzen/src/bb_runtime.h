@@ -31,12 +31,13 @@ namespace bb
     struct BBTypeInfo
     {
         string name;
-        zen::ObjClass *klass;
+        zen::ObjStructDef *def;
         int nfields;            /* user fields */
         vector<int> kinds;      /* per user field */
         vector<int> vecSizes;   /* KIND_VEC: element count */
         vector<int> vecKinds;   /* KIND_VEC: element kind */
         int gFirst, gLast;      /* zen globals holding list head/tail */
+        int gDef;               /* zen global holding the struct def */
     };
 
     /* A Blitz command: signature string in the original Blitz format
@@ -65,11 +66,14 @@ namespace bb
         int g_data, g_dataptr;
 
         vector<BBTypeInfo *> types;
-        map<zen::ObjClass *, BBTypeInfo *> typeByClass;
+        map<zen::ObjStructDef *, BBTypeInfo *> typeByDef;
 
         bool isRuntimeDecl(Decl *d) const { return env->funcDecls->findDecl(d->name) == d; }
         int registerType(const string &name, const vector<int> &kinds,
                          const vector<int> &vecSizes, const vector<int> &vecKinds);
+        /* Type info for a struct def, rebuilt from the encoded field names
+           when the def came from loaded bytecode rather than this compiler. */
+        BBTypeInfo *typeForDef(zen::ObjStructDef *def);
         void registerCommands(const BBCommand *cmds, int n);
     };
 

@@ -1,5 +1,4 @@
 #include "memory.h"
-#include "name_tables.h"
 #include "vm.h"
 #include "zen_arena.h"
 #include <cmath>
@@ -374,23 +373,16 @@ namespace zen
     {
         ObjFunc *fn = (ObjFunc *)alloc_obj(gc, sizeof(ObjFunc), OBJ_FUNC);
         fn->arity = 0;
-        fn->generic_arity = 0;
         fn->num_regs = 0;
         fn->code_count = 0;
         fn->code_capacity = 0;
         fn->const_count = 0;
         fn->const_capacity = 0;
-        fn->upvalue_count = 0;
-        fn->is_process = 0;
-        memset(fn->param_privates, -1, sizeof(fn->param_privates));
         fn->code = nullptr;
         fn->lines = nullptr;
         fn->constants = nullptr;
-        fn->upval_descs = nullptr;
         fn->name = nullptr;
         fn->source = nullptr;
-        fn->return_struct = nullptr;
-        fn->return_class = nullptr;
         return fn;
     }
 
@@ -399,20 +391,10 @@ namespace zen
         ObjNative *nat = (ObjNative *)alloc_obj(gc, sizeof(ObjNative), OBJ_NATIVE);
         nat->fn = fn;
         nat->arity = arity;
-        nat->generic_arity = 0;
         nat->name = name;
         return nat;
     }
 
-    ObjNative *new_native_generic(GC *gc, GenericNativeFn fn, int generic_arity, int arity, ObjString *name)
-    {
-        ObjNative *nat = (ObjNative *)alloc_obj(gc, sizeof(ObjNative), OBJ_NATIVE);
-        nat->generic_fn = fn;
-        nat->arity = arity;
-        nat->generic_arity = generic_arity;
-        nat->name = name;
-        return nat;
-    }
 
     ObjArray *new_array(GC *gc)
     {
@@ -423,17 +405,29 @@ namespace zen
         return arr;
     }
 
-    ObjMap *new_map(GC *gc)
+    ObjStructDef *new_struct_def(GC *gc, ObjString *name)
     {
-        ObjMap *map = (ObjMap *)alloc_obj(gc, sizeof(ObjMap), OBJ_MAP);
-        map->count = 0;
-        map->capacity = 0;
-        map->bucket_count = 0;
-        map->free_head = -1;
-        map->buckets = nullptr;
-        map->nodes = nullptr;
-        return map;
+        ObjStructDef *def = (ObjStructDef *)alloc_obj(gc, sizeof(ObjStructDef), OBJ_STRUCT_DEF);
+        def->name = name;
+        def->num_fields = 0;
+        def->field_names = nullptr;
+        return def;
     }
+
+    ObjStruct *new_struct(GC *gc, ObjStructDef *def)
+    {
+        /* the field array allocation below could trigger a collection while
+           the struct is not yet reachable — keep the GC off until it is set up */
+        gc_pause(gc);
+        ObjStruct *s = (ObjStruct *)alloc_obj(gc, sizeof(ObjStruct), OBJ_STRUCT);
+        s->def = def;
+        s->fields = def->num_fields > 0 ? (Value *)zen_alloc(gc, sizeof(Value) * (size_t)def->num_fields) : nullptr;
+        for (int32_t i = 0; i < def->num_fields; i++)
+            s->fields[i] = val_nil();
+        gc_resume(gc);
+        return s;
+    }
+
 
     /* =========================================================
     ** Array Operations — end-pointer layout for minimal push cost.
@@ -750,461 +744,6 @@ namespace zen
     }
 
     /* =========================================================
-    ** Map/Set — Chained hash table with node pool.
-    ** Bucket array (int32_t[]) + flat node array.
-    ** Free nodes marked with hash == 0xFFFFFFFF sentinel.
-    ** Load factor ≤ 1.0 → grow when count >= bucket_count.
-    ** ========================================================= */
-
-    static inline uint32_t hash_value(Value v)
-    {
-        uint32_t h;
-        /* Fast path for the common case (int keys) — no branch */
-        if (__builtin_expect(v.type == VAL_INT, 1))
-        {
-            h = (uint32_t)v.as.integer * 2654435761u;
-        }
-        else
-        {
-            switch (v.type)
-            {
-            case VAL_NIL:
-                h = 0x9e3779b9u;
-                break;
-            case VAL_BOOL:
-                h = v.as.boolean ? 0x9e3779bbu : 0x9e3779b9u;
-                break;
-            case VAL_INT:
-                __builtin_unreachable();
-            case VAL_FLOAT:
-            {
-                uint64_t bits;
-                memcpy(&bits, &v.as.number, sizeof(bits));
-                h = (uint32_t)((bits ^ (bits >> 32)) * 2654435761ULL);
-                break;
-            }
-            case VAL_OBJ:
-                /* Strings hash lazily (0 = not yet computed); equal strings
-                   must produce equal hashes however they were built. */
-                if (v.as.obj->type == OBJ_STRING)
-                    h = string_hash((ObjString *)v.as.obj);
-                else
-                    h = v.as.obj->hash;
-                break;
-            default:
-                h = 0;
-                break;
-            }
-        }
-        /* 0xFFFFFFFF is the free-node sentinel — never return it */
-        return h + (h == 0xFFFFFFFFu);
-    }
-
-    /* ===== MAP (chained hash table with node pool) ===== */
-
-    static void map_rebuild_buckets(ObjMap *map)
-    {
-        int32_t mask = map->bucket_count - 1;
-        memset(map->buckets, 0xFF, sizeof(int32_t) * map->bucket_count); /* -1 fill */
-        for (int32_t i = 0; i < map->capacity; i++)
-        {
-            MapNode *n = &map->nodes[i];
-            if (n->hash == 0xFFFFFFFFu)
-                continue; /* free node sentinel */
-            int32_t b = (int32_t)(n->hash & (uint32_t)mask);
-            n->next = map->buckets[b];
-            map->buckets[b] = i;
-        }
-    }
-
-    static void map_grow_buckets(GC *gc, ObjMap *map)
-    {
-        int32_t old_bc = map->bucket_count;
-        int32_t new_bc = old_bc == 0 ? 16 : old_bc * 2;
-        size_t old_bytes = sizeof(int32_t) * old_bc;
-        size_t new_bytes = sizeof(int32_t) * new_bc;
-        map->buckets = (int32_t *)realloc(map->buckets, new_bytes);
-        gc->bytes_allocated += new_bytes - old_bytes;
-        map->bucket_count = new_bc;
-        map_rebuild_buckets(map);
-    }
-
-    static void map_grow_nodes(GC *gc, ObjMap *map)
-    {
-        int32_t old_cap = map->capacity;
-        int32_t new_cap = old_cap == 0 ? 16 : old_cap * 2;
-        size_t old_bytes = sizeof(MapNode) * old_cap;
-        size_t new_bytes = sizeof(MapNode) * new_cap;
-        map->nodes = (MapNode *)realloc(map->nodes, new_bytes);
-        gc->bytes_allocated += new_bytes - old_bytes;
-
-        /* Link new slots into free list */
-        for (int32_t i = old_cap; i < new_cap; i++)
-        {
-            map->nodes[i].hash = 0xFFFFFFFFu;
-            map->nodes[i].next = (i + 1 < new_cap) ? i + 1 : map->free_head;
-        }
-        map->free_head = old_cap;
-        map->capacity = new_cap;
-    }
-
-    static inline int32_t map_alloc_node(GC *gc, ObjMap *map)
-    {
-        if (__builtin_expect(map->free_head == -1, 0))
-            map_grow_nodes(gc, map);
-        int32_t idx = map->free_head;
-        map->free_head = map->nodes[idx].next;
-        return idx;
-    }
-
-    static inline void map_free_node(ObjMap *map, int32_t idx)
-    {
-        map->nodes[idx].key = val_nil();
-        map->nodes[idx].hash = 0xFFFFFFFFu; /* free sentinel */
-        map->nodes[idx].next = map->free_head;
-        map->free_head = idx;
-    }
-
-    bool map_set(GC *gc, ObjMap *map, Value key, Value val)
-    {
-        /* Ensure we have buckets */
-        if (__builtin_expect(map->bucket_count == 0, 0))
-        {
-            map_grow_nodes(gc, map);
-            map_grow_buckets(gc, map);
-        }
-        /* Grow buckets if load factor > 0.875 (count*8 >= bucket_count*7) */
-        if (__builtin_expect(map->count * 8 >= map->bucket_count * 7, 0))
-            map_grow_buckets(gc, map);
-
-        uint32_t h = hash_value(key);
-        int32_t mask = map->bucket_count - 1;
-        int32_t bucket = (int32_t)(h & (uint32_t)mask);
-        int32_t idx = map->buckets[bucket];
-
-        /* Walk chain looking for existing key */
-        while (idx != -1)
-        {
-            MapNode *n = &map->nodes[idx];
-            if (n->hash == h && values_equal(n->key, key))
-            {
-                n->value = val;
-                if (__builtin_expect(val.type == VAL_OBJ, 0))
-                    gc_write_barrier(gc, (Obj *)map, val.as.obj);
-                return false; /* updated existing */
-            }
-            idx = n->next;
-        }
-
-        /* Not found — insert new node at head of chain */
-        int32_t ni = map_alloc_node(gc, map);
-        MapNode *node = &map->nodes[ni];
-        node->key = key;
-        node->value = val;
-        node->hash = h;
-        node->next = map->buckets[bucket];
-        map->buckets[bucket] = ni;
-        map->count++;
-
-        if (__builtin_expect(key.type == VAL_OBJ, 0))
-            gc_write_barrier(gc, (Obj *)map, key.as.obj);
-        if (__builtin_expect(val.type == VAL_OBJ, 0))
-            gc_write_barrier(gc, (Obj *)map, val.as.obj);
-        return true; /* new entry */
-    }
-
-    Value map_get(ObjMap *map, Value key, bool *found)
-    {
-        if (__builtin_expect(map->count == 0, 0))
-        {
-            *found = false;
-            return val_nil();
-        }
-        uint32_t h = hash_value(key);
-        int32_t mask = map->bucket_count - 1;
-        int32_t idx = map->buckets[(int32_t)(h & (uint32_t)mask)];
-
-        while (idx != -1)
-        {
-            MapNode *n = &map->nodes[idx];
-            if (n->hash == h && values_equal(n->key, key))
-            {
-                *found = true;
-                return n->value;
-            }
-            idx = n->next;
-        }
-        *found = false;
-        return val_nil();
-    }
-
-    bool map_delete(ObjMap *map, Value key)
-    {
-        if (map->count == 0)
-            return false;
-        uint32_t h = hash_value(key);
-        int32_t mask = map->bucket_count - 1;
-        int32_t bucket = (int32_t)(h & (uint32_t)mask);
-        int32_t idx = map->buckets[bucket];
-        int32_t prev = -1;
-
-        while (idx != -1)
-        {
-            MapNode *n = &map->nodes[idx];
-            if (n->hash == h && values_equal(n->key, key))
-            {
-                /* Unlink from chain */
-                if (prev == -1)
-                    map->buckets[bucket] = n->next;
-                else
-                    map->nodes[prev].next = n->next;
-                map_free_node(map, idx);
-                map->count--;
-                return true;
-            }
-            prev = idx;
-            idx = n->next;
-        }
-        return false;
-    }
-
-    bool map_contains(ObjMap *map, Value key)
-    {
-        if (map->count == 0)
-            return false;
-        uint32_t h = hash_value(key);
-        int32_t mask = map->bucket_count - 1;
-        int32_t idx = map->buckets[(int32_t)(h & (uint32_t)mask)];
-
-        while (idx != -1)
-        {
-            MapNode *n = &map->nodes[idx];
-            if (n->hash == h && values_equal(n->key, key))
-                return true;
-            idx = n->next;
-        }
-        return false;
-    }
-
-    int32_t map_count(ObjMap *map) { return map->count; }
-
-    void map_clear(GC *gc, ObjMap *map)
-    {
-        if (map->buckets)
-        {
-            gc->bytes_allocated -= sizeof(int32_t) * map->bucket_count;
-            free(map->buckets);
-        }
-        if (map->nodes)
-        {
-            gc->bytes_allocated -= sizeof(MapNode) * map->capacity;
-            free(map->nodes);
-        }
-        map->buckets = nullptr;
-        map->nodes = nullptr;
-        map->count = 0;
-        map->capacity = 0;
-        map->bucket_count = 0;
-        map->free_head = -1;
-    }
-
-    void map_keys(GC *gc, ObjMap *map, ObjArray *out)
-    {
-        for (int32_t i = 0; i < map->capacity; i++)
-            if (map->nodes[i].hash != 0xFFFFFFFFu)
-                array_push(gc, out, map->nodes[i].key);
-    }
-
-    void map_values(GC *gc, ObjMap *map, ObjArray *out)
-    {
-        for (int32_t i = 0; i < map->capacity; i++)
-            if (map->nodes[i].hash != 0xFFFFFFFFu)
-                array_push(gc, out, map->nodes[i].value);
-    }
-
-    /* ===== SET (chained hash table with node pool) ===== */
-
-    ObjSet *new_set(GC *gc)
-    {
-        ObjSet *s = (ObjSet *)alloc_obj(gc, sizeof(ObjSet), OBJ_SET);
-        s->count = 0;
-        s->capacity = 0;
-        s->bucket_count = 0;
-        s->free_head = -1;
-        s->buckets = nullptr;
-        s->nodes = nullptr;
-        return s;
-    }
-
-    static void set_rebuild_buckets(ObjSet *set)
-    {
-        int32_t mask = set->bucket_count - 1;
-        memset(set->buckets, 0xFF, sizeof(int32_t) * set->bucket_count);
-        for (int32_t i = 0; i < set->capacity; i++)
-        {
-            SetNode *n = &set->nodes[i];
-            if (n->hash == 0xFFFFFFFFu)
-                continue;
-            int32_t b = (int32_t)(n->hash & (uint32_t)mask);
-            n->next = set->buckets[b];
-            set->buckets[b] = i;
-        }
-    }
-
-    static void set_grow_buckets(GC *gc, ObjSet *set)
-    {
-        int32_t old_bc = set->bucket_count;
-        int32_t new_bc = old_bc == 0 ? 16 : old_bc * 2;
-        size_t old_bytes = sizeof(int32_t) * old_bc;
-        size_t new_bytes = sizeof(int32_t) * new_bc;
-        set->buckets = (int32_t *)realloc(set->buckets, new_bytes);
-        gc->bytes_allocated += new_bytes - old_bytes;
-        set->bucket_count = new_bc;
-        set_rebuild_buckets(set);
-    }
-
-    static void set_grow_nodes(GC *gc, ObjSet *set)
-    {
-        int32_t old_cap = set->capacity;
-        int32_t new_cap = old_cap == 0 ? 16 : old_cap * 2;
-        size_t old_bytes = sizeof(SetNode) * old_cap;
-        size_t new_bytes = sizeof(SetNode) * new_cap;
-        set->nodes = (SetNode *)realloc(set->nodes, new_bytes);
-        gc->bytes_allocated += new_bytes - old_bytes;
-
-        for (int32_t i = old_cap; i < new_cap; i++)
-        {
-            set->nodes[i].hash = 0xFFFFFFFFu;
-            set->nodes[i].next = (i + 1 < new_cap) ? i + 1 : set->free_head;
-        }
-        set->free_head = old_cap;
-        set->capacity = new_cap;
-    }
-
-    static inline int32_t set_alloc_node(GC *gc, ObjSet *set)
-    {
-        if (__builtin_expect(set->free_head == -1, 0))
-            set_grow_nodes(gc, set);
-        int32_t idx = set->free_head;
-        set->free_head = set->nodes[idx].next;
-        return idx;
-    }
-
-    static inline void set_free_node(ObjSet *set, int32_t idx)
-    {
-        set->nodes[idx].key = val_nil();
-        set->nodes[idx].hash = 0xFFFFFFFFu;
-        set->nodes[idx].next = set->free_head;
-        set->free_head = idx;
-    }
-
-    bool set_add(GC *gc, ObjSet *set, Value key)
-    {
-        if (__builtin_expect(set->bucket_count == 0, 0))
-        {
-            set_grow_nodes(gc, set);
-            set_grow_buckets(gc, set);
-        }
-        /* Grow buckets if load factor > 0.875 */
-        if (__builtin_expect(set->count * 8 >= set->bucket_count * 7, 0))
-            set_grow_buckets(gc, set);
-
-        uint32_t h = hash_value(key);
-        int32_t mask = set->bucket_count - 1;
-        int32_t bucket = (int32_t)(h & (uint32_t)mask);
-        int32_t idx = set->buckets[bucket];
-
-        while (idx != -1)
-        {
-            SetNode *n = &set->nodes[idx];
-            if (n->hash == h && values_equal(n->key, key))
-                return false; /* already exists */
-            idx = n->next;
-        }
-
-        int32_t ni = set_alloc_node(gc, set);
-        SetNode *node = &set->nodes[ni];
-        node->key = key;
-        node->hash = h;
-        node->next = set->buckets[bucket];
-        set->buckets[bucket] = ni;
-        set->count++;
-
-        if (__builtin_expect(key.type == VAL_OBJ, 0))
-            gc_write_barrier(gc, (Obj *)set, key.as.obj);
-        return true;
-    }
-
-    bool set_contains(ObjSet *set, Value key)
-    {
-        if (__builtin_expect(set->count == 0, 0))
-            return false;
-        uint32_t h = hash_value(key);
-        int32_t mask = set->bucket_count - 1;
-        int32_t idx = set->buckets[(int32_t)(h & (uint32_t)mask)];
-
-        while (idx != -1)
-        {
-            SetNode *n = &set->nodes[idx];
-            if (n->hash == h && values_equal(n->key, key))
-                return true;
-            idx = n->next;
-        }
-        return false;
-    }
-
-    bool set_remove(ObjSet *set, Value key)
-    {
-        if (set->count == 0)
-            return false;
-        uint32_t h = hash_value(key);
-        int32_t mask = set->bucket_count - 1;
-        int32_t bucket = (int32_t)(h & (uint32_t)mask);
-        int32_t idx = set->buckets[bucket];
-        int32_t prev = -1;
-
-        while (idx != -1)
-        {
-            SetNode *n = &set->nodes[idx];
-            if (n->hash == h && values_equal(n->key, key))
-            {
-                if (prev == -1)
-                    set->buckets[bucket] = n->next;
-                else
-                    set->nodes[prev].next = n->next;
-                set_free_node(set, idx);
-                set->count--;
-                return true;
-            }
-            prev = idx;
-            idx = n->next;
-        }
-        return false;
-    }
-
-    void set_clear(GC *gc, ObjSet *set)
-    {
-        if (set->buckets)
-        {
-            gc->bytes_allocated -= sizeof(int32_t) * set->bucket_count;
-            free(set->buckets);
-        }
-        if (set->nodes)
-        {
-            gc->bytes_allocated -= sizeof(SetNode) * set->capacity;
-            free(set->nodes);
-        }
-        set->buckets = nullptr;
-        set->nodes = nullptr;
-        set->count = 0;
-        set->capacity = 0;
-        set->bucket_count = 0;
-        set->free_head = -1;
-    }
-
-    int32_t set_count(ObjSet *set) { return set->count; }
-
-    /* =========================================================
     ** ObjBuffer — Typed buffer operations
     ** ========================================================= */
 
@@ -1274,95 +813,6 @@ namespace zen
             buffer_set(buf, i, val);
     }
 
-    ObjClass *new_class(GC *gc, ObjString *name, ObjClass *parent)
-    {
-        ObjClass *cls = (ObjClass *)alloc_obj(gc, sizeof(ObjClass), OBJ_CLASS);
-        cls->name = name;
-        cls->parent = parent;
-        cls->methods = new_map(gc);
-        cls->statics = nullptr; /* created lazily when a static member is declared */
-        cls->num_fields = 0;
-        cls->field_names = nullptr;
-        cls->field_defaults = nullptr;
-        cls->vtable = nullptr;
-        cls->vtable_size = 0;
-        for (int i = 0; i < kOperatorSlotCount; i++)
-            cls->operator_slots[i] = val_nil();
-        cls->native_ctor = nullptr;
-        cls->native_dtor = nullptr;
-        cls->persistent = false;
-        cls->constructable = true;
-        return cls;
-    }
-
-    ObjInstance *new_instance(GC *gc, ObjClass *klass)
-    {
-        ObjInstance *inst;
-        int nf = klass->num_fields;
-        if (klass->persistent)
-        {
-            /* Persistent: malloc directo, NUNCA entra na lista do GC.
-            ** C++ é dono da memória. Chama vm.destroy_instance() para libertar. */
-            inst = (ObjInstance *)malloc(sizeof(ObjInstance));
-            inst->obj.type = OBJ_INSTANCE;
-            inst->obj.color = gc->black_val;
-            inst->obj.interned = 0;
-            inst->obj.hash = 0;
-            inst->obj.gc_next = nullptr; /* not in any list */
-        }
-        else
-        {
-            /* The field array allocation below can trigger GC. Until this
-            ** function returns, the new instance is not yet reachable from a
-            ** VM root, so keep GC disabled during construction. */
-            gc_pause(gc);
-            inst = (ObjInstance *)alloc_obj(gc, sizeof(ObjInstance), OBJ_INSTANCE);
-        }
-
-        inst->klass = klass;
-        inst->native_data = nullptr;
-        if (nf > 0)
-        {
-            inst->fields = (Value *)zen_alloc(gc, sizeof(Value) * nf);
-            if (klass->field_defaults)
-                for (int i = 0; i < nf; i++)
-                    inst->fields[i] = klass->field_defaults[i];
-            else
-                for (int i = 0; i < nf; i++)
-                    inst->fields[i] = val_nil();
-        }
-        else
-        {
-            inst->fields = nullptr;
-        }
-        if (!klass->persistent)
-            gc_resume(gc);
-        return inst;
-    }
-
-    /* Destroy a persistent instance — C++ owns lifetime, calls this explicitly */
-    void destroy_instance(GC *gc, ObjInstance *inst)
-    {
-        if (!inst) return;
-        /* Call native destructor — walk parent chain */
-        if (inst->native_data)
-        {
-            ObjClass *dtor_src = inst->klass;
-            while (dtor_src && !dtor_src->native_dtor)
-                dtor_src = dtor_src->parent;
-            if (dtor_src && dtor_src->native_dtor)
-            {
-                dtor_src->native_dtor((VM *)gc->vm, inst->native_data);
-                inst->native_data = nullptr;
-            }
-        }
-        /* Free fields */
-        if (inst->fields)
-            zen_free(gc, inst->fields, sizeof(Value) * inst->klass->num_fields);
-        /* Free the instance itself (was malloc'd, not GC-tracked) */
-        free(inst);
-    }
-
     /* =========================================================
     ** GC — Tri-color Mark & Sweep
     ** ========================================================= */
@@ -1392,7 +842,7 @@ namespace zen
             gc_mark_obj(gc, v.as.obj);
     }
 
-    /* Processa um objecto gray → marca os filhos, torna-o black */
+    /* Blacken a gray object: mark its children */
     static void gc_blacken(GC *gc, Obj *obj)
     {
         obj->color = gc->black_val;
@@ -1400,24 +850,24 @@ namespace zen
         switch (obj->type)
         {
         case OBJ_STRING:
-            /* strings não têm referências filhas */
+        case OBJ_BUFFER:
+        case OBJ_STRUCT_DEF:
+            /* no child references (field names are interned strings) */
             break;
 
         case OBJ_FUNC:
         {
             ObjFunc *fn = (ObjFunc *)obj;
             gc_mark_obj(gc, (Obj *)fn->name);
+            gc_mark_obj(gc, (Obj *)fn->source);
             for (int i = 0; i < fn->const_count; i++)
                 gc_mark_value(gc, fn->constants[i]);
             break;
         }
 
         case OBJ_NATIVE:
-        {
-            ObjNative *nat = (ObjNative *)obj;
-            gc_mark_obj(gc, (Obj *)nat->name);
+            gc_mark_obj(gc, (Obj *)((ObjNative *)obj)->name);
             break;
-        }
 
         case OBJ_ARRAY:
         {
@@ -1428,130 +878,14 @@ namespace zen
             break;
         }
 
-        case OBJ_MAP:
-        {
-            ObjMap *map = (ObjMap *)obj;
-            for (int i = 0; i < map->capacity; i++)
-            {
-                if (map->nodes[i].hash != 0xFFFFFFFFu)
-                {
-                    gc_mark_value(gc, map->nodes[i].key);
-                    gc_mark_value(gc, map->nodes[i].value);
-                }
-            }
-            break;
-        }
-
-        case OBJ_SET:
-        {
-            ObjSet *set = (ObjSet *)obj;
-            for (int i = 0; i < set->capacity; i++)
-            {
-                if (set->nodes[i].hash != 0xFFFFFFFFu)
-                    gc_mark_value(gc, set->nodes[i].key);
-            }
-            break;
-        }
-
-        case OBJ_BUFFER:
-            /* No GC references in raw byte data */
-            break;
-
-        case OBJ_CLASS:
-        {
-            ObjClass *cls = (ObjClass *)obj;
-            gc_mark_obj(gc, (Obj *)cls->name);
-            gc_mark_obj(gc, (Obj *)cls->parent);
-            gc_mark_obj(gc, (Obj *)cls->methods);
-            gc_mark_obj(gc, (Obj *)cls->statics);
-            /* Mark vtable entries */
-            for (int32_t i = 0; i < cls->vtable_size; i++)
-                if (cls->vtable[i].type == VAL_OBJ)
-                    gc_mark_obj(gc, cls->vtable[i].as.obj);
-            for (int32_t i = 0; i < kOperatorSlotCount; i++)
-                if (cls->operator_slots[i].type == VAL_OBJ)
-                    gc_mark_obj(gc, cls->operator_slots[i].as.obj);
-            break;
-        }
-
-        case OBJ_INSTANCE:
-        {
-            ObjInstance *inst = (ObjInstance *)obj;
-            gc_mark_obj(gc, (Obj *)inst->klass);
-            int nf = inst->klass->num_fields;
-            for (int i = 0; i < nf; i++)
-                gc_mark_value(gc, inst->fields[i]);
-            break;
-        }
-
-        case OBJ_CLOSURE:
-        {
-            ObjClosure *cl = (ObjClosure *)obj;
-            gc_mark_obj(gc, (Obj *)cl->func);
-            for (int i = 0; i < cl->upvalue_count; i++)
-                gc_mark_obj(gc, (Obj *)cl->upvalues[i]);
-            break;
-        }
-
-        case OBJ_UPVALUE:
-        {
-            ObjUpvalue *uv = (ObjUpvalue *)obj;
-            gc_mark_value(gc, uv->closed);
-            break;
-        }
-
-        case OBJ_FIBER:
-        {
-            ObjFiber *fiber = (ObjFiber *)obj;
-            /* Mark stack values */
-            for (Value *v = fiber->stack; v < fiber->stack_top; v++)
-                gc_mark_value(gc, *v);
-            /* Mark call frame closures */
-            for (int i = 0; i < fiber->frame_count; i++)
-            {
-                if (fiber->frames[i].closure)
-                    gc_mark_obj(gc, (Obj *)fiber->frames[i].closure);
-            }
-            /* Mark open upvalues */
-            ObjUpvalue *uv = fiber->open_upvalues;
-            while (uv)
-            {
-                gc_mark_obj(gc, (Obj *)uv);
-                uv = uv->next;
-            }
-            /* Mark caller fiber */
-            if (fiber->caller)
-                gc_mark_obj(gc, (Obj *)fiber->caller);
-            /* Mark error string */
-            if (fiber->error)
-                gc_mark_obj(gc, (Obj *)fiber->error);
-            break;
-        }
-
-        case OBJ_STRUCT_DEF:
-            /* Struct definition — field names are interned strings (no GC refs) */
-            break;
-
         case OBJ_STRUCT:
         {
-            /* Struct instance — mark field values */
             ObjStruct *s = (ObjStruct *)obj;
+            gc_mark_obj(gc, (Obj *)s->def);
             for (int32_t i = 0; i < s->def->num_fields; i++)
                 gc_mark_value(gc, s->fields[i]);
             break;
         }
-
-        case OBJ_NATIVE_STRUCT_DEF:
-            /* Native struct def — no GC refs (field defs are static) */
-            break;
-
-        case OBJ_NATIVE_STRUCT:
-            /* Native struct instance — raw buffer, no Value refs to mark */
-            break;
-
-        case OBJ_PROCESS:
-            /* TODO: when process system is implemented */
-            break;
         }
     }
 
@@ -1580,45 +914,25 @@ namespace zen
             return sizeof(ObjFunc);
         case OBJ_NATIVE:
             return sizeof(ObjNative);
-        case OBJ_CLOSURE:
-            return sizeof(ObjClosure);
-        case OBJ_UPVALUE:
-            return sizeof(ObjUpvalue);
-        case OBJ_FIBER:
-            return sizeof(ObjFiber);
         case OBJ_ARRAY:
             return sizeof(ObjArray);
-        case OBJ_MAP:
-            return sizeof(ObjMap);
-        case OBJ_SET:
-            return sizeof(ObjSet);
         case OBJ_BUFFER:
             return sizeof(ObjBuffer);
         case OBJ_STRUCT_DEF:
             return sizeof(ObjStructDef);
         case OBJ_STRUCT:
             return sizeof(ObjStruct);
-        case OBJ_NATIVE_STRUCT_DEF:
-            return sizeof(NativeStructDef);
-        case OBJ_NATIVE_STRUCT:
-            return sizeof(ObjNativeStruct);
-        case OBJ_CLASS:
-            return sizeof(ObjClass);
-        case OBJ_INSTANCE:
-            return sizeof(ObjInstance);
-        case OBJ_PROCESS:
-            return 0; /* TODO */
         }
         return 0;
     }
 
-    /* Liberta um objecto e os seus buffers internos */
+    /* Free an object and its internal buffers */
     static void free_obj(GC *gc, Obj *obj)
     {
         switch (obj->type)
         {
         case OBJ_STRING:
-            /* nada extra — chars[] está inline */
+        case OBJ_NATIVE:
             break;
         case OBJ_FUNC:
         {
@@ -1629,12 +943,8 @@ namespace zen
                 zen_free(gc, fn->lines, sizeof(int32_t) * fn->code_count);
             if (fn->constants)
                 zen_free(gc, fn->constants, sizeof(Value) * fn->const_count);
-            if (fn->upval_descs)
-                zen_free(gc, fn->upval_descs, sizeof(UpvalDesc) * fn->upvalue_count);
             break;
         }
-        case OBJ_NATIVE:
-            break;
         case OBJ_ARRAY:
         {
             ObjArray *arr = (ObjArray *)obj;
@@ -1642,90 +952,11 @@ namespace zen
                 zen_free(gc, arr->data, sizeof(Value) * arr_capacity(arr));
             break;
         }
-        case OBJ_MAP:
-        {
-            ObjMap *map = (ObjMap *)obj;
-            if (map->buckets)
-            {
-                gc->bytes_allocated -= sizeof(int32_t) * map->bucket_count;
-                free(map->buckets);
-            }
-            if (map->nodes)
-            {
-                gc->bytes_allocated -= sizeof(MapNode) * map->capacity;
-                free(map->nodes);
-            }
-            break;
-        }
-        case OBJ_SET:
-        {
-            ObjSet *set = (ObjSet *)obj;
-            if (set->buckets)
-            {
-                gc->bytes_allocated -= sizeof(int32_t) * set->bucket_count;
-                free(set->buckets);
-            }
-            if (set->nodes)
-            {
-                gc->bytes_allocated -= sizeof(SetNode) * set->capacity;
-                free(set->nodes);
-            }
-            break;
-        }
         case OBJ_BUFFER:
         {
             ObjBuffer *buf = (ObjBuffer *)obj;
             if (buf->data)
                 zen_free(gc, buf->data, (size_t)buf->capacity * buffer_elem_size[buf->btype]);
-            break;
-        }
-        case OBJ_CLASS:
-        {
-            ObjClass *cls = (ObjClass *)obj;
-            if (cls->field_names)
-                zen_free(gc, cls->field_names, sizeof(ObjString *) * cls->num_fields);
-            if (cls->field_defaults)
-                zen_free(gc, cls->field_defaults, sizeof(Value) * cls->num_fields);
-            if (cls->vtable)
-                zen_free(gc, cls->vtable, sizeof(Value) * cls->vtable_size);
-            break;
-        }
-        case OBJ_INSTANCE:
-        {
-            ObjInstance *inst = (ObjInstance *)obj;
-            /* Call native destructor — walk parent chain to find dtor */
-            if (inst->native_data)
-            {
-                ObjClass *dtor_src = inst->klass;
-                while (dtor_src && !dtor_src->native_dtor)
-                    dtor_src = dtor_src->parent;
-                if (dtor_src && dtor_src->native_dtor)
-                {
-                    dtor_src->native_dtor((VM *)gc->vm, inst->native_data);
-                    inst->native_data = nullptr;
-                }
-            }
-            if (inst->fields)
-                zen_free(gc, inst->fields, sizeof(Value) * inst->klass->num_fields);
-            break;
-        }
-        case OBJ_CLOSURE:
-        {
-            ObjClosure *cl = (ObjClosure *)obj;
-            if (cl->upvalues)
-                zen_free(gc, cl->upvalues, sizeof(ObjUpvalue *) * cl->upvalue_count);
-            break;
-        }
-        case OBJ_UPVALUE:
-            /* No extra allocs — closed value is inline */
-            break;
-        case OBJ_FIBER:
-        {
-            ObjFiber *fiber = (ObjFiber *)obj;
-            if (fiber->stack)
-                zen_free(gc, fiber->stack, sizeof(Value) * fiber->stack_capacity);
-            if (fiber->frames)
-                zen_free(gc, fiber->frames, sizeof(CallFrame) * fiber->frame_capacity);
             break;
         }
         case OBJ_STRUCT_DEF:
@@ -1742,25 +973,6 @@ namespace zen
                 zen_free(gc, s->fields, sizeof(Value) * s->def->num_fields);
             break;
         }
-        case OBJ_NATIVE_STRUCT_DEF:
-        {
-            NativeStructDef *def = (NativeStructDef *)obj;
-            if (def->fields)
-                zen_free(gc, def->fields, sizeof(NativeFieldDef) * def->num_fields);
-            break;
-        }
-        case OBJ_NATIVE_STRUCT:
-        {
-            ObjNativeStruct *ns = (ObjNativeStruct *)obj;
-            if (ns->def && ns->def->dtor)
-                ns->def->dtor(nullptr, ns->data);
-            if (ns->data)
-                zen_free(gc, ns->data, ns->def->struct_size);
-            break;
-        }
-        case OBJ_PROCESS:
-            /* TODO */
-            break;
         }
         zen_free(gc, obj, obj_size(obj));
     }

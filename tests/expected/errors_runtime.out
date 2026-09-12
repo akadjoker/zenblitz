@@ -1,5 +1,5 @@
+[runtime error] Array index out of bounds
+  File "errors_runtime.bb", line 5, in <main program>
 start
 0
 before oob
-nil
-not reached

@@ -8,21 +8,9 @@
 
 #include "vm.h"
 #include "compiler.h"
-#include "module.h"
 #include "memory.h"
 #include "debug.h"
 #include "bytecode.h"
-/* Native modules (graphics, audio, sqlite, dnn, ...) live in the separate
-   zenvm-modules repo. It builds its own `zen` from this very file rather
-   than keeping a second copy: compile with
-       -DZEN_CLI_EXTRA_LIBS_HEADER='"zen_modules_libs.h"'
-   and that header must declare
-       void zen_cli_register_extra_libs(zen::VM &vm);
-   which register_default_libs() calls after the core libs. Plain builds of
-   this repo never define the macro and get the core-only CLI. */
-#ifdef ZEN_CLI_EXTRA_LIBS_HEADER
-#include ZEN_CLI_EXTRA_LIBS_HEADER
-#endif
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -76,45 +64,9 @@ static int g_num_search_paths = 0;
 
 static void register_default_libs(VM &vm)
 {
-    vm.open_lib_globals(&zen_lib_base); /* always available */
-    vm.register_lib(&zen_lib_math);
-    vm.register_lib(&zen_lib_os);
-    vm.register_lib(&zen_lib_time);
-    vm.register_lib(&zen_lib_fs);
-    vm.register_lib(&zen_lib_path);
-    vm.register_lib(&zen_lib_file);
-#ifdef ZEN_ENABLE_REGEX
-    vm.register_lib(&zen_lib_re);
-#endif
-#ifdef ZEN_ENABLE_ZIP
-    vm.register_lib(&zen_lib_zip);
-#endif
-#ifdef ZEN_ENABLE_NET
-    vm.register_lib(&zen_lib_net);
-#endif
-#ifdef ZEN_ENABLE_HTTP
-    vm.register_lib(&zen_lib_http);
-#endif
-#ifdef ZEN_ENABLE_CRYPTO
-    vm.register_lib(&zen_lib_crypto);
-#endif
-#ifdef ZEN_ENABLE_JSON
-    vm.register_lib(&zen_lib_json);
-#endif
-#ifdef ZEN_ENABLE_UTF8
-    vm.register_lib(&zen_lib_utf8);
-#endif
-    vm.register_lib(&zen_lib_easing);
-    vm.register_lib(&zen_lib_base64);
-    vm.register_lib(&zen_lib_csv);
-    vm.register_lib(&zen_lib_xml);
-    vm.register_lib(&zen_lib_ini);
-    vm.register_lib(&zen_lib_log);
-#ifdef ZEN_CLI_EXTRA_LIBS_HEADER
-    zen_cli_register_extra_libs(vm); /* zenvm-modules: image, sdl2, sqlite, ... */
-#endif
-    for (int i = 0; i < g_num_search_paths; i++)
-        vm.add_search_path(g_search_paths[i]);
+    /* Blitz commands and runtime helpers become VM globals here, so both
+       source compiles and precompiled bytecode see them in the same slots. */
+    install_runtime(&vm);
 }
 
 static void install_args(VM &vm, int script_argc, char **script_argv)

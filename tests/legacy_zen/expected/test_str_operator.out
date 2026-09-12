@@ -1,4 +1,0 @@
-Vec2(1,2)
-b=Vec2(3,4)
-c=Vec2(4,6)
-ok: __str__ operator

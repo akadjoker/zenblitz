@@ -1,6 +1,5 @@
 #include "bytecode.h"
 #include "memory.h"
-#include "name_tables.h"
 #include "object.h"
 #include "value.h"
 #include "vm.h"
@@ -29,9 +28,8 @@ namespace
         BC_FLOAT64 = 3,
         BC_STRING = 4,
         BC_FUNC = 5,
-        BC_CLOSURE = 6,
-        BC_CLASS = 7,
         BC_STRUCT_DEF = 8,
+        BC_ARRAY = 9,
     };
 
     static void set_error(char *err, int err_len, const char *fmt, ...)
@@ -239,13 +237,20 @@ namespace
     }
 
     static bool write_func(BytecodeWriter &w, ObjFunc *fn, bool strip_debug, BytecodeStats *stats, char *err, int err_len);
-    static bool write_class(BytecodeWriter &w, ObjClass *klass, bool strip_debug, BytecodeStats *stats, char *err, int err_len);
     static bool write_value(BytecodeWriter &w, Value value, bool strip_debug, BytecodeStats *stats, char *err, int err_len);
 
     static bool should_write_global_value(Value value)
     {
-        return value.type == VAL_OBJ && value.as.obj &&
-               (value.as.obj->type == OBJ_CLASS || value.as.obj->type == OBJ_STRUCT_DEF);
+        /* Everything the compiler set up as program state: numbers, strings,
+           arrays (Data), struct defs (Types). Natives and functions are not
+           written: natives are re-registered by install_runtime() and
+           functions are installed by the main program itself. */
+        if (value.type == VAL_INT || value.type == VAL_FLOAT || value.type == VAL_BOOL)
+            return true;
+        if (value.type != VAL_OBJ || !value.as.obj)
+            return false;
+        ObjType t = value.as.obj->type;
+        return t == OBJ_STRUCT_DEF || t == OBJ_STRING || t == OBJ_ARRAY;
     }
 
     static bool write_global_names(BytecodeWriter &w, VM *vm, bool strip_debug, BytecodeStats *stats, char *err, int err_len)
@@ -289,35 +294,6 @@ namespace
         return true;
     }
 
-    static bool write_selectors(BytecodeWriter &w, VM *vm, BytecodeStats *stats, char *err, int err_len)
-    {
-        uint32_t count = vm ? (uint32_t)vm->num_selectors() : 0u;
-        if (stats)
-            stats->selectors = count;
-        if (!w.write_u32(count))
-            return false;
-
-        for (uint32_t i = 0; i < count; i++)
-        {
-            const char *name = vm->selector_name((int)i);
-            if (!name)
-            {
-                set_error(err, err_len, "missing selector name at slot %u", (unsigned)i);
-                return false;
-            }
-            size_t len = strlen(name);
-            if (len > (size_t)UINT32_MAX)
-            {
-                set_error(err, err_len, "selector name is too large");
-                return false;
-            }
-            if (!w.write_u32((uint32_t)len) ||
-                (len > 0 && !w.write_raw(name, len)))
-                return false;
-        }
-
-        return true;
-    }
 
     static bool write_value(BytecodeWriter &w, Value value, bool strip_debug, BytecodeStats *stats, char *err, int err_len)
     {
@@ -343,20 +319,17 @@ namespace
                 return w.write_u8(BC_STRING) && write_string(w, (ObjString *)value.as.obj, stats, err, err_len);
             if (value.as.obj->type == OBJ_FUNC)
                 return w.write_u8(BC_FUNC) && write_func(w, (ObjFunc *)value.as.obj, strip_debug, stats, err, err_len);
-            if (value.as.obj->type == OBJ_CLOSURE)
+            if (value.as.obj->type == OBJ_ARRAY)
             {
-                ObjClosure *cl = (ObjClosure *)value.as.obj;
-                if (stats)
-                    stats->closures++;
-                if (cl->upvalue_count != 0)
-                {
-                    set_error(err, err_len, "cannot dump closure with captured upvalues");
+                ObjArray *arr = (ObjArray *)value.as.obj;
+                int32_t n = arr_count(arr);
+                if (!w.write_u8(BC_ARRAY) || !w.write_u32((uint32_t)n))
                     return false;
-                }
-                return w.write_u8(BC_CLOSURE) && write_func(w, cl->func, strip_debug, stats, err, err_len);
+                for (int32_t i = 0; i < n; i++)
+                    if (!write_value(w, arr->data[i], strip_debug, stats, err, err_len))
+                        return false;
+                return true;
             }
-            if (value.as.obj->type == OBJ_CLASS)
-                return w.write_u8(BC_CLASS) && write_class(w, (ObjClass *)value.as.obj, strip_debug, stats, err, err_len);
             if (value.as.obj->type == OBJ_STRUCT_DEF)
             {
                 ObjStructDef *sd = (ObjStructDef *)value.as.obj;
@@ -395,19 +368,14 @@ namespace
         if (stats)
         {
             stats->functions++;
-            if (fn->is_process)
-                stats->processes++;
             stats->instructions += fn->code_count > 0 ? (uint32_t)fn->code_count : 0u;
         }
 
         if (!w.write_i32(fn->arity) ||
             !w.write_i32(fn->num_regs) ||
-            !w.write_u8(fn->is_process ? 1 : 0) ||
-            !w.write_raw(fn->param_privates, sizeof(fn->param_privates)) ||
             !w.write_i32(fn->code_count) ||
             !w.write_i32(strip_debug ? 0 : fn->code_count) ||
-            !w.write_i32(fn->const_count) ||
-            !w.write_i32(fn->upvalue_count))
+            !w.write_i32(fn->const_count))
             return false;
 
         for (int32_t i = 0; i < fn->code_count; i++)
@@ -431,107 +399,15 @@ namespace
                 return false;
         }
 
-        for (int32_t i = 0; i < fn->upvalue_count; i++)
-        {
-            UpvalDesc d = fn->upval_descs ? fn->upval_descs[i] : UpvalDesc{0, 0};
-            if (!w.write_u8(d.index) || !w.write_u8(d.is_local))
-                return false;
-        }
 
         if (!write_optional_string(w, strip_debug ? nullptr : fn->name, stats, err, err_len) ||
             !write_optional_string(w, strip_debug ? nullptr : fn->source, stats, err, err_len))
             return false;
 
-        /* minor 2: reified generics — number of leading type params. Written
-        ** last so a minor-1 reader (which stops before this field) never sees
-        ** it; a minor-2 reader gates the read on `minor`. */
-        if (!w.write_i32(fn->generic_arity))
-            return false;
-
         return true;
     }
 
-    static bool write_methods(BytecodeWriter &w, ObjClass *klass, bool strip_debug, BytecodeStats *stats, char *err, int err_len)
-    {
-        uint32_t count = klass->methods ? (uint32_t)klass->methods->count : 0u;
-        if (!w.write_u32(count))
-            return false;
-        if (!klass->methods || count == 0)
-            return true;
 
-        uint32_t written = 0;
-        for (int32_t b = 0; b < klass->methods->bucket_count; b++)
-        {
-            for (int32_t idx = klass->methods->buckets[b]; idx != -1; idx = klass->methods->nodes[idx].next)
-            {
-                MapNode *node = &klass->methods->nodes[idx];
-                if (node->key.type != VAL_OBJ || !node->key.as.obj || node->key.as.obj->type != OBJ_STRING)
-                {
-                    set_error(err, err_len, "class method key is not a string");
-                    return false;
-                }
-                if (!write_string(w, (ObjString *)node->key.as.obj, stats, err, err_len) ||
-                    !write_value(w, node->value, strip_debug, stats, err, err_len))
-                    return false;
-                written++;
-            }
-        }
-
-        if (written != count)
-        {
-            set_error(err, err_len, "class method table count mismatch");
-            return false;
-        }
-        return true;
-    }
-
-    static bool write_class(BytecodeWriter &w, ObjClass *klass, bool strip_debug, BytecodeStats *stats, char *err, int err_len)
-    {
-        if (!klass || !klass->name)
-        {
-            set_error(err, err_len, "invalid class");
-            return false;
-        }
-        if (klass->native_ctor || klass->native_dtor)
-        {
-            set_error(err, err_len, "cannot dump native-backed class '%s'", klass->name->chars);
-            return false;
-        }
-
-        if (stats)
-            stats->classes++;
-
-        if (!write_string(w, klass->name, stats, err, err_len) ||
-            !write_optional_string(w, klass->parent ? klass->parent->name : nullptr, stats, err, err_len) ||
-            !w.write_i32(klass->num_fields))
-            return false;
-
-        for (int32_t i = 0; i < klass->num_fields; i++)
-        {
-            if (!write_string(w, klass->field_names ? klass->field_names[i] : nullptr, stats, err, err_len))
-                return false;
-        }
-
-        if (!write_methods(w, klass, strip_debug, stats, err, err_len) ||
-            !w.write_i32(klass->vtable_size))
-            return false;
-
-        for (int32_t i = 0; i < klass->vtable_size; i++)
-        {
-            Value v = klass->vtable ? klass->vtable[i] : val_nil();
-            if (!write_value(w, v, strip_debug, stats, err, err_len))
-                return false;
-        }
-
-        for (int32_t i = 0; i < kOperatorSlotCount; i++)
-        {
-            if (!write_value(w, klass->operator_slots[i], strip_debug, stats, err, err_len))
-                return false;
-        }
-
-        return w.write_u8(klass->persistent ? 1 : 0) &&
-               w.write_u8(klass->constructable ? 1 : 0);
-    }
 
     static bool read_string(VM *vm, BytecodeReader &r, ObjString **out, char *err, int err_len)
     {
@@ -582,49 +458,7 @@ namespace
 
     static ObjFunc *read_func(VM *vm, BytecodeReader &r, uint16_t minor, char *err, int err_len);
     static bool read_value(VM *vm, BytecodeReader &r, uint16_t minor, Value *out, char *err, int err_len);
-    static bool read_selectors(VM *vm, BytecodeReader &r, char *err, int err_len)
-    {
-        uint32_t count = 0;
-        if (!r.read_u32(&count))
-        {
-            set_error(err, err_len, "truncated selector table");
-            return false;
-        }
-        if (count > 256)
-        {
-            set_error(err, err_len, "too many selectors in bytecode");
-            return false;
-        }
 
-        for (uint32_t i = 0; i < count; i++)
-        {
-            ObjString *name = nullptr;
-            if (!read_string(vm, r, &name, err, err_len))
-                return false;
-
-            if (i < (uint32_t)vm->num_selectors())
-            {
-                const char *existing = vm->selector_name((int)i);
-                if (!existing || strcmp(existing, name->chars) != 0)
-                {
-                    set_error(err, err_len, "selector mismatch at slot %u", (unsigned)i);
-                    return false;
-                }
-                continue;
-            }
-
-            int idx = vm->intern_selector(name->chars, name->length);
-            if (idx != (int)i)
-            {
-                set_error(err, err_len, "selector slot mismatch for '%s'", name->chars);
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    static ObjClass *read_class(VM *vm, BytecodeReader &r, uint16_t minor, char *err, int err_len);
 
     static bool read_global_names(VM *vm, BytecodeReader &r, uint16_t minor, char *err, int err_len)
     {
@@ -765,32 +599,25 @@ namespace
             *out = val_obj((Obj *)fn);
             return true;
         }
-        case BC_CLOSURE:
+        case BC_ARRAY:
         {
-            ObjFunc *fn = read_func(vm, r, minor, err, err_len);
-            if (!fn)
+            uint32_t n = 0;
+            if (!r.read_u32(&n))
+            {
+                set_error(err, err_len, "truncated array constant");
                 return false;
+            }
             GC *gc = &vm->get_gc();
-            ObjClosure *cl = (ObjClosure *)zen_alloc(gc, sizeof(ObjClosure));
-            cl->obj.type = OBJ_CLOSURE;
-            cl->obj.color = gc->black_val;
-            cl->obj.interned = 0;
-            cl->obj._pad = 0;
-            cl->obj.hash = 0;
-            cl->obj.gc_next = gc->objects;
-            gc->objects = (Obj *)cl;
-            cl->func = fn;
-            cl->upvalues = nullptr;
-            cl->upvalue_count = 0;
-            *out = val_obj((Obj *)cl);
-            return true;
-        }
-        case BC_CLASS:
-        {
-            ObjClass *klass = read_class(vm, r, minor, err, err_len);
-            if (!klass)
-                return false;
-            *out = val_obj((Obj *)klass);
+            ObjArray *arr = new_array(gc);
+            *out = val_obj((Obj *)arr);
+            array_reserve(gc, arr, (int32_t)n);
+            for (uint32_t i = 0; i < n; i++)
+            {
+                Value v = val_nil();
+                if (!read_value(vm, r, minor, &v, err, err_len))
+                    return false;
+                array_push(gc, arr, v);
+            }
             return true;
         }
         case BC_STRUCT_DEF:
@@ -805,15 +632,7 @@ namespace
                 set_error(err, err_len, "truncated struct_def field count");
                 return false;
             }
-            ObjStructDef *sd = (ObjStructDef *)zen_alloc(gc, sizeof(ObjStructDef));
-            sd->obj.type = OBJ_STRUCT_DEF;
-            sd->obj.color = gc->black_val;
-            sd->obj.interned = 0;
-            sd->obj._pad = 0;
-            sd->obj.hash = 0;
-            sd->obj.gc_next = gc->objects;
-            gc->objects = (Obj *)sd;
-            sd->name = name;
+            ObjStructDef *sd = new_struct_def(gc, name);
             sd->num_fields = (int32_t)num_fields;
             sd->field_names = (ObjString **)zen_alloc(gc, sizeof(ObjString *) * num_fields);
             for (uint32_t i = 0; i < num_fields; i++)
@@ -846,21 +665,15 @@ namespace
 
         int32_t arity = 0;
         int32_t num_regs = 0;
-        uint8_t is_process = 0;
-        int8_t param_privates[16];
         int32_t code_count = 0;
         int32_t line_count = 0;
         int32_t const_count = 0;
-        int32_t upvalue_count = 0;
 
         if (!r.read_i32(&arity) ||
             !r.read_i32(&num_regs) ||
-            !r.read_u8(&is_process) ||
-            !r.read_raw(param_privates, sizeof(param_privates)) ||
             !r.read_i32(&code_count) ||
             !r.read_i32(&line_count) ||
-            !r.read_i32(&const_count) ||
-            !r.read_i32(&upvalue_count))
+            !r.read_i32(&const_count))
         {
             set_error(err, err_len, "truncated function header");
             return nullptr;
@@ -868,8 +681,7 @@ namespace
 
         if (!valid_non_negative_count(code_count, "code count", err, err_len) ||
             !valid_non_negative_count(line_count, "line count", err, err_len) ||
-            !valid_non_negative_count(const_count, "constant count", err, err_len) ||
-            !valid_non_negative_count(upvalue_count, "upvalue count", err, err_len))
+            !valid_non_negative_count(const_count, "constant count", err, err_len))
             return nullptr;
 
         if (line_count != 0 && line_count != code_count)
@@ -881,8 +693,6 @@ namespace
         ObjFunc *fn = new_func(gc);
         fn->arity = arity;
         fn->num_regs = num_regs;
-        fn->is_process = is_process ? 1 : 0;
-        memcpy(fn->param_privates, param_privates, sizeof(param_privates));
 
         fn->code_count = code_count;
         fn->code_capacity = code_count;
@@ -928,170 +738,13 @@ namespace
                 return nullptr;
         }
 
-        fn->upvalue_count = upvalue_count;
-        if (upvalue_count > 0)
-        {
-            fn->upval_descs = (UpvalDesc *)zen_alloc(gc, sizeof(UpvalDesc) * (size_t)upvalue_count);
-        }
-
-        for (int32_t i = 0; i < upvalue_count; i++)
-        {
-            uint8_t index = 0;
-            uint8_t is_local = 0;
-            if (!r.read_u8(&index) || !r.read_u8(&is_local))
-            {
-                set_error(err, err_len, "truncated upvalue descriptors");
-                return nullptr;
-            }
-            fn->upval_descs[i].index = index;
-            fn->upval_descs[i].is_local = is_local ? 1 : 0;
-        }
-
         if (!read_optional_string(vm, r, &fn->name, err, err_len) ||
             !read_optional_string(vm, r, &fn->source, err, err_len))
             return nullptr;
 
-        /* minor 2: reified generics — see write_func(). Older files simply
-        ** don't carry this field; new_func() already zeroed generic_arity, so
-        ** skipping the read entirely is correct for them. */
-        fn->generic_arity = 0;
-        if (minor >= 2)
-        {
-            if (!r.read_i32(&fn->generic_arity))
-            {
-                set_error(err, err_len, "truncated generic_arity");
-                return nullptr;
-            }
-        }
-
         return fn;
     }
 
-    static ObjClass *read_class(VM *vm, BytecodeReader &r, uint16_t minor, char *err, int err_len)
-    {
-        GC *gc = &vm->get_gc();
-
-        ObjString *name = nullptr;
-        ObjString *parent_name = nullptr;
-        int32_t num_fields = 0;
-        if (!read_string(vm, r, &name, err, err_len) ||
-            !read_optional_string(vm, r, &parent_name, err, err_len) ||
-            !r.read_i32(&num_fields))
-        {
-            set_error(err, err_len, "truncated class header");
-            return nullptr;
-        }
-        if (num_fields < 0)
-        {
-            set_error(err, err_len, "invalid class field count");
-            return nullptr;
-        }
-
-        ObjClass *parent = nullptr;
-        if (parent_name)
-        {
-            Value pv = vm->get_global(parent_name->chars);
-            if (!is_class(pv))
-            {
-                set_error(err, err_len, "missing parent class '%s'", parent_name->chars);
-                return nullptr;
-            }
-            parent = as_class(pv);
-        }
-
-        ObjClass *klass = new_class(gc, name, parent);
-        for (int32_t i = 0; i < kOperatorSlotCount; i++)
-            klass->operator_slots[i] = val_nil();
-        klass->num_fields = num_fields;
-        if (num_fields > 0)
-        {
-            klass->field_names = (ObjString **)zen_alloc(gc, sizeof(ObjString *) * (size_t)num_fields);
-            for (int32_t i = 0; i < num_fields; i++)
-            {
-                if (!read_string(vm, r, &klass->field_names[i], err, err_len))
-                    return nullptr;
-            }
-        }
-
-        uint32_t method_count = 0;
-        if (!r.read_u32(&method_count))
-        {
-            set_error(err, err_len, "truncated class methods");
-            return nullptr;
-        }
-        for (uint32_t i = 0; i < method_count; i++)
-        {
-            ObjString *mname = nullptr;
-            Value method = val_nil();
-            if (!read_string(vm, r, &mname, err, err_len) ||
-                !read_value(vm, r, minor, &method, err, err_len))
-                return nullptr;
-            map_set(gc, klass->methods, val_obj((Obj *)mname), method);
-            int op_slot = operator_slot_for_name(mname->chars, mname->length);
-            if (op_slot >= 0 && op_slot < kOperatorSlotCount)
-                klass->operator_slots[op_slot] = method;
-        }
-
-        int32_t vtable_size = 0;
-        if (!r.read_i32(&vtable_size) || vtable_size < 0)
-        {
-            set_error(err, err_len, "invalid class vtable size");
-            return nullptr;
-        }
-        klass->vtable_size = vtable_size;
-        if (vtable_size > 0)
-        {
-            klass->vtable = (Value *)zen_alloc(gc, sizeof(Value) * (size_t)vtable_size);
-            for (int32_t i = 0; i < vtable_size; i++)
-            {
-                klass->vtable[i] = val_nil();
-                if (!read_value(vm, r, minor, &klass->vtable[i], err, err_len))
-                    return nullptr;
-            }
-        }
-
-        if (minor >= 1)
-        {
-            for (int32_t i = 0; i < kOperatorSlotCount; i++)
-            {
-                if (!read_value(vm, r, minor, &klass->operator_slots[i], err, err_len))
-                    return nullptr;
-            }
-        }
-        else
-        {
-            for (int32_t i = 0; i < kOperatorSlotCount; i++)
-            {
-                int selector_slot = vm->find_selector(kOperatorNames[i].name, kOperatorNames[i].len);
-                if (selector_slot >= 0 &&
-                    selector_slot < klass->vtable_size &&
-                    is_nil(klass->operator_slots[i]))
-                {
-                    klass->operator_slots[i] = klass->vtable[selector_slot];
-                }
-            }
-        }
-
-        if (parent)
-        {
-            for (int32_t i = 0; i < kOperatorSlotCount; i++)
-            {
-                if (is_nil(klass->operator_slots[i]))
-                    klass->operator_slots[i] = parent->operator_slots[i];
-            }
-        }
-
-        uint8_t persistent = 0;
-        uint8_t constructable = 1;
-        if (!r.read_u8(&persistent) || !r.read_u8(&constructable))
-        {
-            set_error(err, err_len, "truncated class flags");
-            return nullptr;
-        }
-        klass->persistent = persistent != 0;
-        klass->constructable = constructable != 0;
-        return klass;
-    }
 
 } /* namespace */
 
@@ -1143,7 +796,6 @@ bool dump_bytecode_file(VM *vm, ObjFunc *func, const char *path, bool strip_debu
               w.write_u16(ZEN_BYTECODE_VERSION_MINOR) &&
               w.write_u32(flags) &&
               write_global_names(w, vm, strip_debug, stats, err, err_len) &&
-              write_selectors(w, vm, stats, err, err_len) &&
               write_func(w, func, strip_debug, stats, err, err_len);
 
     if (!ok || !w.ok())
@@ -1230,24 +882,13 @@ ObjFunc *load_bytecode_buffer(VM *vm, const uint8_t *data, size_t size, char *er
     }
 
     /* Disable GC for the entire load: objects created during read_global_names /
-       read_selectors / read_func are not yet reachable from any GC root, so a
+       read_func are not yet reachable from any GC root, so a
        collection triggered by an allocation would sweep them prematurely.      */
     GC &gc = vm->get_gc();
     void *saved_vm = gc.vm;
     gc.vm = nullptr;
 
     if (!read_global_names(vm, r, minor, err, err_len))
-    {
-        gc.vm = saved_vm;
-        return nullptr;
-    }
-
-    /* Resolve native functions/constants that weren't serialized.
-       Imports (math, os, etc.) register natives as globals at compile time,
-       but native objects can't be serialized into bytecode. */
-    vm->resolve_native_globals();
-
-    if (!read_selectors(vm, r, err, err_len))
     {
         gc.vm = saved_vm;
         return nullptr;

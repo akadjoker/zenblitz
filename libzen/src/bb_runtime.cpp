@@ -32,7 +32,7 @@ namespace bb
     }
 
     /* ================= helpers on instances ================= */
-    static inline void set_field(VM *vm, ObjInstance *inst, int idx, Value v)
+    static inline void set_field(VM *vm, ObjStruct *inst, int idx, Value v)
     {
         inst->fields[idx] = v;
         if (is_obj(v)) gc_write_barrier(&vm->get_gc(), (Obj *)inst, v.as.obj);
@@ -40,16 +40,21 @@ namespace bb
 
     static inline bool obj_alive(Value v, BBTypeInfo *ti)
     {
-        if (!is_instance(v)) return false;
-        Value a = as_instance(v)->fields[ti->nfields + HF_ALIVE];
+        if (!is_struct(v)) return false;
+        Value a = as_struct(v)->fields[ti->nfields + HF_ALIVE];
         return is_bool(a) && a.as.boolean;
     }
 
     static BBTypeInfo *type_of_value(Value v)
     {
-        if (!is_instance(v)) return 0;
-        map<ObjClass *, BBTypeInfo *>::iterator it = g_rt->typeByClass.find(as_instance(v)->klass);
-        return it == g_rt->typeByClass.end() ? 0 : it->second;
+        if (!is_struct(v)) return 0;
+        return g_rt->typeForDef(as_struct(v)->def);
+    }
+
+    static BBTypeInfo *type_arg(Value v)
+    {
+        if (!is_struct_def(v)) return 0;
+        return g_rt->typeForDef(as_struct_def(v));
     }
 
     static Value default_for_kind(VM *vm, int kind)
@@ -75,18 +80,18 @@ namespace bb
     }
 
     /* ================= handles ================= */
-    static std::unordered_map<long long, ObjInstance *> handle_map;
+    static std::unordered_map<long long, ObjStruct *> handle_map;
     static long long next_handle = 0;
 
     /* ================= natives: types/objects ================= */
     static int nat_new(VM *vm, Value *args, int nargs)
     {
         (void)nargs;
-        int idx = (int)bb_arg_int(args[0]);
-        BBTypeInfo *ti = g_rt->types[idx];
+        BBTypeInfo *ti = type_arg(args[0]);
+        if (!ti) { vm->runtime_error("New: bad type"); return -1; }
         GC *gc = &vm->get_gc();
         gc_pause(gc);
-        ObjInstance *inst = new_instance(gc, ti->klass);
+        ObjStruct *inst = new_struct(gc, ti->def);
         Value v = val_obj((Obj *)inst);
         args[0] = v;
         for (int i = 0; i < ti->nfields; ++i)
@@ -103,24 +108,24 @@ namespace bb
         set_field(vm, inst, nf + HF_ALIVE, val_bool(true));
         set_field(vm, inst, nf + HF_HANDLE, val_int(0));
         if (is_nil(last)) vm->set_global(ti->gFirst, v);
-        else set_field(vm, as_instance(last), nf + HF_NEXT, v);
+        else set_field(vm, as_struct(last), nf + HF_NEXT, v);
         vm->set_global(ti->gLast, v);
         gc_resume(gc);
         return 1;
     }
 
-    static void unlink_obj(VM *vm, BBTypeInfo *ti, ObjInstance *inst)
+    static void unlink_obj(VM *vm, BBTypeInfo *ti, ObjStruct *inst)
     {
         int nf = ti->nfields;
         Value prev = inst->fields[nf + HF_PREV];
         Value next = inst->fields[nf + HF_NEXT];
         if (is_nil(prev)) vm->set_global(ti->gFirst, next);
-        else set_field(vm, as_instance(prev), nf + HF_NEXT, next);
+        else set_field(vm, as_struct(prev), nf + HF_NEXT, next);
         if (is_nil(next)) vm->set_global(ti->gLast, prev);
-        else set_field(vm, as_instance(next), nf + HF_PREV, prev);
+        else set_field(vm, as_struct(next), nf + HF_PREV, prev);
     }
 
-    static void kill_obj(VM *vm, BBTypeInfo *ti, ObjInstance *inst)
+    static void kill_obj(VM *vm, BBTypeInfo *ti, ObjStruct *inst)
     {
         int nf = ti->nfields;
         inst->fields[nf + HF_ALIVE] = val_bool(false);
@@ -135,7 +140,7 @@ namespace bb
         Value v = args[0];
         BBTypeInfo *ti = type_of_value(v);
         if (!ti || !obj_alive(v, ti)) return 0;
-        ObjInstance *inst = as_instance(v);
+        ObjStruct *inst = as_struct(v);
         unlink_obj(vm, ti, inst);
         kill_obj(vm, ti, inst);
         return 0;
@@ -144,11 +149,12 @@ namespace bb
     static int nat_delete_each(VM *vm, Value *args, int nargs)
     {
         (void)nargs;
-        BBTypeInfo *ti = g_rt->types[(int)bb_arg_int(args[0])];
+        BBTypeInfo *ti = type_arg(args[0]);
+        if (!ti) { vm->runtime_error("Delete Each: bad type"); return -1; }
         Value cur = vm->get_global(ti->gFirst);
-        while (is_instance(cur))
+        while (is_struct(cur))
         {
-            ObjInstance *inst = as_instance(cur);
+            ObjStruct *inst = as_struct(cur);
             Value next = inst->fields[ti->nfields + HF_NEXT];
             kill_obj(vm, ti, inst);
             cur = next;
@@ -165,9 +171,9 @@ namespace bb
         BBTypeInfo *ti = type_of_value(v);
         if (!ti) { vm->runtime_error("Object does not exist"); return -1; }
         int nf = ti->nfields;
-        Value n = as_instance(v)->fields[nf + HF_NEXT];
-        while (is_instance(n) && !obj_alive(n, ti)) n = as_instance(n)->fields[nf + HF_NEXT];
-        args[0] = is_instance(n) ? n : val_nil();
+        Value n = as_struct(v)->fields[nf + HF_NEXT];
+        while (is_struct(n) && !obj_alive(n, ti)) n = as_struct(n)->fields[nf + HF_NEXT];
+        args[0] = is_struct(n) ? n : val_nil();
         return 1;
     }
 
@@ -178,9 +184,9 @@ namespace bb
         BBTypeInfo *ti = type_of_value(v);
         if (!ti) { vm->runtime_error("Object does not exist"); return -1; }
         int nf = ti->nfields;
-        Value n = as_instance(v)->fields[nf + HF_PREV];
-        while (is_instance(n) && !obj_alive(n, ti)) n = as_instance(n)->fields[nf + HF_PREV];
-        args[0] = is_instance(n) ? n : val_nil();
+        Value n = as_struct(v)->fields[nf + HF_PREV];
+        while (is_struct(n) && !obj_alive(n, ti)) n = as_struct(n)->fields[nf + HF_PREV];
+        args[0] = is_struct(n) ? n : val_nil();
         return 1;
     }
 
@@ -191,7 +197,7 @@ namespace bb
         BBTypeInfo *tb = type_of_value(b);
         if (!ti || !tb || !obj_alive(a, ti) || !obj_alive(b, tb)) { vm->runtime_error("Object does not exist"); return -1; }
         if (a.as.obj == b.as.obj) return 0;
-        ObjInstance *ia = as_instance(a), *ib = as_instance(b);
+        ObjStruct *ia = as_struct(a), *ib = as_struct(b);
         int nf = ti->nfields;
         unlink_obj(vm, ti, ia);
         if (before)
@@ -200,7 +206,7 @@ namespace bb
             set_field(vm, ia, nf + HF_PREV, prev);
             set_field(vm, ia, nf + HF_NEXT, b);
             if (is_nil(prev)) vm->set_global(ti->gFirst, a);
-            else set_field(vm, as_instance(prev), nf + HF_NEXT, a);
+            else set_field(vm, as_struct(prev), nf + HF_NEXT, a);
             set_field(vm, ib, nf + HF_PREV, a);
         }
         else
@@ -209,7 +215,7 @@ namespace bb
             set_field(vm, ia, nf + HF_NEXT, next);
             set_field(vm, ia, nf + HF_PREV, b);
             if (is_nil(next)) vm->set_global(ti->gLast, a);
-            else set_field(vm, as_instance(next), nf + HF_PREV, a);
+            else set_field(vm, as_struct(next), nf + HF_PREV, a);
             set_field(vm, ib, nf + HF_NEXT, a);
         }
         return 0;
@@ -224,7 +230,7 @@ namespace bb
         Value v = args[0];
         BBTypeInfo *ti = type_of_value(v);
         if (!ti || !obj_alive(v, ti)) { args[0] = val_int(0); return 1; }
-        ObjInstance *inst = as_instance(v);
+        ObjStruct *inst = as_struct(v);
         Value h = inst->fields[ti->nfields + HF_HANDLE];
         if (is_int(h) && h.as.integer) { args[0] = h; return 1; }
         ++next_handle;
@@ -238,9 +244,10 @@ namespace bb
     {
         (void)vm; (void)nargs;
         long long h = bb_arg_int(args[0]);
-        BBTypeInfo *ti = g_rt->types[(int)bb_arg_int(args[1])];
-        std::unordered_map<long long, ObjInstance *>::iterator it = handle_map.find(h);
-        if (it == handle_map.end() || it->second->klass != ti->klass) { args[0] = val_nil(); return 1; }
+        BBTypeInfo *ti = type_arg(args[1]);
+        if (!ti) { vm->runtime_error("Object: bad type"); return -1; }
+        std::unordered_map<long long, ObjStruct *>::iterator it = handle_map.find(h);
+        if (it == handle_map.end() || it->second->def != ti->def) { args[0] = val_nil(); return 1; }
         args[0] = val_obj((Obj *)it->second);
         return 1;
     }
@@ -251,7 +258,7 @@ namespace bb
         if (!ti || !obj_alive(v, ti)) { out += "[NULL]"; return; }
         if (v.as.obj == root && depth > 0) { out += "[ROOT]"; return; }
         if (depth >= 8) { out += "...."; return; }
-        ObjInstance *inst = as_instance(v);
+        ObjStruct *inst = as_struct(v);
         out += "[";
         for (int k = 0; k < ti->nfields; ++k)
         {
@@ -407,24 +414,84 @@ namespace bb
     }
 
     /* ================= type registry ================= */
-    int BBRuntime::registerType(const string &name, const vector<int> &kinds,
-                                const vector<int> &vecSizes, const vector<int> &vecKinds)
+    /* Field names carry the Blitz kind so a struct def loaded from bytecode
+       can be understood without the compiler: "f0%" int, "f1#" float,
+       "f2$" string, "f3." object, "f4[12]#" 12-element float vector. */
+    static string encode_field(int i, int kind, int vecSize, int vecKind)
+    {
+        static const char tags[] = {'%', '#', '$', '.', '['};
+        string n = "f" + bb_itoa(i);
+        if (kind == KIND_VEC) return n + "[" + bb_itoa(vecSize) + "]" + tags[vecKind];
+        return n + tags[kind];
+    }
+
+    static bool decode_field(const char *name, int &kind, int &vecSize, int &vecKind)
+    {
+        const char *p = name;
+        if (*p != 'f') return false;
+        ++p;
+        while (*p >= '0' && *p <= '9') ++p;
+        vecSize = 0;
+        vecKind = 0;
+        if (*p == '[')
+        {
+            vecSize = atoi(p + 1);
+            while (*p && *p != ']') ++p;
+            if (*p != ']') return false;
+            ++p;
+            kind = KIND_VEC;
+            switch (*p) { case '%': vecKind = KIND_INT; break; case '#': vecKind = KIND_FLOAT; break; case '$': vecKind = KIND_STR; break; case '.': vecKind = KIND_OBJ; break; default: return false; }
+            return true;
+        }
+        switch (*p) { case '%': kind = KIND_INT; break; case '#': kind = KIND_FLOAT; break; case '$': kind = KIND_STR; break; case '.': kind = KIND_OBJ; break; default: return false; }
+        return true;
+    }
+
+    static BBTypeInfo *make_info(VM *vm, ObjStructDef *def, const string &name)
     {
         BBTypeInfo *ti = new BBTypeInfo();
         ti->name = name;
-        ti->nfields = (int)kinds.size();
-        ti->kinds = kinds;
-        ti->vecSizes = vecSizes;
-        ti->vecKinds = vecKinds;
-        VM::ClassBuilder b = vm->def_class(("_t" + name).c_str());
-        for (int i = 0; i < ti->nfields; ++i) b.field(("f" + bb_itoa(i)).c_str());
+        ti->def = def;
+        ti->nfields = def->num_fields - HF_COUNT;
+        if (ti->nfields < 0) ti->nfields = 0;
+        for (int i = 0; i < ti->nfields; ++i)
+        {
+            int kind = KIND_INT, vs = 0, vk = 0;
+            decode_field(def->field_names[i]->chars, kind, vs, vk);
+            ti->kinds.push_back(kind);
+            ti->vecSizes.push_back(vs);
+            ti->vecKinds.push_back(vk);
+        }
+        string gname = def->name->chars;
+        ti->gDef = vm->find_global(gname.c_str());
+        ti->gFirst = vm->def_global((gname + "_first").c_str(), vm->get_global((gname + "_first").c_str()));
+        ti->gLast = vm->def_global((gname + "_last").c_str(), vm->get_global((gname + "_last").c_str()));
+        return ti;
+    }
+
+    int BBRuntime::registerType(const string &name, const vector<int> &kinds,
+                                const vector<int> &vecSizes, const vector<int> &vecKinds)
+    {
+        VM::StructBuilder b = vm->def_struct(("_t" + name).c_str());
+        for (size_t i = 0; i < kinds.size(); ++i)
+            b.field(encode_field((int)i, kinds[i], vecSizes[i], vecKinds[i]).c_str());
         b.field("__prev").field("__next").field("__alive").field("__handle");
-        ti->klass = b.end();
-        ti->gFirst = vm->def_global(("_t" + name + "_first").c_str(), val_nil());
-        ti->gLast = vm->def_global(("_t" + name + "_last").c_str(), val_nil());
+        ObjStructDef *def = b.end();
+        BBTypeInfo *ti = make_info(vm, def, name);
         types.push_back(ti);
-        typeByClass[ti->klass] = ti;
+        typeByDef[def] = ti;
         return (int)types.size() - 1;
+    }
+
+    BBTypeInfo *BBRuntime::typeForDef(ObjStructDef *def)
+    {
+        map<ObjStructDef *, BBTypeInfo *>::iterator it = typeByDef.find(def);
+        if (it != typeByDef.end()) return it->second;
+        if (!def->name || strncmp(def->name->chars, "_t", 2) != 0) return 0;
+        BBTypeInfo *ti = make_info(vm, def, def->name->chars + 2);
+        types.push_back(ti);
+        typeByDef[def] = ti;
+        return ti;
     }
 
     /* ================= command registration ================= */

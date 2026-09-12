@@ -116,10 +116,21 @@ intacta. Fases 1, 2, 3 e 5-A completas; `tests/*.bb` com snapshots a passar;
 performance ao nível do compilador Zen anterior. Os testes `.zen` antigos
 estão em `tests/legacy_zen/`.
 
-## 9. Próximos passos
+## 9. Redução do runtime (12 Set 2026)
 
-1. Fase 4.1: `OP_CONCAT` sem append in-place (aliasing de strings > 128 chars).
-2. Peepholes: ADDI/SUBI, comparações com imediato, intrínsecos de matemática.
-3. `--debug`: bounds check por dimensão nos arrays (agora só o índice achatado).
-4. Fase 5-B (ficheiros, streams, banks).
-5. Rever `test_class_api` e `tests/fuzz`, que ainda compilam código Zen.
+Feito no zenblitz: fibers, processos, classes, closures, upvalues, generics,
+maps, sets, slices, `import` e os builtins da linguagem Zen foram removidos.
+Ficou: dispatch, GC, strings, arrays, buffers, structs (Types), bytecode.
+`OP_CONCAT` já não faz append in-place (semântica de valor). Os Types são
+auto-descritivos no bytecode (os nomes dos campos levam o tipo) e as globais
+com valor (Data, strings) são serializadas, por isso `--dump` / load funciona
+sem o compilador. A VM pode suspender numa nativa (`request_suspend`) para o
+loop da web. Core: 28 000 → 10 000 linhas; opcodes 114 → 69; tipos de
+objecto 17 → 7. fib(30) 93 ms → 54 ms.
+
+## 10. Próximos passos
+
+1. Peepholes: ADDI/SUBI, comparações com imediato, intrínsecos de matemática.
+2. `--debug`: bounds check por dimensão nos arrays (agora só o índice achatado).
+3. Fase 5-B (ficheiros, streams, banks sobre `ObjBuffer`).
+4. Listas e mapas por comandos (`CreateList`, `ListAdd`, ...), se quisermos.

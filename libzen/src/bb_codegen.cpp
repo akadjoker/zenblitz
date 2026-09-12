@@ -636,8 +636,7 @@ namespace bb
         int save = g.top();
         int base = g.allocTemp();
         int a = g.allocTemp();
-        g.loadInt(a, sem_type->structType()->rt_index);
-        (void)ti;
+        g.emitABx(OP_GETGLOBAL, a, ti->gDef);
         g.callGlobal(base, 1, g.rt->g_new);
         return g.finish(base, dest, save);
     }
@@ -682,7 +681,7 @@ namespace bb
         int a = g.allocTemp();
         g.exprInto(expr, a);
         int b = g.allocTemp();
-        g.loadInt(b, sem_type->structType()->rt_index);
+        g.emitABx(OP_GETGLOBAL, b, g.typeOf(sem_type)->gDef);
         g.callGlobal(base, 2, g.rt->g_object);
         return g.finish(base, dest, save);
     }
@@ -1131,7 +1130,7 @@ namespace bb
         int save = g.top();
         int base = g.allocTemp();
         int a = g.allocTemp();
-        g.loadInt(a, sem_struct->rt_index);
+        g.emitABx(OP_GETGLOBAL, a, g.typeOf(sem_struct)->gDef);
         g.callGlobal(base, 1, g.rt->g_deleteEach);
         g.freeTo(save);
     }
@@ -1419,7 +1418,7 @@ namespace bb
             {
                 int t = allocTemp();
                 int ki = f->em.add_constant(val_obj((Obj *)funcObjs[k]));
-                emitABx(OP_CLOSURE, t, ki);
+                emitABx(OP_LOADK, t, ki);
                 emitABx(OP_SETGLOBAL, t, funcDecls[k]->offset);
                 freeTo(t);
             }

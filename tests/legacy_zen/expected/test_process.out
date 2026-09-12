@@ -1,5 +1,0 @@
-File "tests/test_process.zen", line 29
-          draw_text("main",20,20,12,255,255,255,255);
-          ^^^^^^^^^
-Error at 'draw_text': undefined variable (never declared with var/def/class)
-zen: compilation failed.

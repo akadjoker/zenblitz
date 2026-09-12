@@ -6,53 +6,24 @@
 
 namespace zen
 {
-
     /*
-    ** GC Tri-Color (Mark-Sweep incremental):
-    **
-    ** Fases:
-    **   1. MARK — começa nas raízes (stack, globals, open upvalues)
-    **              pinta roots de GRAY, depois processa grays→BLACK
-    **   2. SWEEP — varre a linked list de objectos:
-    **              WHITE → free; GRAY/BLACK → repinta WHITE para próximo ciclo
-    **
-    ** Tri-color invariant:
-    **   "Um objecto BLACK nunca aponta directamente para WHITE"
-    **   Se violar → write barrier pinta o target GRAY
-    **
-    ** Write barrier: quando código muta um campo de um objecto BLACK
-    **   (ex: instance.field = new_string), o GC precisa saber.
-    **   → marca o objecto como GRAY (re-scan no próximo step).
-    **
-    ** Strings interned: tabela separada; strings WHITE sem referências
-    **   são removidas da tabela E libertadas.
+    ** GC — tri-color mark & sweep with epoch flip (see memory.cpp).
     */
-
     struct GC
     {
-        Obj *objects;    /* linked list de TODOS os objectos */
-        Obj *gray_stack; /* lista de objectos gray (para processar) */
+        Obj *objects;    /* linked list of ALL objects */
+        Obj *gray_stack;
         int gray_count;
         int gray_capacity;
-        Obj **gray_list; /* array dinâmico de gray objects */
+        Obj **gray_list;
 
         size_t bytes_allocated;
-        size_t next_gc; /* threshold para próximo ciclo */
+        size_t next_gc;
         size_t pause_saved_next_gc;
         int pause_depth;
 
-        /* Tri-color epoch flip: the numeric values meaning "white" and
-        ** "black" swap after every collection, so all survivors become
-        ** white for the next cycle with zero repainting work. GRAY is
-        ** fixed. Always paint new/protected objects with black_val —
-        ** never the GC_BLACK constant directly. */
         GCColor white_val;
         GCColor black_val;
-        /* Head of the object list at the end of the last collection. Objects
-        ** prepended since then (the "newborn prefix") are the only ones that
-        ** still carry black and must be whitened before marking — see
-        ** gc_collect(). Only ever dereferenced before sweep, and refreshed
-        ** right after it, so it can never dangle. */
         Obj *first_old;
 
         /* String interning table (open addressing) */
@@ -60,20 +31,17 @@ namespace zen
         int string_count;
         int string_capacity;
 
-        /* Back-pointer to VM (for GC trigger from zen_alloc) */
-        void *vm;
+        void *vm; /* back-pointer (GC trigger from zen_alloc) */
 
-        /* Pool allocator — O(1) alloc/free for small objects */
         Arena arena;
     };
 
-    /* API de memória — substitui new/delete/malloc/free */
     void *zen_alloc(GC *gc, size_t size);
-    void *zen_alloc_now(GC *gc, size_t size); /* alloc sem trigger GC */
+    void *zen_alloc_now(GC *gc, size_t size);
     void *zen_realloc(GC *gc, void *ptr, size_t old_size, size_t new_size);
     void zen_free(GC *gc, void *ptr, size_t size);
 
-    /* Criação de objectos (aloca + regista no GC) */
+    /* Object creation (allocates + registers with the GC) */
     ObjString *new_string(GC *gc, const char *chars, int length);
     ObjString *new_string_uninit(GC *gc, int length);
     ObjString *create_string(GC *gc, const char *chars, int length); /* non-interned */
@@ -82,47 +50,26 @@ namespace zen
     ObjString *string_append_inplace(GC *gc, ObjString *a, ObjString *b);
     ObjFunc *new_func(GC *gc);
     ObjNative *new_native(GC *gc, NativeFn fn, int arity, ObjString *name);
-    ObjNative *new_native_generic(GC *gc, GenericNativeFn fn, int generic_arity, int arity, ObjString *name);
     ObjArray *new_array(GC *gc);
-    ObjMap *new_map(GC *gc);
-    ObjClass *new_class(GC *gc, ObjString *name, ObjClass *parent);
-    ObjInstance *new_instance(GC *gc, ObjClass *klass);
-    void destroy_instance(GC *gc, ObjInstance *inst); /* free persistent instance (C++ owned) */
+    ObjStructDef *new_struct_def(GC *gc, ObjString *name);
+    ObjStruct *new_struct(GC *gc, ObjStructDef *def); /* fields start as nil */
 
     /* Array operations */
-    void array_push_slow(GC *gc, ObjArray *arr, Value val); /* grow + push */
+    void array_push_slow(GC *gc, ObjArray *arr, Value val);
     void array_set(GC *gc, ObjArray *arr, int32_t index, Value val);
     Value array_pop(ObjArray *arr);
     void array_insert(GC *gc, ObjArray *arr, int32_t index, Value val);
     void array_remove(ObjArray *arr, int32_t index);
     void array_clear(ObjArray *arr);
     void array_reserve(GC *gc, ObjArray *arr, int32_t cap);
-    int32_t array_find(ObjArray *arr, Value val);          /* -1 if not found */
-    int32_t array_find_int(ObjArray *arr, int32_t target); /* fast unrolled int find */
+    int32_t array_find(ObjArray *arr, Value val);
+    int32_t array_find_int(ObjArray *arr, int32_t target);
     bool array_contains(ObjArray *arr, Value val);
     void array_reverse(ObjArray *arr);
-    void array_sort_int(ObjArray *arr); /* ascending int sort */
+    void array_sort_int(ObjArray *arr);
     void array_copy(GC *gc, ObjArray *dst, ObjArray *src);
     void array_push_n(GC *gc, ObjArray *arr, const Value *vals, int32_t n);
     void array_append(GC *gc, ObjArray *dst, ObjArray *src);
-
-    /* Map operations */
-    bool map_set(GC *gc, ObjMap *map, Value key, Value val);
-    Value map_get(ObjMap *map, Value key, bool *found);
-    bool map_delete(ObjMap *map, Value key);
-    bool map_contains(ObjMap *map, Value key);
-    int32_t map_count(ObjMap *map);
-    void map_clear(GC *gc, ObjMap *map);
-    void map_keys(GC *gc, ObjMap *map, ObjArray *out);   /* collect all keys */
-    void map_values(GC *gc, ObjMap *map, ObjArray *out); /* collect all values */
-
-    /* Set operations */
-    ObjSet *new_set(GC *gc);
-    bool set_add(GC *gc, ObjSet *set, Value key);
-    bool set_contains(ObjSet *set, Value key);
-    bool set_remove(ObjSet *set, Value key);
-    void set_clear(GC *gc, ObjSet *set);
-    int32_t set_count(ObjSet *set);
 
     /* Buffer operations */
     ObjBuffer *new_buffer(GC *gc, BufferType btype, int32_t count);
@@ -139,17 +86,12 @@ namespace zen
     void gc_mark_value(GC *gc, Value v);
     void gc_mark_obj(GC *gc, Obj *obj);
 
-    /* Write barrier — chamar quando um obj BLACK recebe nova referência.
-    ** Compares against the CURRENT epoch's colours (white/black swap every
-    ** collection) — hardcoding GC_BLACK/GC_WHITE here would fire backwards
-    ** on odd epochs and grey out white parents, hiding their children from
-    ** the mark phase. */
+    /* Write barrier — call when a BLACK object receives a new reference. */
     inline void gc_write_barrier(GC *gc, Obj *parent, Obj *child)
     {
         if (parent->color == gc->black_val && child && child->color == gc->white_val)
         {
             parent->color = GC_GRAY;
-            /* adiciona ao gray list para re-scan */
             if (gc->gray_count >= gc->gray_capacity)
             {
                 gc->gray_capacity = gc->gray_capacity < 8 ? 8 : gc->gray_capacity * 2;
@@ -160,7 +102,6 @@ namespace zen
         }
     }
 
-    /* Inline fast paths — hot for game loops */
     inline void array_push(GC *gc, ObjArray *arr, Value val)
     {
         if (__builtin_expect(arr->end != arr->cap_end, 1))
@@ -175,20 +116,15 @@ namespace zen
         }
     }
 
-    /* Push int without GC barrier — caller knows it's not OBJ */
     inline void array_push_int(GC *gc, ObjArray *arr, int32_t n)
     {
         Value v;
         v.type = VAL_INT;
         v.as.integer = n;
         if (__builtin_expect(arr->end != arr->cap_end, 1))
-        {
             *arr->end++ = v;
-        }
         else
-        {
             array_push_slow(gc, arr, v);
-        }
     }
 
     inline Value array_get(ObjArray *arr, int32_t index)
@@ -198,16 +134,13 @@ namespace zen
         return val_nil();
     }
 
-    /* Pop without branch — caller guarantees count > 0 */
     inline Value array_pop_unsafe(ObjArray *arr)
     {
         return *--arr->end;
     }
 
-    /* String interning */
     ObjString *find_interned(GC *gc, const char *chars, int length, uint32_t hash);
 
-    /* Convenience: auto-hash */
     inline ObjString *intern_string(GC *gc, const char *chars, int length)
     {
         return intern_string(gc, chars, length, hash_string(chars, length));

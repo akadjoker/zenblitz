@@ -12,6 +12,11 @@
 
 namespace zen
 {
+    void install_runtime(VM *vm)
+    {
+        bb::bb_runtime_for(vm);
+    }
+
     Compiler::Compiler() : debug_(false) { error_[0] = '\0'; }
     Compiler::~Compiler() {}
 

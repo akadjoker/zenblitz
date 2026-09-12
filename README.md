@@ -6,8 +6,13 @@ The language it compiles is **Blitz Basic** (Blitz3D syntax): the compiler
 front-end is a port of the original Blitz3D compiler (zlib licence) with the
 x86 back-end replaced by a Zen bytecode emitter.
 
-The runtime (VM, GC, emitter, bytecode dump/load, builtin modules) is the same
-one the previous Zen-syntax compiler used. Only the front-end changed.
+The runtime is the Zen VM reduced to what Blitz needs: register machine with
+computed-goto dispatch, tri-color GC, interned strings, arrays, typed buffers
+(banks), plain record types, bytecode dump/load. Fibers, processes, classes,
+closures, maps, sets and the Zen builtin modules were removed (about 10 000
+lines of core, down from 28 000). The interpreter can suspend at a native
+call (`VM::request_suspend`) and continue later, which is how a Blitz main
+loop will yield to the browser on the web build.
 
 ## Example
 
@@ -75,11 +80,20 @@ The mapping from Blitz constructs to VM bytecode, the planned phases (files,
 banks, graphics) and the known differences from Blitz3D are in
 `PLANO_BLITZ.md`.
 
+## Bytecode
+
+```bash
+./bin/zenblitz --dump game.zbc game.bb   # compile to bytecode
+./bin/zenblitz game.zbc                  # run it (no source needed)
+```
+
+Types, Data and global initial values are stored in the file; the Blitz
+natives are re-registered by the loader.
+
 ## Known differences from Blitz3D
 
 - Integers are 64-bit and floats are 64-bit (no 32-bit overflow).
 - Very large/small floats print as `1e+10` instead of `1e+010`.
-- Integer division by zero yields 0 instead of a runtime error.
 - No IDE/debugger; runtime errors report file and line.
 
 ## Source layout
@@ -90,7 +104,8 @@ banks, graphics) and the known differences from Blitz3D are in
 - `libzen/src/bb_runtime.*`, `bb_cmds.cpp` — Type lists, Data, conversions,
   and the Blitz command set registered as natives.
 - `libzen/src/compiler.cpp` — `zen::Compiler::compile()` entry point.
-- `libzen/src/vm*.cpp`, `memory.cpp`, `emitter.cpp`, `bytecode.cpp` — the VM.
+- `libzen/src/vm.cpp`, `vm_dispatch.cpp`, `memory.cpp`, `emitter.cpp`,
+  `bytecode.cpp` — the VM (about 3 300 lines).
 
 ## License
 

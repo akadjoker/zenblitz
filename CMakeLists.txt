@@ -1,11 +1,7 @@
 cmake_minimum_required(VERSION 3.10)
 project(zen LANGUAGES CXX)
 
-# This repository is the core only: libzen (compiler + VM + builtin libs)
-# and the plain `zen` CLI. Native modules (raylib, SDL2, GLFW, OpenGL,
-# audio, sqlite, dnn, stb_*, gif, canvas), the zen_game / zen_gl runners and
-# the graphics demos live in the separate zenvm-modules repository, which
-# consumes this one as a git submodule via add_subdirectory().
+# zenblitz: Blitz Basic compiler + the Zen VM runtime (libzen) + the CLI.
 
 set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -41,18 +37,11 @@ if(ZEN_BUILD_CLI)
     add_subdirectory(cli)
 endif()
 
-# --- Class API tests (C++ ↔ Script vtable) ---
-add_subdirectory(tests/test_class_api)
-
-# --- Fuzzer (requires clang + -DZEN_BUILD_FUZZ=ON) ---
-option(ZEN_BUILD_FUZZ "Build libFuzzer harness" OFF)
-add_subdirectory(tests/fuzz)
-
-# --- Snapshot tests for tests/*.zen (ctest integration) ---
+# --- Snapshot tests for tests/*.bb (ctest integration) ---
 # Run with:
 #   cd build && ctest --output-on-failure
 # Refresh snapshots with:
-#   tests/run_tests.sh ./bin/zen --update
+#   tests/run_tests.sh ./bin/zenblitz --update
 enable_testing()
 if(ZEN_BUILD_CLI AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_tests.sh")
     add_test(

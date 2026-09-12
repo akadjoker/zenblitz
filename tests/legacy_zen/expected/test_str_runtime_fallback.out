@@ -1,5 +1,0 @@
-Label[yes]
-x=Label[yes]
-Label[no]
-y=Label[no]
-ok: __str__ runtime fallback

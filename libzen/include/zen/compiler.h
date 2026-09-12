@@ -16,6 +16,11 @@ namespace zen
 {
     class VM;
 
+    /* Register the Blitz command set and runtime helpers as VM globals.
+       compile() does this on first use; call it explicitly before loading
+       precompiled bytecode so the native globals exist in the same slots. */
+    void install_runtime(VM *vm);
+
     class Compiler
     {
     public:
