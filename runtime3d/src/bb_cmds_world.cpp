@@ -40,7 +40,7 @@ namespace bb3d
     static ct::HashMap<long long, engine::Entity *> g_entities;
     static long long g_next_entity = 0;
 
-    static engine::Entity *entity_of(long long h)
+    engine::Entity *entity_of(long long h)
     {
         engine::Entity **found = g_entities.find(h);
         return found ? *found : nullptr;

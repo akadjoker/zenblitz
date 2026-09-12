@@ -134,6 +134,10 @@ namespace engine
             float fogFar;
             float morph;
             std::int32_t pad[2];
+            float texMatrix[4]; // xy = scale, zw = position
+            float texRotation;
+            std::int32_t texMatrixUsed;
+            std::int32_t pad2[2];
             float lightPosType[kMaxRenderLights][4];
             float lightColorRange[kMaxRenderLights][4];
             float lightDir[kMaxRenderLights][4];

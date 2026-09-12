@@ -1,7 +1,7 @@
 #include "engine/MD2Rep.h"
 #include "engine/Md2Norms.h"
+#include <SDL2/SDL_rwops.h>
 #include <ct/hashmap.hpp>
-#include <cstdio>
 #include <cstdint>
 #include <cstring>
 
@@ -24,23 +24,23 @@ namespace engine
         // "IDP2" on disk, read little-endian into an int
         const std::int32_t kMd2Magic = ((std::int32_t)'2' << 24) | ((std::int32_t)'P' << 16) | ((std::int32_t)'D' << 8) | (std::int32_t)'I';
 
-        bool readAt(FILE *in, long offset, void *buf, size_t bytes)
+        bool readAt(SDL_RWops *in, long offset, void *buf, size_t bytes)
         {
-            if (fseek(in, offset, SEEK_SET) != 0) return false;
-            return fread(buf, 1, bytes, in) == bytes;
+            if (SDL_RWseek(in, offset, RW_SEEK_SET) < 0) return false;
+            return SDL_RWread(in, buf, 1, bytes) == bytes;
         }
     }
 
     MD2Rep::MD2Rep(const std::string &f)
     {
-        FILE *in = fopen(f.c_str(), "rb");
+        SDL_RWops *in = SDL_RWFromFile(f.c_str(), "rb");
         if (!in) return;
 
         Md2Header header;
-        if (fread(&header, 1, sizeof(header), in) != sizeof(header) || header.magic != kMd2Magic || header.version != 8 ||
+        if (SDL_RWread(in, &header, 1, sizeof(header)) != sizeof(header) || header.magic != kMd2Magic || header.version != 8 ||
             header.numVertices <= 0 || header.numTriangles <= 0 || header.numFrames <= 0 || header.numTexCoords <= 0)
         {
-            fclose(in);
+            SDL_RWclose(in);
             return;
         }
 
@@ -51,7 +51,7 @@ namespace engine
         if (!readAt(in, header.offsetTexCoords, fileUvs.data(), fileUvs.size() * sizeof(Md2FileUv)) ||
             !readAt(in, header.offsetTriangles, fileTris.data(), fileTris.size() * sizeof(Md2FileTri)))
         {
-            fclose(in);
+            SDL_RWclose(in);
             return;
         }
 
@@ -96,16 +96,16 @@ namespace engine
         ct::Vector<Md2FileVert> fileVerts;
         fileVerts.resize(header.numVertices);
 
-        if (fseek(in, header.offsetFrames, SEEK_SET) != 0) { mFrames = 0; fclose(in); return; }
+        if (SDL_RWseek(in, header.offsetFrames, RW_SEEK_SET) < 0) { mFrames = 0; SDL_RWclose(in); return; }
         for (int k = 0; k < mFrames; ++k)
         {
             float scale[3], trans[3];
             char name[16];
-            if (fread(scale, 1, 12, in) != 12 || fread(trans, 1, 12, in) != 12 || fread(name, 1, 16, in) != 16 ||
-                fread(fileVerts.data(), 1, fileVerts.size() * sizeof(Md2FileVert), in) != fileVerts.size() * sizeof(Md2FileVert))
+            if (SDL_RWread(in, scale, 1, 12) != 12 || SDL_RWread(in, trans, 1, 12) != 12 || SDL_RWread(in, name, 1, 16) != 16 ||
+                SDL_RWread(in, fileVerts.data(), 1, fileVerts.size() * sizeof(Md2FileVert)) != fileVerts.size() * sizeof(Md2FileVert))
             {
                 mFrames = 0;
-                fclose(in);
+                SDL_RWclose(in);
                 return;
             }
             // Quake's axes -> Blitz's: (x,y,z) file = (z,x,y) engine, applied
@@ -124,7 +124,7 @@ namespace engine
                 mBox.update(blitz::Vector(out[j].x, out[j].y, out[j].z));
             }
         }
-        fclose(in);
+        SDL_RWclose(in);
     }
 
     MD2Rep::~MD2Rep() {}

@@ -1,15 +1,18 @@
 #include "engine/LoaderB3D.h"
 #include "engine/Animator.h"
+#include "engine/Texture.h"
+#include <SDL2/SDL_rwops.h>
 #include <ct/vector.hpp>
-#include <cstdio>
 #include <cstring>
 
 namespace engine
 {
     namespace
     {
-        FILE *g_in;
+        SDL_RWops *g_in;
+        gpu::Device *g_dev;
         ct::Vector<long> g_chunkStack;
+        ct::Vector<Texture *> g_textures;
         ct::Vector<Brush> g_brushes;
         ct::Vector<Object *> g_bones;
 
@@ -20,6 +23,8 @@ namespace engine
 
         void clearState()
         {
+            for (size_t k = 0; k < g_textures.size(); ++k) Texture::release(g_textures[k]);
+            g_textures.clear();
             g_bones.clear();
             g_brushes.clear();
             g_chunkStack.clear();
@@ -28,24 +33,24 @@ namespace engine
         int readChunk()
         {
             int header[2];
-            if (fread(header, 8, 1, g_in) < 1) return 0;
-            g_chunkStack.push_back(ftell(g_in) + header[1]);
+            if (SDL_RWread(g_in, header, 8, 1) < 1) return 0;
+            g_chunkStack.push_back((long)SDL_RWtell(g_in) + header[1]);
             return swapEndian(header[0]);
         }
 
         void exitChunk()
         {
-            fseek(g_in, g_chunkStack[g_chunkStack.size() - 1], SEEK_SET);
+            SDL_RWseek(g_in, g_chunkStack[g_chunkStack.size() - 1], RW_SEEK_SET);
             g_chunkStack.pop_back();
         }
 
         long chunkSize()
         {
-            return g_chunkStack[g_chunkStack.size() - 1] - ftell(g_in);
+            return g_chunkStack[g_chunkStack.size() - 1] - (long)SDL_RWtell(g_in);
         }
 
-        void readBytes(void *buf, int n) { size_t r = fread(buf, n, 1, g_in); (void)r; }
-        void skipBytes(int n) { fseek(g_in, n, SEEK_CUR); }
+        void readBytes(void *buf, int n) { size_t r = SDL_RWread(g_in, buf, n, 1); (void)r; }
+        void skipBytes(int n) { SDL_RWseek(g_in, n, RW_SEEK_CUR); }
         int readInt() { int n; readBytes(&n, 4); return n; }
         void readIntArray(int t[], int n) { readBytes(t, n * 4); }
         float readFloat() { float n; readBytes(&n, 4); return n; }
@@ -76,16 +81,23 @@ namespace engine
         {
             while (chunkSize())
             {
-                readString();
-                readInt();
-                readInt();
+                std::string name = readString();
+                int flags = readInt();
+                int blend = readInt();
                 float pos[2], scl[2];
                 readFloatArray(pos, 2);
                 readFloatArray(scl, 2);
-                readFloat();
-                /* BrushTexture not wired to a real GPU texture load here yet
-                   (LoadTexture integration comes with the texture commands);
-                   the chunk is still consumed so parsing stays in sync. */
+                float rot = readFloat();
+
+                Texture *tex = g_dev ? Texture::load(name, flags & 0xffff) : nullptr;
+                if (tex)
+                {
+                    tex->setBlend(blend);
+                    if (pos[0] != 0 || pos[1] != 0) tex->setPosition(pos[0], pos[1]);
+                    if (scl[0] != 1 || scl[1] != 1) tex->setScale(scl[0], scl[1]);
+                    if (rot != 0) tex->setRotation(rot);
+                }
+                g_textures.push_back(tex);
             }
         }
 
@@ -110,6 +122,15 @@ namespace engine
                 bru.setShininess(shi);
                 bru.setBlend(blend);
                 bru.setFX(fx);
+
+                if (g_dev)
+                {
+                    for (int k = 0; k < 8; ++k)
+                    {
+                        if (texId[k] < 0 || (size_t)texId[k] >= g_textures.size() || !g_textures[texId[k]]) continue;
+                        bru.setTexture(k, BrushTexture::fromTexture(*g_dev, g_textures[texId[k]], 0));
+                    }
+                }
 
                 g_brushes.push_back(bru);
             }
@@ -287,26 +308,30 @@ namespace engine
         }
     }
 
-    MeshModel *LoaderB3D::load(const std::string &f, const Transform &conv, int hint)
+    MeshModel *LoaderB3D::load(const std::string &f, const Transform &conv, int hint, gpu::Device *dev)
     {
         (void)conv; (void)hint;
 
-        g_in = fopen(f.c_str(), "rb");
+        g_in = SDL_RWFromFile(f.c_str(), "rb");
         if (!g_in) return nullptr;
 
+        g_dev = dev;
         clearState();
+
+        size_t slash = f.find_last_of("/\\");
+        setTexturePath(slash == std::string::npos ? std::string() : f.substr(0, slash));
 
         int tag = readChunk();
         if (tag != 'BB3D')
         {
-            fclose(g_in);
+            SDL_RWclose(g_in);
             return nullptr;
         }
 
         int version = readInt();
         if (version > 1)
         {
-            fclose(g_in);
+            SDL_RWclose(g_in);
             return nullptr;
         }
 
@@ -321,8 +346,9 @@ namespace engine
             }
             exitChunk();
         }
-        fclose(g_in);
+        SDL_RWclose(g_in);
 
+        setTexturePath(std::string());
         clearState();
 
         return obj ? obj->getModel()->getMeshModel() : nullptr;

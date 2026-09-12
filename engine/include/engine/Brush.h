@@ -2,6 +2,7 @@
 #define ENGINE_BRUSH_H
 
 #include "engine/Geom.h"
+#include "engine/Texture.h"
 #include "gpu/GPU.h"
 
 namespace engine
@@ -38,6 +39,27 @@ namespace engine
         int blend = BlendReplace;
         int flags = 0;
         bool transparent = false;
+
+        // BrushTexture/EntityTexture: uploads `frame` if needed and copies
+        // the Texture's transform/blend/flags - the same fields the
+        // original's TexState carried through to gxScene.
+        static BrushTexture fromTexture(gpu::Device &dev, Texture *tex, int frame)
+        {
+            BrushTexture bt;
+            if (!tex) return bt;
+            tex->ensureUploaded(dev, frame);
+            bt.handle = tex->handle(frame);
+            bt.transparent = tex->isTransparent();
+            bt.blend = tex->getBlend();
+            bt.flags = tex->getFlags();
+            if (tex->hasMatrix())
+            {
+                float sx, sy, tx, ty, rot;
+                tex->getMatrix(sx, sy, tx, ty, rot);
+                bt.uScale = sx; bt.vScale = sy; bt.uPos = tx; bt.vPos = ty; bt.rotation = rot;
+            }
+            return bt;
+        }
     };
 
     class Brush

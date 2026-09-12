@@ -35,6 +35,7 @@ add_library(zenblitz_engine STATIC
     src/world/Md2Norms.cpp
     src/world/MD2Rep.cpp
     src/world/MD2Model.cpp
+    src/world/Texture.cpp
 )
 
 target_include_directories(zenblitz_engine PUBLIC

@@ -20,6 +20,10 @@ namespace engine
         "  float u_fogNear;\n"
         "  float u_fogFar;\n"
         "  float u_morph;\n"
+        "  vec4 u_texMatrix;\n" // xy = scale, zw = position
+        "  float u_texRotation;\n"
+        "  int u_texMatrixUsed;\n"
+        "  int u_pad2[2];\n"
         "  vec4 u_lightPosType[4];\n"
         "  vec4 u_lightColorRange[4];\n"
         "  vec4 u_lightDir[4];\n"
@@ -95,7 +99,13 @@ namespace engine
         "void main(){\n"
         "  vec4 base = u_color;\n"
         "  if ((u_flags & FX_VERTEXCOLOR) != 0) base *= v_color;\n"
-        "  vec4 tex = texture(u_texture, v_uv);\n"
+        "  vec2 uv = v_uv;\n"
+        "  if (u_texMatrixUsed != 0) {\n"
+        "    float c = cos(u_texRotation), s = sin(u_texRotation);\n"
+        "    uv = vec2(uv.x*c*u_texMatrix.x - uv.y*s*u_texMatrix.y, uv.x*s*u_texMatrix.x + uv.y*c*u_texMatrix.y);\n"
+        "    uv += u_texMatrix.zw;\n"
+        "  }\n"
+        "  vec4 tex = texture(u_texture, uv);\n"
         "  base *= tex;\n"
         "  if ((u_flags & FX_ALPHATEST) != 0 && base.a < 0.5) discard;\n"
         "  vec3 n;\n"
@@ -433,6 +443,22 @@ namespace engine
         u.fogNear = mPending.fogNear;
         u.fogFar = mPending.fogFar;
         u.flags = brush.getFX();
+
+        u.texMatrix[0] = u.texMatrix[1] = 1.0f;
+        u.texMatrix[2] = u.texMatrix[3] = 0.0f;
+        u.texRotation = 0.0f;
+        u.texMatrixUsed = 0;
+        if (brush.getTextureCount() > 0)
+        {
+            const BrushTexture &bt = brush.getTexture(0);
+            u.texMatrix[0] = bt.uScale;
+            u.texMatrix[1] = bt.vScale;
+            u.texMatrix[2] = bt.uPos;
+            u.texMatrix[3] = bt.vPos;
+            u.texRotation = bt.rotation;
+            u.texMatrixUsed = (bt.uScale != 1.0f || bt.vScale != 1.0f || bt.uPos != 0.0f || bt.vPos != 0.0f || bt.rotation != 0.0f) ? 1 : 0;
+        }
+        u.pad2[0] = u.pad2[1] = 0;
 
         u.lightCount = mLightBlock.count;
         std::memcpy(u.lightPosType, mLightBlock.posType, sizeof(u.lightPosType));
