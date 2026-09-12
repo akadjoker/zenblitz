@@ -31,6 +31,9 @@ namespace engine
             Brush brush;
             int vpX, vpY, vpW, vpH;
             int boneSlot;
+            // 0 = normal draw; else a camera viewport clear: bit 1 colour,
+            // bit 2 depth (CameraClsMode). surface is null for clears.
+            int clear;
         };
 
         bool init(gpu::Device &dev, kx::ShaderDialect dialect) { return mRenderer.init(dev, dialect); }
@@ -68,6 +71,13 @@ namespace engine
 
         MeshRenderer mRenderer;
         Transform mCamTform;
+        Vector mAmbient{0.1f, 0.1f, 0.1f};
+
+    public:
+        // AmbientLight - 0..1 per channel
+        void setAmbient(const Vector &rgb) { mAmbient = rgb; }
+
+    private:
 
         ct::Vector<Model *> mOrdMods, mUnordMods;
         ct::Vector<Camera *> mCameras;

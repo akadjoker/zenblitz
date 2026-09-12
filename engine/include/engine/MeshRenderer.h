@@ -50,6 +50,15 @@ namespace engine
         // the vertex buffer as is.
         void draw(gpu::Device &dev, int index, const Surface *surface, const Brush &brush, int boneSlot);
 
+        // Camera viewport clear (CameraClsColor/CameraClsMode): stages a
+        // draw of a full-viewport quad at far depth in the given colour.
+        // No render pass may be open; occupies a prepare() index like any
+        // other draw call. drawClear issues it inside the pass, with the
+        // viewport already set - the viewport bounds the clear. Colour
+        // and/or depth writes are enabled per the flags.
+        void prepareClear(const Vector &color);
+        void drawClear(gpu::Device &dev, int index, bool clearColor, bool clearDepth);
+
     private:
         struct PipelineKey
         {
@@ -57,10 +66,12 @@ namespace engine
             bool doubleSided = false;
             bool hasTexture = false;
             bool skinned = false;
+            bool clear = false, clearColor = false, clearDepth = false;
             std::uint32_t key() const
             {
                 return (std::uint32_t)blend | (doubleSided ? 0x100u : 0u) | (hasTexture ? 0x200u : 0u) |
-                       (skinned ? 0x400u : 0u);
+                       (skinned ? 0x400u : 0u) | (clear ? 0x800u : 0u) | (clearColor ? 0x1000u : 0u) |
+                       (clearDepth ? 0x2000u : 0u);
             }
         };
         struct CachedPipeline
@@ -137,7 +148,13 @@ namespace engine
         };
         BoundState mBound;
 
+        // full-screen NDC quad at far depth, drawn under the camera's
+        // viewport for CameraClsColor/CameraClsMode
+        Surface mClearQuad;
+
         const CachedPipeline *pipelineFor(const PipelineKey &pk);
+        void bindAndDraw(gpu::Device &dev, const CachedPipeline *cp, int index, const Surface *surface,
+                         gpu::TextureHandle tex, int boneSlot);
         bool ensureBuffer(gpu::Device &dev, gpu::BufferHandle &buffer, std::uint64_t &capacity,
                           std::uint64_t needed, const char *debugName);
     };

@@ -185,7 +185,23 @@ namespace engine
         texDesc.debugName = "meshrenderer.white";
         mWhiteTexture = dev.createTexture(texDesc);
 
-        return mSampler.valid() && mWhiteTexture.valid();
+        // clear quad: clip-space corners at z=+1 (NDC far), drawn with an
+        // identity MVP; cull is off on its pipeline so winding is moot
+        mClearQuad.clear(true, true);
+        static const float corners[4][2] = {{-1, -1}, {1, -1}, {1, 1}, {-1, 1}};
+        for (int i = 0; i < 4; ++i)
+        {
+            Surface::Vertex v;
+            v.coords = Vector(corners[i][0], corners[i][1], 1.0f);
+            v.normal = Vector(0, 0, -1);
+            mClearQuad.addVertex(v);
+        }
+        Surface::Triangle t1{{0, 1, 2}}, t2{{0, 2, 3}};
+        mClearQuad.addTriangle(t1);
+        mClearQuad.addTriangle(t2);
+        bool quadOk = mClearQuad.ensureGpu(dev);
+
+        return mSampler.valid() && mWhiteTexture.valid() && quadOk;
     }
 
     bool MeshRenderer::ensureBuffer(gpu::Device &dev, gpu::BufferHandle &buffer, std::uint64_t &capacity,
@@ -216,6 +232,7 @@ namespace engine
         if (mBoneBuffer.valid()) mGpu->destroy(mBoneBuffer);
         if (mSampler.valid()) mGpu->destroy(mSampler);
         if (mWhiteTexture.valid()) mGpu->destroy(mWhiteTexture);
+        mClearQuad.freeGpu(*mGpu);
         mUniformBuffer = gpu::BufferHandle();
         mBoneBuffer = gpu::BufferHandle();
         mUniformBufferCapacity = mBoneBufferCapacity = 0;
@@ -331,6 +348,17 @@ namespace engine
             break;
         }
 
+        if (pk.clear)
+        {
+            // viewport clear: always passes depth, writes far depth and/or
+            // colour per CameraClsMode, ignores winding and blending
+            desc.depthStencil.depthCompare = gpu::CompareOp::Always;
+            desc.depthStencil.depthWriteEnabled = pk.clearDepth;
+            ct0.writeMask = pk.clearColor ? gpu::ColorWriteAll : 0;
+            ct0.blendEnabled = false;
+            desc.raster.cullMode = gpu::CullMode::None;
+        }
+
         CachedPipeline cached;
         cached.key = key;
         cached.pipeline = mGpu->createPipeline(desc);
@@ -397,6 +425,41 @@ namespace engine
         }
     }
 
+    void MeshRenderer::prepareClear(const Vector &color)
+    {
+        Uniforms u;
+        std::memset(&u, 0, sizeof(u));
+        Matrix4 identity = Matrix4::identity();
+        std::memcpy(u.mvp, identity.data(), sizeof(u.mvp));
+        std::memcpy(u.model, identity.data(), sizeof(u.model));
+        u.color[0] = color.x;
+        u.color[1] = color.y;
+        u.color[2] = color.z;
+        u.color[3] = 1.0f;
+        u.flags = FxFullbright;
+        u.fogMode = FogNone;
+
+        std::uint64_t offset = (std::uint64_t)mStagedCount * mUniformStride;
+        if (mStaged.size() < offset + mUniformStride) mStaged.resize(offset + mUniformStride);
+        std::memcpy(&mStaged[offset], &u, sizeof(Uniforms));
+        ++mStagedCount;
+    }
+
+    void MeshRenderer::drawClear(gpu::Device &dev, int index, bool clearColor, bool clearDepth)
+    {
+        if (!clearColor && !clearDepth) return;
+        if (index < 0 || (std::uint32_t)index >= mStagedCount) return;
+
+        PipelineKey pk;
+        pk.clear = true;
+        pk.clearColor = clearColor;
+        pk.clearDepth = clearDepth;
+
+        const CachedPipeline *cp = pipelineFor(pk);
+        if (!cp->pipeline.valid()) return;
+        bindAndDraw(dev, cp, index, &mClearQuad, mWhiteTexture, -1);
+    }
+
     void MeshRenderer::draw(gpu::Device &dev, int index, const Surface *surface, const Brush &brush, int boneSlot)
     {
         if (surface->gpuIndexCount() <= 0) return;
@@ -415,6 +478,13 @@ namespace engine
         gpu::TextureHandle tex = pk.hasTexture ? brush.getTexture(0).handle : mWhiteTexture;
         if (!tex.valid()) tex = mWhiteTexture;
 
+        bindAndDraw(dev, cp, index, surface, tex, boneSlot);
+    }
+
+    void MeshRenderer::bindAndDraw(gpu::Device &dev, const CachedPipeline *cp, int index, const Surface *surface,
+                                   gpu::TextureHandle tex, int boneSlot)
+    {
+        const bool skinned = boneSlot >= 0;
         // the GL backend re-issues glUseProgram/glBindTexture/glBindBuffer
         // on every call with no caching of its own, so skip binds that
         // haven't changed since the last draw this frame
@@ -425,7 +495,7 @@ namespace engine
         }
         dev.bindUniformBuffer((std::uint32_t)cp->uniformsSlot, mUniformBuffer,
                               (std::uint64_t)index * mUniformStride, sizeof(Uniforms));
-        if (pk.skinned && cp->bonesSlot >= 0)
+        if (skinned && cp->bonesSlot >= 0)
             dev.bindUniformBuffer((std::uint32_t)cp->bonesSlot, mBoneBuffer,
                                   (std::uint64_t)boneSlot * mBoneStride, kMaxGpuBones * sizeof(Matrix4));
         if (tex.value() != mBound.texture)

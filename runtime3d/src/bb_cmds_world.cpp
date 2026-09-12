@@ -307,12 +307,9 @@ namespace bb3d
 
     static int c_AmbientLight(VM *vm, Value *args, int nargs)
     {
-        (void)vm; (void)nargs;
-        (void)args;
-        /* World::render's per-camera ambient is set to a fixed 0.1,0.1,0.1
-           for now - see World::render(Camera*,Mirror*). Wiring this per
-           world requires passing the value through; deferred until a
-           sample actually needs a non-default ambient. */
+        (void)nargs;
+        world_for(vm)->setAmbient(engine::Vector(arg_float(args[0]) / 255.0f, arg_float(args[1]) / 255.0f,
+                                                 arg_float(args[2]) / 255.0f));
         return 0;
     }
 
@@ -349,6 +346,15 @@ namespace bb3d
         engine::Entity *e = entity_of(arg_int(args[0]));
         engine::Camera *cam = e ? e->getCamera() : nullptr;
         if (cam) cam->setClsColor(engine::Vector(arg_float(args[1]) / 255.0f, arg_float(args[2]) / 255.0f, arg_float(args[3]) / 255.0f));
+        return 0;
+    }
+
+    static int c_CameraClsMode(VM *vm, Value *args, int nargs)
+    {
+        (void)vm; (void)nargs;
+        engine::Entity *e = entity_of(arg_int(args[0]));
+        engine::Camera *cam = e ? e->getCamera() : nullptr;
+        if (cam) cam->setClsMode(arg_int(args[1]) != 0, arg_int(args[2]) != 0);
         return 0;
     }
 
@@ -442,6 +448,7 @@ namespace bb3d
         {"CameraZoom%camera#zoom", c_CameraZoom},
         {"CameraViewport%camera%x%y%width%height", c_CameraViewport},
         {"CameraClsColor%camera%red%green%blue", c_CameraClsColor},
+        {"CameraClsMode%camera%cls_color%cls_zbuffer", c_CameraClsMode},
 
         {"LightColor%light%red%green%blue", c_LightColor},
         {"LightRange%light#range", c_LightRange},

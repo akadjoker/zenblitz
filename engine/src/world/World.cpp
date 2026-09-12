@@ -341,6 +341,21 @@ namespace engine
         {
             Camera *cam = mCameras[k];
 
+            // Camera::beginRenderFrame in the original: clear this camera's
+            // viewport (colour and/or depth per CameraClsMode) once, before
+            // its mirrors and main pass
+            int clear = (cam->getClsColorEnabled() ? 1 : 0) | (cam->getClsZEnabled() ? 2 : 0);
+            if (clear)
+            {
+                mRenderer.prepareClear(cam->getClsColor());
+                DrawCall dc;
+                dc.surface = nullptr;
+                cam->getViewport(&dc.vpX, &dc.vpY, &dc.vpW, &dc.vpH);
+                dc.boneSlot = -1;
+                dc.clear = clear;
+                mDrawCalls.push_back(dc);
+            }
+
             for (size_t mi = 0; mi < mMirrors.size(); ++mi)
                 render(cam, mMirrors[mi], dev);
 
@@ -381,7 +396,7 @@ namespace engine
                                     aspect, cam->getFrustumNear(), cam->getFrustumFar());
 
         mPendingCamera.viewProjection = proj * view;
-        mPendingCamera.ambient = Vector(0.1f, 0.1f, 0.1f);
+        mPendingCamera.ambient = mAmbient;
         mPendingCamera.fogMode = cam->getFogMode();
         mPendingCamera.fogColor = cam->getFogColor();
         mPendingCamera.fogNear = cam->getFogNear();
@@ -440,6 +455,7 @@ namespace engine
             dc.vpX = mPendingCamera.vpX; dc.vpY = mPendingCamera.vpY;
             dc.vpW = mPendingCamera.vpW; dc.vpH = mPendingCamera.vpH;
             dc.boneSlot = mod->boneSlot();
+            dc.clear = 0;
             mDrawCalls.push_back(dc);
         }
         q.clear();
@@ -487,7 +503,10 @@ namespace engine
                 dev.setViewport(vp);
                 lastVpX = dc.vpX; lastVpY = dc.vpY; lastVpW = dc.vpW; lastVpH = dc.vpH;
             }
-            mRenderer.draw(dev, (int)k, dc.surface, dc.brush, dc.boneSlot);
+            if (dc.clear)
+                mRenderer.drawClear(dev, (int)k, (dc.clear & 1) != 0, (dc.clear & 2) != 0);
+            else
+                mRenderer.draw(dev, (int)k, dc.surface, dc.brush, dc.boneSlot);
         }
     }
 }
