@@ -59,3 +59,22 @@ if(ZEN_BUILD_CLI AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_tests.sh")
         LABELS "snapshot"
     )
 endif()
+
+# --- zenblitz3d: the engine build (window, input, 2D/3D rendering) ---
+# OFF by default so every existing target (zenblitz, zenblitz-rt, and every
+# CI job — Android, Emscripten, MSVC included) keeps building without SDL or
+# a GPU backend, exactly as verified today. See PLANO_ENGINE.md.
+option(ZEN_BUILD_ENGINE "Build zenblitz3d (engine + SDL + GPU)" OFF)
+if(ZEN_BUILD_ENGINE)
+    set(GPU_BUILD_OPENGL ON CACHE BOOL "" FORCE)
+    set(GPU_BUILD_SDL ON CACHE BOOL "" FORCE)
+    set(GPU_BUILD_DEMOS OFF CACHE BOOL "" FORCE)
+    set(GPU_BUILD_OPENGL_TESTS OFF CACHE BOOL "" FORCE)
+    set(MATHC_NATIVE_ARCH OFF CACHE BOOL "" FORCE) # -march=native would break other machines/CI
+    set(MATHC_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(MATHC_BUILD_BENCH OFF CACHE BOOL "" FORCE)
+    add_subdirectory(extern/GPU/gpu)
+    add_subdirectory(extern/math)
+    add_subdirectory(engine)
+    add_subdirectory(runtime3d)
+endif()

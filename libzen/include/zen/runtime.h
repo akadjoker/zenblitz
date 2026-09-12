@@ -7,6 +7,8 @@
 ** runtimes) include this instead of compiler.h.
 */
 
+#include "object.h" /* NativeFn */
+
 namespace zen
 {
     class VM;
@@ -24,6 +26,18 @@ namespace zen
        A missing directory is not an error; returns false only on a
        malformed .decls, with the reason in `err`. */
     bool install_userlibs(VM *vm, const char *dir, char *err = nullptr, int err_len = 0);
+
+    /* A command declaration in the Blitz signature format the parser
+       already understands (see bb_cmds.cpp for examples):
+       return-tag name then a tag+name per parameter, tags %#$ for
+       int/float/string, "=" for a default value. E.g.
+       "%CreateCube%parent=0" — an engine (runtime3d) registers its comands
+       (Graphics, DrawImage, CreateCube, ...) this way, exactly like the
+       console command set install_runtime() installs, so the compiler
+       treats them identically — no separate mechanism, no header from
+       inside libzen needed. Call after install_runtime(). */
+    struct CommandDecl { const char *sig; NativeFn fn; };
+    void install_commands(VM *vm, const CommandDecl *cmds, int count);
 }
 
 #endif /* ZEN_RUNTIME_H */
