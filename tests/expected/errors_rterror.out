@@ -1,4 +1,4 @@
+a
 [runtime error] custom failure
   File "errors_rterror.bb", line 2, in boom
   File "errors_rterror.bb", line 5, in <main program>
-a

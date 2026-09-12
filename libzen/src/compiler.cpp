@@ -12,11 +12,6 @@
 
 namespace zen
 {
-    void install_runtime(VM *vm)
-    {
-        bb::bb_runtime_for(vm);
-    }
-
     Compiler::Compiler() : debug_(false) { error_[0] = '\0'; }
     Compiler::~Compiler() {}
 
@@ -32,7 +27,7 @@ namespace zen
         try
         {
             bb::Toker toker(in);
-            bb::Parser parser(toker);
+            bb::Parser parser(toker, vm);
             prog = parser.parse(filename);
             prog->semant(rt->env);
             bb::BBGen gen(vm, rt, debug_);
@@ -45,7 +40,7 @@ namespace zen
                 snprintf(error_, sizeof(error_), "%s:%d:%d: error: %s", file, (x.pos >> 16) + 1, (x.pos & 0xffff) + 1, x.ex.c_str());
             else
                 snprintf(error_, sizeof(error_), "%s: error: %s", file, x.ex.c_str());
-            fprintf(stderr, "%s\n", error_);
+            backend_log(vm->backend(), LOG_ERROR, error_);
             delete prog;
             return nullptr;
         }

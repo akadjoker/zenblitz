@@ -14,40 +14,22 @@
 namespace zen
 {
     /* =========================================================
-    ** Default callbacks — standard C stdio
+    ** Null backend — text through zenconf.h, no files, no clock
     ** ========================================================= */
-    static ZenFile default_io_open(const char *path, const char *mode, void *) { return (ZenFile)fopen(path, mode); }
-    static long default_io_read(ZenFile file, void *buf, long size, void *) { return (long)fread(buf, 1, (size_t)size, (FILE *)file); }
-    static long default_io_write(ZenFile file, const void *buf, long size, void *) { return (long)fwrite(buf, 1, (size_t)size, (FILE *)file); }
-    static long default_io_seek(ZenFile file, long offset, int whence, void *)
+    static void null_print(const char *str, int len, void *) { zen_write(str, (size_t)len); }
+    static void null_log(int, const char *msg, void *)
     {
-        if (fseek((FILE *)file, offset, whence) != 0) return -1;
-        return ftell((FILE *)file);
+        zen_writeerr(msg, strlen(msg));
+        zen_writeerr("\n", 1);
     }
-    static int default_io_close(ZenFile file, void *) { return fclose((FILE *)file); }
-    static int default_io_exists(const char *path, void *)
-    {
-        FILE *f = fopen(path, "rb");
-        if (!f) return 0;
-        fclose(f);
-        return 1;
-    }
-    static void default_print(const char *str, int len, void *) { zen_write(str, (size_t)len); }
-    static void default_print_err(const char *str, int len, void *) { zen_writeerr(str, (size_t)len); }
 
-    ZenCallbacks zen_default_callbacks()
+    Backend null_backend()
     {
-        ZenCallbacks cb;
-        cb.io.open = default_io_open;
-        cb.io.read = default_io_read;
-        cb.io.write = default_io_write;
-        cb.io.seek = default_io_seek;
-        cb.io.close = default_io_close;
-        cb.io.exists = default_io_exists;
-        cb.print = default_print;
-        cb.print_err = default_print_err;
-        cb.userdata = nullptr;
-        return cb;
+        Backend b;
+        memset(&b, 0, sizeof(b));
+        b.print = null_print;
+        b.log = null_log;
+        return b;
     }
 
     /* =========================================================
@@ -55,11 +37,11 @@ namespace zen
     ** ========================================================= */
     VM::VM()
         : globals_(nullptr), global_names_(nullptr), num_globals_(0), globals_capacity_(0),
-          main_fiber_(nullptr), had_error_(false), suspend_requested_(false)
+          main_fiber_(nullptr), had_error_(false), suspend_requested_(false), wake_at_ms_(0)
     {
         gc_init(&gc_);
         gc_.vm = this;
-        callbacks_ = zen_default_callbacks();
+        backend_ = null_backend();
         error_msg_[0] = '\0';
 
         globals_capacity_ = kInitGlobalCapacity;
@@ -378,10 +360,9 @@ namespace zen
         if (main_fiber_)
             main_fiber_->state = FIBER_ERROR;
 
-        void *ud = callbacks_.userdata;
-        callbacks_.print_err("[runtime error] ", 16, ud);
-        callbacks_.print_err(msg, (int)strlen(msg), ud);
-        callbacks_.print_err("\n", 1, ud);
+        char line[560];
+        snprintf(line, sizeof(line), "[runtime error] %s", msg);
+        backend_log(backend_, LOG_ERROR, line);
 
         if (main_fiber_)
         {
@@ -395,9 +376,8 @@ namespace zen
                 const char *fname = func->name ? func->name->chars : "<script>";
                 const char *src = func->source ? func->source->chars : "?";
                 char traceline[512];
-                int tlen = snprintf(traceline, sizeof(traceline),
-                                    "  File \"%s\", line %d, in %s\n", src, line, fname);
-                callbacks_.print_err(traceline, tlen > 0 ? tlen : 0, ud);
+                snprintf(traceline, sizeof(traceline), "  File \"%s\", line %d, in %s", src, line, fname);
+                backend_log(backend_, LOG_ERROR, traceline);
             }
         }
     }

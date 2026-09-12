@@ -44,6 +44,11 @@ namespace
         err[err_len - 1] = '\0';
     }
 
+/* The writer serialises a compiled program to a .zbc file, which only the
+** compiler ever does — a runtime-only build (ZEN_NO_BYTECODE_WRITER, set for
+** the zen_vm library) drops it along with the stdio calls it needs, leaving
+** just the loader that works off a memory buffer. */
+#ifndef ZEN_NO_BYTECODE_WRITER
     class BytecodeWriter
     {
     public:
@@ -117,6 +122,7 @@ namespace
         FILE *file_;
         bool ok_;
     };
+#endif /* ZEN_NO_BYTECODE_WRITER */
 
     class BytecodeReader
     {
@@ -208,6 +214,7 @@ namespace
         bool ok_;
     };
 
+#ifndef ZEN_NO_BYTECODE_WRITER
     static bool write_string(BytecodeWriter &w, ObjString *str, BytecodeStats *stats, char *err, int err_len)
     {
         if (!str)
@@ -406,6 +413,7 @@ namespace
 
         return true;
     }
+#endif /* ZEN_NO_BYTECODE_WRITER */
 
 
 
@@ -754,6 +762,7 @@ bool is_bytecode_buffer(const uint8_t *data, size_t size)
            memcmp(data, ZEN_BYTECODE_MAGIC, sizeof(ZEN_BYTECODE_MAGIC)) == 0;
 }
 
+#ifndef ZEN_NO_BYTECODE_WRITER
 bool dump_bytecode_file(ObjFunc *func, const char *path, bool strip_debug, char *err, int err_len)
 {
     return dump_bytecode_file(nullptr, func, path, strip_debug, err, err_len);
@@ -840,6 +849,7 @@ bool dump_bytecode_file(VM *vm, ObjFunc *func, const char *path, bool strip_debu
 
     return true;
 }
+#endif /* ZEN_NO_BYTECODE_WRITER */
 
 ObjFunc *load_bytecode_buffer(VM *vm, const uint8_t *data, size_t size, char *err, int err_len)
 {

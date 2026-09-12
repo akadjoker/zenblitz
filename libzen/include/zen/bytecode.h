@@ -18,7 +18,11 @@ namespace zen
     **          just a version mismatch, so this must be a MAJOR bump: the
     **          loader's `major != ZEN_BYTECODE_VERSION_MAJOR` check rejects
     **          those files outright instead of misreading them. */
-    static constexpr uint16_t ZEN_BYTECODE_VERSION_MAJOR = 3;
+    /* major 4: OP_MULI was inserted after OP_SUBI, renumbering every opcode
+    **          above it. A file at major 3 would decode those as different
+    **          instructions — corruption rather than a version mismatch, so
+    **          the loader must reject it outright. */
+    static constexpr uint16_t ZEN_BYTECODE_VERSION_MAJOR = 4;
     /* minor 2: ObjFunc gained generic_arity (reified generics, f<T>(...)) —
     **          written at the end of write_func(); read_func() defaults it to
     **          0 for minor < 2. See read_func()/write_func() in bytecode.cpp. */
@@ -40,6 +44,9 @@ namespace zen
 
     bool is_bytecode_buffer(const uint8_t *data, size_t size);
 
+    /* Writing .zbc files is the compiler's job; a runtime-only build
+       (ZEN_NO_BYTECODE_WRITER) keeps only the loader below. */
+#ifndef ZEN_NO_BYTECODE_WRITER
     bool dump_bytecode_file(ObjFunc *func, const char *path, bool strip_debug = false,
                             char *err = nullptr, int err_len = 0);
 
@@ -48,6 +55,7 @@ namespace zen
 
     bool dump_bytecode_file(VM *vm, ObjFunc *func, const char *path, bool strip_debug,
                             BytecodeStats *stats, char *err = nullptr, int err_len = 0);
+#endif
 
     ObjFunc *load_bytecode_buffer(VM *vm, const uint8_t *data, size_t size,
                                   char *err = nullptr, int err_len = 0);

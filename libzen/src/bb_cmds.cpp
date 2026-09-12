@@ -4,11 +4,10 @@
 ** exact same parameter lists and defaults as Blitz3D.
 */
 #include "bb_runtime.h"
+#include "bb_handles.h"
 #include "object.h"
 #include <cctype>
 #include <ctime>
-#include <chrono>
-#include <thread>
 
 using namespace zen;
 
@@ -35,12 +34,11 @@ namespace bb
     {
         (void)nargs;
         bb_print(vm, bb_arg_cstr(args[0]), bb_arg_len(args[0]));
-        fflush(stdout);
-        string line;
-        int c;
-        while ((c = fgetc(stdin)) != EOF && c != '\n') line += (char)c;
-        if (line.size() && line[line.size() - 1] == '\r') line.resize(line.size() - 1);
-        args[0] = bb_ret_str(vm, line);
+        const Backend &b = vm->backend();
+        char line[4096];
+        int n = b.input ? b.input(line, sizeof(line), b.userdata) : -1;
+        if (n > 0 && line[n - 1] == '\r') --n;
+        args[0] = bb_ret_str(vm, line, n < 0 ? 0 : n);
         return 1;
     }
 
@@ -332,26 +330,41 @@ namespace bb
 
     static int c_ExecFile(VM *vm, Value *args, int nargs)
     {
-        (void)vm; (void)nargs;
-        int r = system(bb_arg_cstr(args[0]));
-        args[0] = val_int(r);
+        (void)nargs;
+        const Backend &b = vm->backend();
+        if (!b.exec)
+        {
+            backend_log(b, LOG_WARN, "ExecFile: not supported");
+            args[0] = val_int(-1);
+            return 1;
+        }
+        args[0] = val_int(b.exec(bb_arg_cstr(args[0]), b.userdata));
         return 1;
     }
 
+    static int64_t millisecs(VM *vm)
+    {
+        const Backend &b = vm->backend();
+        return b.millisecs ? b.millisecs(b.userdata) : 0;
+    }
+    /* Delay never sleeps itself: it hands the host a wake-up deadline via
+       request_suspend() and returns. The suspend takes effect after this
+       native, so the program continues at the statement after Delay once
+       the host calls resume() — a console loop blocks until the deadline
+       (see rt_main), while a browser or Android host must not block its
+       main thread and schedules resume() for wake_at() instead. */
     static int c_Delay(VM *vm, Value *args, int nargs)
     {
-        (void)vm; (void)nargs;
-        long long ms = bb_arg_int(args[0]);
-        if (ms > 0) std::this_thread::sleep_for(std::chrono::milliseconds(ms));
+        (void)nargs;
+        int64_t ms = bb_arg_int(args[0]);
+        if (ms > 0) vm->request_suspend(millisecs(vm) + ms);
         return 0;
     }
 
     static int c_MilliSecs(VM *vm, Value *args, int nargs)
     {
-        (void)vm; (void)nargs;
-        using namespace std::chrono;
-        long long ms = duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count();
-        args[0] = val_int((int)ms);
+        (void)nargs;
+        args[0] = val_int((int)millisecs(vm)); /* wraps like Blitz's 32-bit MilliSecs */
         return 1;
     }
 
@@ -380,78 +393,75 @@ namespace bb
         return 1;
     }
 
+    /* SystemProperty and GetEnv$ both ask the backend; the platform strings
+       ("os", "cpu") are its business, not the runtime's. */
+    static int property(VM *vm, Value *args, const char *name)
+    {
+        const Backend &b = vm->backend();
+        const char *v = b.get_property ? b.get_property(name, b.userdata) : nullptr;
+        args[0] = bb_ret_str(vm, v ? v : "");
+        return 1;
+    }
+
     static int c_SystemProperty(VM *vm, Value *args, int nargs)
     {
         (void)nargs;
         string p = bb_tolower(bb_arg_str(args[0]));
-        string r;
-        if (p == "os") r = "Linux";
-        else if (p == "blitzversion") r = "1.108";
-        else if (p == "cpu") r = "x86_64";
-        args[0] = bb_ret_str(vm, r);
-        return 1;
+        if (p == "blitzversion") { args[0] = bb_ret_str(vm, "1.108"); return 1; }
+        return property(vm, args, p.c_str());
     }
 
     static int c_GetEnv(VM *vm, Value *args, int nargs)
     {
         (void)nargs;
-        const char *p = getenv(bb_arg_cstr(args[0]));
-        args[0] = bb_ret_str(vm, p ? p : "");
-        return 1;
+        return property(vm, args, bb_arg_cstr(args[0]));
     }
 
     static int c_SetEnv(VM *vm, Value *args, int nargs)
     {
-        (void)vm; (void)nargs;
-        setenv(bb_arg_cstr(args[0]), bb_arg_cstr(args[1]), 1);
+        (void)nargs;
+        const Backend &b = vm->backend();
+        if (b.set_property) b.set_property(bb_arg_cstr(args[0]), bb_arg_cstr(args[1]), b.userdata);
         return 0;
     }
 
     static int c_DebugLog(VM *vm, Value *args, int nargs)
     {
-        (void)vm; (void)nargs;
-        fprintf(stderr, "%s\n", bb_arg_cstr(args[0]));
+        (void)nargs;
+        backend_log(vm->backend(), LOG_INFO, bb_arg_cstr(args[0]));
         return 0;
     }
 
-    /* timers: simple fixed-rate timers based on the steady clock */
+    /* timers: fixed-rate timers on the backend clock (milliseconds) */
     struct BBTimer { double period; double next; };
-    static map<long long, BBTimer> timers;
-    static long long next_timer = 0;
-
-    static double now_secs()
-    {
-        using namespace std::chrono;
-        return duration_cast<duration<double> >(steady_clock::now().time_since_epoch()).count();
-    }
+    static Handles<BBTimer *> timers;
 
     static int c_CreateTimer(VM *vm, Value *args, int nargs)
     {
-        (void)vm; (void)nargs;
+        (void)nargs;
         long long hz = bb_arg_int(args[0]);
         if (hz <= 0) hz = 1;
-        BBTimer t;
-        t.period = 1.0 / (double)hz;
-        t.next = now_secs() + t.period;
-        timers[++next_timer] = t;
-        args[0] = val_int(next_timer);
+        BBTimer *t = new BBTimer;
+        t->period = 1000.0 / (double)hz;
+        t->next = (double)millisecs(vm) + t->period;
+        args[0] = val_int(timers.add(t));
         return 1;
     }
 
+    /* Like Delay, WaitTimer yields to the host rather than blocking: it
+       suspends with the tick deadline and reports the ticks elapsed. The
+       host resumes at the statement after WaitTimer, so the count is taken
+       against the clock as it will be once the deadline passes. */
     static int c_WaitTimer(VM *vm, Value *args, int nargs)
     {
-        (void)vm; (void)nargs;
-        map<long long, BBTimer>::iterator it = timers.find(bb_arg_int(args[0]));
-        if (it == timers.end()) { args[0] = val_int(0); return 1; }
-        BBTimer &t = it->second;
-        double n = now_secs();
+        (void)nargs;
+        BBTimer *t = timers.get(bb_arg_int(args[0]));
+        if (!t) { args[0] = val_int(0); return 1; }
+        double now = (double)millisecs(vm);
+        if (now < t->next) vm->request_suspend((int64_t)(t->next + 0.5));
+        double reached = now < t->next ? t->next : now;
         int ticks = 0;
-        if (n < t.next)
-        {
-            std::this_thread::sleep_for(std::chrono::duration<double>(t.next - n));
-            n = now_secs();
-        }
-        while (t.next <= n) { t.next += t.period; ++ticks; }
+        while (t->next <= reached) { t->next += t->period; ++ticks; }
         args[0] = val_int(ticks);
         return 1;
     }
@@ -459,7 +469,9 @@ namespace bb
     static int c_FreeTimer(VM *vm, Value *args, int nargs)
     {
         (void)vm; (void)nargs;
-        timers.erase(bb_arg_int(args[0]));
+        long long h = bb_arg_int(args[0]);
+        delete timers.get(h);
+        timers.remove(h);
         return 0;
     }
 

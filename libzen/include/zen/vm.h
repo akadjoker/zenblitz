@@ -3,34 +3,10 @@
 
 #include "memory.h"
 #include "opcodes.h"
+#include "backend.h"
 
 namespace zen
 {
-    /* =========================================================
-    ** ZenIO — platform-abstracted file I/O (override for SDL/WASM).
-    ** ========================================================= */
-    typedef void *ZenFile;
-
-    struct ZenIO
-    {
-        ZenFile (*open)(const char *path, const char *mode, void *userdata);
-        long (*read)(ZenFile file, void *buf, long size, void *userdata);
-        long (*write)(ZenFile file, const void *buf, long size, void *userdata);
-        long (*seek)(ZenFile file, long offset, int whence, void *userdata);
-        int (*close)(ZenFile file, void *userdata);
-        int (*exists)(const char *path, void *userdata);
-    };
-
-    struct ZenCallbacks
-    {
-        ZenIO io;
-        void (*print)(const char *str, int len, void *userdata);
-        void (*print_err)(const char *str, int len, void *userdata);
-        void *userdata;
-    };
-
-    ZenCallbacks zen_default_callbacks();
-
     /*
     ** VM — interpreter state: globals, GC, the main execution context.
     */
@@ -50,8 +26,17 @@ namespace zen
         bool resume();
         bool suspended() const { return main_fiber_->state == FIBER_SUSPENDED; }
         /* Ask the interpreter to return to the host right after the native
-           currently running (Flip, Delay, ...). */
-        void request_suspend() { suspend_requested_ = true; }
+           currently running (Flip, Delay, ...). wake_at_ms is a deadline on
+           the backend's millisecs() clock (0 = no deadline, e.g. Flip
+           yielding one frame); the host reads it with wake_at() to know when
+           to call resume() again — a console loop can sleep until then, a
+           browser/Android loop schedules a timer instead of blocking. */
+        void request_suspend(int64_t wake_at_ms = 0)
+        {
+            suspend_requested_ = true;
+            wake_at_ms_ = wake_at_ms;
+        }
+        int64_t wake_at() const { return wake_at_ms_; }
         Value call_global(int idx, Value *args, int nargs);
         Value call_global(const char *name, Value *args, int nargs);
 
@@ -83,8 +68,9 @@ namespace zen
         StructBuilder def_struct(const char *name);
 
         /* --- Callbacks (platform I/O hooks) --- */
-        void set_callbacks(const ZenCallbacks &cb) { callbacks_ = cb; }
-        const ZenCallbacks &get_callbacks() const { return callbacks_; }
+        /* platform services (backend.h); set before install_runtime() */
+        void set_backend(const Backend &b) { backend_ = b; }
+        const Backend &backend() const { return backend_; }
 
         /* --- Strings (interned) --- */
         ObjString *make_string(const char *str, int length = -1);
@@ -128,9 +114,10 @@ namespace zen
         Fiber *main_fiber_;
         bool had_error_;
         bool suspend_requested_;
+        int64_t wake_at_ms_;
         char error_msg_[512];
 
-        ZenCallbacks callbacks_;
+        Backend backend_;
     };
 
 } /* namespace zen */

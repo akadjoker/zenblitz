@@ -5,7 +5,8 @@
 **   ./zenblitz file.bb     → compile and run file
 **   ./zenblitz -e "code"    → compile and run inline code
 **   ./zenblitz --dump out.zbc file.bb   → compile to bytecode
-**   ./zenblitz --build game file.bb     → standalone executable (runtime + bytecode)
+**   ./zenblitz --build game file.bb     → standalone executable (zenblitz-rt + bytecode)
+**   ./zenblitz --build game.exe --stub zenblitz-rt.exe file.bb   → with another runtime
 **   ./zenblitz --debug file.bb          → extra runtime checks (array bounds per dimension)
 */
 
@@ -14,13 +15,14 @@
 #include "memory.h"
 #include "debug.h"
 #include "bytecode.h"
+#include "embedded.h"
+#include "backend_stdio.h"
+#include "host_loop.h"
+#include "userlibs.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#if defined(_WIN32)
-#include <windows.h>
-#else
-#include <unistd.h>
+#if !defined(_WIN32)
 #include <sys/stat.h>
 #endif
 
@@ -77,8 +79,12 @@ static int g_num_search_paths = 0;
 static void register_default_libs(VM &vm)
 {
     /* Blitz commands and runtime helpers become VM globals here, so both
-       source compiles and precompiled bytecode see them in the same slots. */
+       source compiles and precompiled bytecode see them in the same slots.
+       Userlibs are part of that command set, so they must be installed in
+       the same order in both paths — hence here, not at each call site. */
+    vm.set_backend(stdio_backend());
     install_runtime(&vm);
+    install_userlibs_beside_exe(vm, "zenblitz");
 }
 
 static void install_args(VM &vm, int script_argc, char **script_argv)
@@ -108,38 +114,45 @@ static void disassemble_nested(ObjFunc *fn)
 }
 
 /* =========================================================
-** Standalone executables: runtime binary + bytecode + trailer
-**   [zenblitz executable][.zbc bytes][u64 bytecode size]["ZBLZEXE1"]
+** Standalone executables: runtime binary + bytecode + trailer (embedded.h)
 ** ========================================================= */
-static const char EXE_MAGIC[8] = {'Z', 'B', 'L', 'Z', 'E', 'X', 'E', '1'};
 
-static char *self_path(char *buf, size_t size)
+/* The stub `--build` uses when none is given: zenblitz-rt (the runtime-only
+   executable) next to this one, or this executable itself if it is not
+   there — which works too, the program just carries the compiler along. */
+static const char *default_stub(char *buf, size_t size)
 {
-#if defined(__linux__)
-    ssize_t n = readlink("/proc/self/exe", buf, size - 1);
-    if (n <= 0) return nullptr;
-    buf[n] = '\0';
-    return buf;
-#elif defined(_WIN32)
-    if (GetModuleFileNameA(nullptr, buf, (DWORD)size) == 0) return nullptr;
-    return buf;
+#if defined(_WIN32)
+    const char *rt = "zenblitz-rt.exe";
 #else
-    return nullptr;
+    const char *rt = "zenblitz-rt";
 #endif
+    if (path_beside_exe(rt, buf, size))
+    {
+        FILE *f = fopen(buf, "rb");
+        if (f)
+        {
+            fclose(f);
+            return buf;
+        }
+    }
+    /* No runtime beside us: fall back to this executable, which works too —
+       the program just carries the compiler along. */
+    return self_path(buf, size);
 }
 
 static int build_executable(const char *bytecode_path, const char *out_path)
 {
-    char self[4096];
+    char stub[4096];
     const char *base = g_stub_path;
     if (!base)
     {
-        if (!self_path(self, sizeof(self)))
+        base = default_stub(stub, sizeof(stub));
+        if (!base)
         {
             fprintf(stderr, "zenblitz: cannot locate the runtime executable (use --stub)\n");
             return 1;
         }
-        base = self;
     }
     long rt_size = 0, bc_size = 0;
     char *rt = read_file(base, &rt_size);
@@ -176,34 +189,8 @@ static int build_executable(const char *bytecode_path, const char *out_path)
 #ifndef _WIN32
     chmod(out_path, 0755);
 #endif
-    printf("zenblitz: built '%s' (%ld bytes of bytecode)\n", out_path, bc_size);
+    printf("zenblitz: built '%s' (%ld bytes of bytecode, runtime '%s')\n", out_path, bc_size, base);
     return 0;
-}
-
-/* If this executable carries an embedded program, return it (malloc'd). */
-static char *embedded_program(long *out_size)
-{
-    char self[4096];
-    if (!self_path(self, sizeof(self))) return nullptr;
-    FILE *f = fopen(self, "rb");
-    if (!f) return nullptr;
-    fseek(f, 0, SEEK_END);
-    long total = ftell(f);
-    if (total < 16) { fclose(f); return nullptr; }
-    char trailer[16];
-    fseek(f, total - 16, SEEK_SET);
-    if (fread(trailer, 1, 16, f) != 16 || memcmp(trailer + 8, EXE_MAGIC, 8) != 0) { fclose(f); return nullptr; }
-    uint64_t sz = 0;
-    memcpy(&sz, trailer, 8);
-    if (sz == 0 || (long)sz > total - 16) { fclose(f); return nullptr; }
-    char *buf = (char *)malloc((size_t)sz + 1);
-    fseek(f, total - 16 - (long)sz, SEEK_SET);
-    size_t got = fread(buf, 1, (size_t)sz, f);
-    fclose(f);
-    if (got != sz) { free(buf); return nullptr; }
-    buf[sz] = '\0';
-    *out_size = (long)sz;
-    return buf;
 }
 
 static int run_source(const char *source, const char *filename,
@@ -274,8 +261,7 @@ static int run_source(const char *source, const char *filename,
 
     if (g_dis_only) return 0;
 
-    vm.run(fn);
-    return vm.had_error() ? 1 : 0;
+    return run_until_done(vm, fn);
 }
 
 static int run_bytecode(const uint8_t *data, size_t size, const char *filename,
@@ -304,8 +290,7 @@ static int run_bytecode(const uint8_t *data, size_t size, const char *filename,
     if (g_dis_only)
         return 0;
 
-    vm.run(fn);
-    return vm.had_error() ? 1 : 0;
+    return run_until_done(vm, fn);
 }
 
 /* =========================================================
@@ -348,7 +333,7 @@ static void repl()
         ObjFunc *fn = compiler.compile(&vm.get_gc(), &vm, line, "<repl>");
         if (fn)
         {
-            vm.run(fn);
+            run_until_done(vm, fn);
         }
     }
 }
