@@ -4,6 +4,7 @@
 #include "engine/Object.h"
 #include "engine/Brush.h"
 #include "engine/Surface.h"
+#include "engine/RenderContext.h"
 #include <ct/vector.hpp>
 
 namespace engine
@@ -44,6 +45,8 @@ namespace engine
         virtual MeshModel *getMeshModel() { return nullptr; }
 
         virtual void setRenderBrush(const Brush &b) { mRenderBrush = b; }
+        virtual bool render(const RenderContext &rc, gpu::Device &dev) { (void)rc; (void)dev; return false; }
+        virtual void renderQueue(int type, gpu::Device &dev) { (void)type; (void)dev; }
 
         void capture() override
         {

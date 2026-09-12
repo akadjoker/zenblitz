@@ -3,7 +3,7 @@
 
 #include "engine/Model.h"
 #include "engine/MeshCollider.h"
-#include "engine/Frustum.h"
+#include "engine/RenderContext.h"
 #include <ct/vector.hpp>
 #include <ct/hashmap.hpp>
 
@@ -24,8 +24,8 @@ namespace engine
         bool collide(const Line &line, float radius, Collision *currColl, const Transform &t) override;
 
         void setRenderBrush(const Brush &b) override;
-        bool render(const Frustum &worldFrustum, const Transform &renderTform);
-        void renderQueue(int type);
+        bool render(const RenderContext &rc, gpu::Device &dev);
+        void renderQueue(int type, gpu::Device &dev);
 
         void createBones();
 

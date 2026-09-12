@@ -27,6 +27,7 @@ add_library(zenblitz_engine STATIC
     src/world/MeshCollider.cpp
     src/world/Animator.cpp
     src/world/MeshModel.cpp
+    src/world/MeshRenderer.cpp
 )
 
 target_include_directories(zenblitz_engine PUBLIC

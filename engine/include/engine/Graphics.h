@@ -66,6 +66,7 @@ namespace kx
     bool mInFrame = false;
     bool mSurfaceDepth = true;
     gpu::TextureHandle mScreenTexture;
+    gpu::TextureHandle mScreenDepthTexture;
     std::uint32_t mScreenTextureWidth = 0, mScreenTextureHeight = 0;
     bool mScreenSizeSet = false;
   };

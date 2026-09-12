@@ -195,12 +195,12 @@ namespace engine
             mBoneTforms[k] = -bones[k]->getWorldTform();
     }
 
-    bool MeshModel::render(const Frustum &worldFrustum, const Transform &renderTform)
+    bool MeshModel::render(const RenderContext &rc, gpu::Device &dev)
     {
         const Box &b = getCullBox();
         if (b.empty()) return false;
 
-        Frustum modelFrustum(worldFrustum, -renderTform);
+        Frustum modelFrustum(rc.getWorldFrustum(), -getRenderTform());
         if (!modelFrustum.cull(b)) return false;
 
         if (mLocalBrushChanges != mBrushChanges)
@@ -221,7 +221,7 @@ namespace engine
             for (size_t k = 0; k < mSurfaces.size(); ++k)
             {
                 Surface *s = mSurfaces[k];
-                if (s->numTriangles())
+                if (s->numTriangles() && s->ensureGpu(dev))
                     enqueue(s, 0, s->numVertices(), 0, s->numTriangles(), mBrushes[k]);
             }
             return false;
@@ -241,7 +241,7 @@ namespace engine
             Surface *s = mSurfaces[k];
             if (mBrushes[k].getBlend() == BlendReplace)
             {
-                if (s->numTriangles())
+                if (s->numTriangles() && s->ensureGpuSkinned(dev, mSurfBones))
                     enqueue(s, 0, s->numVertices(), 0, s->numTriangles(), mBrushes[k]);
             }
             else
@@ -252,7 +252,7 @@ namespace engine
         return trans;
     }
 
-    void MeshModel::renderQueue(int type)
+    void MeshModel::renderQueue(int type, gpu::Device &dev)
     {
         if (type == QueueTransparent && !mSurfBones.empty())
         {
@@ -261,7 +261,7 @@ namespace engine
                 Surface *s = mSurfaces[k];
                 if (mBrushes[k].getBlend() != BlendReplace)
                 {
-                    if (s->numTriangles())
+                    if (s->numTriangles() && s->ensureGpuSkinned(dev, mSurfBones))
                         enqueue(s, 0, s->numVertices(), 0, s->numTriangles(), mBrushes[k]);
                 }
             }

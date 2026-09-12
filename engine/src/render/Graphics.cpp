@@ -54,7 +54,10 @@ namespace kx
       mInFrame = false;
       if (mScreenTexture.valid())
         mGpu->destroy(mScreenTexture);
+      if (mScreenDepthTexture.valid())
+        mGpu->destroy(mScreenDepthTexture);
       mScreenTexture = gpu::TextureHandle();
+      mScreenDepthTexture = gpu::TextureHandle();
       mScreenTextureWidth = mScreenTextureHeight = 0;
       mScreenSizeSet = false;
       gpu::destroyDevice(mGpu);
@@ -79,13 +82,18 @@ namespace kx
       mGpu->destroy(mScreenTexture);
       mScreenTexture = gpu::TextureHandle();
     }
+    if (mScreenDepthTexture.valid())
+    {
+      mGpu->destroy(mScreenDepthTexture);
+      mScreenDepthTexture = gpu::TextureHandle();
+    }
   }
 
   bool Graphics::ensureScreenTexture()
   {
     if (!mScreenSizeSet)
       setScreenSize(mWidth, mHeight);
-    if (mScreenTexture.valid())
+    if (mScreenTexture.valid() && mScreenDepthTexture.valid())
       return true;
 
     gpu::TextureDesc desc;
@@ -95,7 +103,16 @@ namespace kx
     desc.usage = gpu::TextureUsageRenderTarget | gpu::TextureUsageSampled | gpu::TextureUsageCopySource;
     desc.debugName = "screen";
     mScreenTexture = mGpu->createTexture(desc);
-    return mScreenTexture.valid();
+
+    gpu::TextureDesc depthDesc;
+    depthDesc.width = mScreenTextureWidth;
+    depthDesc.height = mScreenTextureHeight;
+    depthDesc.format = gpu::Format::Depth24Stencil8;
+    depthDesc.usage = gpu::TextureUsageRenderTarget;
+    depthDesc.debugName = "screen.depth";
+    mScreenDepthTexture = mGpu->createTexture(depthDesc);
+
+    return mScreenTexture.valid() && mScreenDepthTexture.valid();
   }
 
   bool Graphics::logErrors(const char *where)
@@ -142,6 +159,7 @@ namespace kx
     pass.colors[0].clearColor[2] = b;
     pass.colors[0].clearColor[3] = a;
     pass.hasDepthStencil = mSurfaceDepth;
+    pass.depthStencil.target.texture = mScreenDepthTexture;
     pass.depthStencil.depthLoadOp = gpu::LoadOp::Clear;
     pass.depthStencil.stencilLoadOp = gpu::LoadOp::Clear;
 
@@ -186,6 +204,7 @@ namespace kx
     pass.colors[0].loadOp = gpu::LoadOp::Load;
     pass.colors[0].storeOp = gpu::StoreOp::Store;
     pass.hasDepthStencil = mSurfaceDepth;
+    pass.depthStencil.target.texture = mScreenDepthTexture;
     pass.depthStencil.depthLoadOp = gpu::LoadOp::Load;
     pass.depthStencil.stencilLoadOp = gpu::LoadOp::Load;
 
