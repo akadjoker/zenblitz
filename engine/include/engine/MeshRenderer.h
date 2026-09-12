@@ -111,6 +111,13 @@ namespace engine
         ct::Vector<unsigned char> mStaged;
         std::uint32_t mStagedCount = 0;
 
+        // last handles bound by draw() this frame (0 = nothing bound yet)
+        struct BoundState
+        {
+            std::uint64_t pipeline = 0, texture = 0, vertexBuffer = 0, indexBuffer = 0;
+        };
+        BoundState mBound;
+
         gpu::PipelineHandle pipelineFor(const PipelineKey &pk);
         bool ensureUniformBuffer(gpu::Device &dev, std::uint32_t count);
     };

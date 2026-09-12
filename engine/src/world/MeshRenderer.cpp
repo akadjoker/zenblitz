@@ -218,6 +218,9 @@ namespace engine
     {
         mStaged.clear();
         mStagedCount = 0;
+        // the Canvas Batch draws between our prepare() and draw() and
+        // binds its own pipeline/buffers, so nothing can be assumed bound
+        mBound = BoundState();
     }
 
     gpu::PipelineHandle MeshRenderer::pipelineFor(const PipelineKey &pk)
@@ -338,11 +341,30 @@ namespace engine
         gpu::TextureHandle tex = pk.hasTexture ? brush.getTexture(0).handle : mWhiteTexture;
         if (!tex.valid()) tex = mWhiteTexture;
 
-        dev.setPipeline(pipeline);
+        // the GL backend re-issues glUseProgram/glBindTexture/glBindBuffer
+        // on every call with no caching of its own, so skip binds that
+        // haven't changed since the last draw this frame
+        if (pipeline.value() != mBound.pipeline)
+        {
+            dev.setPipeline(pipeline);
+            mBound.pipeline = pipeline.value();
+        }
         dev.bindUniformBuffer(0, mUniformBuffer, (std::uint64_t)index * mUniformStride, sizeof(Uniforms));
-        dev.bindTexture(0, tex, mSampler);
-        dev.bindVertexBuffer(0, surface->vertexBuffer(), 0);
-        dev.bindIndexBuffer(surface->indexBuffer(), gpu::IndexFormat::Uint16, 0);
+        if (tex.value() != mBound.texture)
+        {
+            dev.bindTexture(0, tex, mSampler);
+            mBound.texture = tex.value();
+        }
+        if (surface->vertexBuffer().value() != mBound.vertexBuffer)
+        {
+            dev.bindVertexBuffer(0, surface->vertexBuffer(), 0);
+            mBound.vertexBuffer = surface->vertexBuffer().value();
+        }
+        if (surface->indexBuffer().value() != mBound.indexBuffer)
+        {
+            dev.bindIndexBuffer(surface->indexBuffer(), gpu::IndexFormat::Uint16, 0);
+            mBound.indexBuffer = surface->indexBuffer().value();
+        }
         dev.drawIndexed((std::uint32_t)surface->gpuIndexCount(), 1, 0, 0, 0);
     }
 }
