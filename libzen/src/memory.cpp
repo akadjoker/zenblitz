@@ -301,19 +301,13 @@ namespace zen
 
         int length = a->length + b->length;
 
-        if (length <= 128) {
-            /* Short path: intern the result so == (pointer comparison) works */
-            char buf[129];
-            memcpy(buf, a->chars, a->length);
-            memcpy(buf + a->length, b->chars, b->length);
-            buf[length] = '\0';
-            uint32_t hash = hash_string(buf, length);
-            ObjString *existing = find_interned(gc, buf, length, hash);
-            if (existing) return existing;
-            return intern_string(gc, buf, length, hash);
-        }
-
-        /* Long path: generous capacity for future appends, skip interning */
+        /* Concatenation results are not interned. Interning them would cost
+        ** a hash over every byte plus a table insertion, and every distinct
+        ** result would stay in the intern table for the GC to walk — a loop
+        ** building 200k distinct strings grows that table to 200k entries.
+        ** Nothing needs it: objects_equal() compares strings by content, so
+        ** "=" is correct either way, and literals (new_string) are still
+        ** interned, which is what makes comparing them cheap. */
         int new_cap = (length + 1) * 2;
         new_cap = (new_cap + 7) & ~7;
 

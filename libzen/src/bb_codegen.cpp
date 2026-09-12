@@ -575,11 +575,20 @@ namespace bb
             g.emitABC(op == '+' ? OP_ADDI : OP_SUBI, d, l, imm & 0xFF);
             return g.finish(d, dest, save);
         }
-        if (sem_type == Type::int_type && op == '+' && smallIntConst(lhs, imm))
+        /* the same for multiplication, which is commutative, so a constant
+           on either side folds into the instruction */
+        if (sem_type == Type::int_type && op == '*' && smallIntConst(rhs, imm))
+        {
+            int l = g.expr(lhs);
+            int d = dest >= 0 ? dest : save;
+            g.emitABC(OP_MULI, d, l, imm & 0xFF);
+            return g.finish(d, dest, save);
+        }
+        if (sem_type == Type::int_type && (op == '+' || op == '*') && smallIntConst(lhs, imm))
         {
             int r = g.expr(rhs);
             int d = dest >= 0 ? dest : save;
-            g.emitABC(OP_ADDI, d, r, imm & 0xFF);
+            g.emitABC(op == '+' ? OP_ADDI : OP_MULI, d, r, imm & 0xFF);
             return g.finish(d, dest, save);
         }
         int l = g.expr(lhs);

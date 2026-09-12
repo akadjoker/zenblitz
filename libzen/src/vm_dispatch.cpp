@@ -150,7 +150,7 @@ namespace zen
             &&lbl_OP_LOADNIL, &&lbl_OP_LOADBOOL, &&lbl_OP_LOADK, &&lbl_OP_LOADI, &&lbl_OP_MOVE,
             &&lbl_OP_GETGLOBAL, &&lbl_OP_SETGLOBAL,
             &&lbl_OP_ADD, &&lbl_OP_SUB, &&lbl_OP_MUL, &&lbl_OP_DIV, &&lbl_OP_MOD, &&lbl_OP_IDIV, &&lbl_OP_NEG,
-            &&lbl_OP_ADDI, &&lbl_OP_SUBI,
+            &&lbl_OP_ADDI, &&lbl_OP_SUBI, &&lbl_OP_MULI,
             &&lbl_OP_BAND, &&lbl_OP_BOR, &&lbl_OP_BXOR, &&lbl_OP_BNOT, &&lbl_OP_SHL, &&lbl_OP_SHR,
             &&lbl_OP_EQ, &&lbl_OP_LT, &&lbl_OP_LE, &&lbl_OP_NOT,
             &&lbl_OP_JMP, &&lbl_OP_JMPIF, &&lbl_OP_JMPIFNOT,
@@ -348,6 +348,17 @@ namespace zen
                 R[ZEN_A(i)] = val_float(to_number(vb) + imm);
             NEXT();
         }
+        CASE(OP_MULI)
+        {
+            uint32_t i = *ip;
+            Value vb = R[ZEN_B(i)];
+            int8_t imm = (int8_t)ZEN_C(i);
+            if (vb.type == VAL_INT)
+                R[ZEN_A(i)] = val_int((int64_t)((uint64_t)vb.as.integer * (uint64_t)(int64_t)imm));
+            else
+                R[ZEN_A(i)] = val_float(to_number(vb) * imm);
+            NEXT();
+        }
         CASE(OP_SUBI)
         {
             uint32_t i = *ip;
@@ -540,7 +551,18 @@ namespace zen
                 CHECK_SUSPEND();
                 DISPATCH();
             }
-            RT_ERROR("global '%s' is not a function", global_names_[gidx] ? global_names_[gidx]->chars : "?");
+            {
+                /* An empty "_f" global is a command the compiler knew and
+                   this runtime does not: the program was built with a
+                   userlib that is not installed beside this executable.
+                   Worth naming, because the generic message sends people
+                   looking for a bug in their own program. */
+                const char *gname = global_names_[gidx] ? global_names_[gidx]->chars : "?";
+                if (is_nil(callee) && gname[0] == '_' && gname[1] == 'f')
+                    RT_ERROR("command '%s' is not available: this program was built with a userlib "
+                             "that is not installed next to the runtime", gname + 2);
+                RT_ERROR("global '%s' is not a function", gname);
+            }
         }
         CASE(OP_RETURNNIL)
         {

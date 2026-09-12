@@ -42,6 +42,7 @@ namespace zen
         OP_NEG,  /* R[A] = -R[B]                                      */
         OP_ADDI, /* R[A] = R[B] + (signed)C                           */
         OP_SUBI, /* R[A] = R[B] - (signed)C                           */
+        OP_MULI, /* R[A] = R[B] * (signed)C                           */
 
         /* --- Bitwise --- */
         OP_BAND, /* R[A] = R[B] & R[C]                      */

@@ -20,6 +20,7 @@ namespace zen
         "NEG",
         "ADDI",
         "SUBI",
+        "MULI",
         "BAND",
         "BOR",
         "BXOR",
@@ -192,7 +193,7 @@ namespace zen
                 printf("  ; R[%d](%d args) -> %d results", a, b, c);
             else if (op == OP_RETURN)
                 printf("  ; return R[%d]..R[%d]", a, a + b - 1);
-            else if (op == OP_ADDI || op == OP_SUBI || op == OP_LTIJMPIFNOT || op == OP_GTIJMPIFNOT)
+            else if (op == OP_ADDI || op == OP_SUBI || op == OP_MULI || op == OP_LTIJMPIFNOT || op == OP_GTIJMPIFNOT)
                 printf("  ; imm=%d", (int)(int8_t)c);
             break;
         }
