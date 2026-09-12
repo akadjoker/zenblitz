@@ -72,6 +72,38 @@ namespace bb3d
         return 0;
     }
 
+    // Blitz3D's SetBuffer/BackBuffer/FrontBuffer pick which surface 2D
+    // drawing targets - a window's front and back buffer, or an
+    // ImageBuffer's pixels. This runtime has no offscreen ImageBuffer
+    // target yet and always draws to the one back buffer, so BackBuffer()/
+    // FrontBuffer() just hand back a fixed handle for "the screen" and
+    // SetBuffer accepts it as a no-op; passing anything else is a runtime
+    // error rather than silently doing the wrong thing.
+    static const long long kScreenBuffer = 1;
+
+    static int c_BackBuffer(VM *vm, Value *args, int)
+    {
+        (void)vm;
+        args[0] = val_int(kScreenBuffer);
+        return 1;
+    }
+    static int c_FrontBuffer(VM *vm, Value *args, int)
+    {
+        (void)vm;
+        args[0] = val_int(kScreenBuffer);
+        return 1;
+    }
+    static int c_SetBuffer(VM *vm, Value *args, int nargs)
+    {
+        (void)nargs;
+        if (arg_int(args[0]) != kScreenBuffer)
+        {
+            vm->runtime_error("SetBuffer: only BackBuffer()/FrontBuffer() are supported (no ImageBuffer target yet)");
+            return -1;
+        }
+        return 0;
+    }
+
     extern const zen::CommandDecl bb3d_cmds_canvas[] = {
         {"Color%red%green%blue", c_Color},
         {"Plot%x%y", c_Plot},
@@ -79,6 +111,10 @@ namespace bb3d
         {"Rect%x%y%width%height%solid=1", c_Rect},
         {"Oval%x%y%width%height%solid=1", c_Oval},
         {"Text%x%y$text%centerx=0%centery=0", c_Text},
+
+        {"%BackBuffer", c_BackBuffer},
+        {"%FrontBuffer", c_FrontBuffer},
+        {"SetBuffer%buffer", c_SetBuffer},
     };
     extern const int bb3d_cmds_canvas_count = (int)(sizeof(bb3d_cmds_canvas) / sizeof(bb3d_cmds_canvas[0]));
 }

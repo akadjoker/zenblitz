@@ -112,6 +112,10 @@ namespace kx
     depthDesc.debugName = "screen.depth";
     mScreenDepthTexture = mGpu->createTexture(depthDesc);
 
+    // freshly (re)created - contents are undefined until the next pass
+    // over it actually clears
+    mScreenCleared = false;
+
     return mScreenTexture.valid() && mScreenDepthTexture.valid();
   }
 
@@ -175,6 +179,7 @@ namespace kx
       }
     }
     mInFrame = true;
+    mScreenCleared = true;
     return true;
   }
 
@@ -194,19 +199,26 @@ namespace kx
   {
     if (!mGpu || mInFrame)
       return false;
-    if (!mScreenTexture.valid())
+    // a program can call RenderWorld before ever calling Cls (Blitz3D
+    // always allowed this), in which case the screen texture was never
+    // created - create it here too rather than silently doing nothing.
+    if (!ensureScreenTexture())
       return false;
+
+    // ... and if it was just created (or recreated), its contents are
+    // undefined - Load would expose that instead of a clean clear.
+    const gpu::LoadOp loadOp = mScreenCleared ? gpu::LoadOp::Load : gpu::LoadOp::Clear;
 
     gpu::RenderPassDesc pass;
     pass.colorCount = 1;
     pass.colors[0].target.texture = mScreenTexture;
     pass.colors[0].surface = false;
-    pass.colors[0].loadOp = gpu::LoadOp::Load;
+    pass.colors[0].loadOp = loadOp;
     pass.colors[0].storeOp = gpu::StoreOp::Store;
     pass.hasDepthStencil = mSurfaceDepth;
     pass.depthStencil.target.texture = mScreenDepthTexture;
-    pass.depthStencil.depthLoadOp = gpu::LoadOp::Load;
-    pass.depthStencil.stencilLoadOp = gpu::LoadOp::Load;
+    pass.depthStencil.depthLoadOp = loadOp;
+    pass.depthStencil.stencilLoadOp = loadOp;
 
     if (!mGpu->beginRenderPass(pass))
     {
@@ -214,6 +226,7 @@ namespace kx
       return false;
     }
     mInFrame = true;
+    mScreenCleared = true;
     return true;
   }
 

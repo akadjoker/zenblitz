@@ -69,6 +69,13 @@ namespace kx
     gpu::TextureHandle mScreenDepthTexture;
     std::uint32_t mScreenTextureWidth = 0, mScreenTextureHeight = 0;
     bool mScreenSizeSet = false;
+    // createTexture leaves the screen texture's contents undefined; a
+    // program that calls RenderWorld before ever calling Cls (Blitz3D
+    // always allowed this - RenderWorld clears on its own) must still get
+    // a real clear on its first pass rather than whatever garbage the GPU
+    // handed back. Cleared by the first beginFrame() or reopenScreenPass()
+    // after the texture is (re)created.
+    bool mScreenCleared = false;
   };
 
 } // namespace kx
