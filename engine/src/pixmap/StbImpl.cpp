@@ -1,0 +1,9 @@
+/*
+** StbImpl.cpp — the single translation unit that compiles stb_image's
+** implementation (it is a header-only library gated behind these macros).
+** Pixmap.cpp includes the headers declaration-only.
+*/
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "stb_image_write.h"

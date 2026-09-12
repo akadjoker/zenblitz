@@ -1,21 +1,4 @@
-/*
-** Geom.h — Blitz3D's own vector/matrix/quaternion math (geom.h in the
-** original), brought in mostly verbatim rather than replaced by the
-** engine's mathc: it is what Position/Rotate/Move/TFormPoint and
-** entity/world/camera/collision already expect (Matrix as three basis
-** vectors + a separate position, not a 4x4), so using it directly avoids
-** a translation layer through the whole engine. mathc still owns the
-** GPU-facing side — see engine::toMat4() in Platform.h, the one place that
-** converts, exactly like the original converted Matrix to D3DMATRIX only
-** at draw time (gxruntime/gxscene.cpp).
-**
-** Kept in its own namespace (blitz::) rather than the original's global
-** scope, both to avoid colliding with engine/GPU code that also has
-** Vector/Matrix-shaped names and because the original's INFINITY constant
-** would otherwise collide with the <math.h> macro of the same name — hence
-** BLITZ_INFINITY below, the one renamed identifier in an otherwise
-** unmodified port.
-*/
+ 
 #ifndef GEOM_H
 #define GEOM_H
 

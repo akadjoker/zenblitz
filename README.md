@@ -1,5 +1,9 @@
 # zenblitz
 
+*In memory of Mark Sibly (1971–2024), creator of Blitz Basic and Blitz3D.
+His compiler gave a generation of hobbyists a way in — this project exists
+because that mattered.*
+
 ZenVM is a C++ register-based virtual machine (computed-goto dispatch,
 tri-color GC, fibers and cooperative processes, compact 32-bit bytecode).
 The language it compiles is **Blitz Basic** (Blitz3D syntax): the compiler

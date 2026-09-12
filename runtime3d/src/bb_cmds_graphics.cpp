@@ -1,14 +1,6 @@
 /*
-** bb_cmds_graphics.cpp — Marco 1: window, loop and input.
-**
-** Graphics, Flip, Cls, ClsColor, KeyDown, KeyHit, MouseX/Y/Down,
-** GraphicsWidth/Height, EndGraphics. Registered through zen::install_commands
-** (runtime.h) — the same signature format and native-function mechanism
-** install_runtime() uses for the console command set, so the compiler
-** treats these exactly like built-ins.
-**
-** One engine::Platform per VM, the same per_vm pattern bb_runtime.cpp (in
-** libzen, not visible here) uses for BBRuntime itself.
+** bb_cmds_graphics.cpp — Graphics, Flip, Cls, ClsColor, KeyDown, KeyHit,
+** MouseX/Y/Down, GraphicsWidth/Height, EndGraphics.
 */
 #include "runtime.h"
 #include "vm.h"
@@ -16,8 +8,6 @@
 #include "ct/hashmap.hpp"
 #include "engine/Platform.h"
 
-/* bb_arg_int/bb_arg_cstr live in libzen's private bb_runtime.h; runtime3d
-   reads Value fields directly instead of pulling that header in. */
 namespace { inline long long arg_int(zen::Value v) { return zen::is_int(v) ? v.as.integer
     : zen::is_float(v) ? (long long)v.as.number : 0; } }
 
@@ -27,7 +17,7 @@ namespace bb3d
 {
     static ct::HashMap<VM *, engine::Platform *> g_platforms;
 
-    static engine::Platform *platform_for(VM *vm)
+    engine::Platform *platform_for(VM *vm)
     {
         engine::Platform **found = g_platforms.find(vm);
         if (found) return *found;
@@ -36,21 +26,12 @@ namespace bb3d
         return p;
     }
 
-    /* ================= window ================= */
     static int c_Graphics(VM *vm, Value *args, int nargs)
     {
         int w = (int)arg_int(args[0]);
         int h = (int)arg_int(args[1]);
-        /* depth (args[2]) and mode (args[3]) are accepted for signature
-           compatibility with Blitz3D; the GPU backend picks its own. */
         engine::Platform *p = platform_for(vm);
         bool ok = p->open(w, h, "zenblitz3d", false);
-        /* Blitz3D had no explicit frame cap either — timing came from
-           vsync, which every desktop display effectively enforced. Nothing
-           here enforces that for us, so an uncapped While/Flip loop just
-           runs at whatever the CPU can do; 60 keeps it comparable to what
-           a real Blitz3D game looked like. Flip's vwait parameter (0 = no
-           wait) can still opt out per-call once that plumbing exists. */
         if (ok) p->setTargetFPS(60);
         args[0] = val_int(ok ? 1 : 0);
         (void)nargs;
@@ -76,7 +57,6 @@ namespace bb3d
         return 1;
     }
 
-    /* ================= frame ================= */
     static int c_Cls(VM *vm, Value *args, int nargs)
     {
         (void)args; (void)nargs;
@@ -95,11 +75,6 @@ namespace bb3d
         return 0;
     }
 
-    /* Suspends the VM for one frame instead of blocking (VM::request_suspend
-       with no deadline — a plain "come back after this frame"), so a
-       browser/Android host can drive frames from its own loop; the console
-       host's resume loop (cli/host_loop.h) just calls resume() straight
-       back since there is no deadline to wait out. */
     static int c_Flip(VM *vm, Value *args, int nargs)
     {
         (void)args; (void)nargs;
@@ -108,7 +83,6 @@ namespace bb3d
         return 0;
     }
 
-    /* ================= input ================= */
     static int c_KeyDown(VM *vm, Value *args, int)
     {
         int dik = (int)arg_int(args[0]);
@@ -132,10 +106,8 @@ namespace bb3d
         return 1;
     }
 
-    /* ================= table =================
-    ** extern: a const array at namespace scope has internal linkage by
-    ** default in C++, which runtime3d.cpp's `extern` declaration of the
-    ** same name would otherwise silently fail to find at link time. */
+    /* extern: without it, a const array at namespace scope has internal
+       linkage and runtime3d.cpp's extern declaration fails to link. */
     extern const zen::CommandDecl bb3d_cmds_graphics[] = {
         {"%Graphics%width%height%depth=0%mode=0", c_Graphics},
         {"%Graphics3D%width%height%depth=0%mode=0", c_Graphics3D},
