@@ -12,6 +12,7 @@
 #include "engine/MeshUtil.h"
 #include "engine/Camera.h"
 #include "engine/Light.h"
+#include "engine/MD2Model.h"
 
 namespace bb3d
 {
@@ -385,6 +386,58 @@ namespace bb3d
         return 0;
     }
 
+    static int c_LoadMD2(VM *vm, Value *args, int nargs)
+    {
+        (void)vm; (void)nargs;
+        const char *file = zen::is_string(args[0]) ? zen::as_cstring(args[0]) : "";
+        engine::Entity *parent = entity_of(arg_int(args[1]));
+        engine::MD2Model *m = new engine::MD2Model(file);
+        if (!m->getValid()) { delete m; args[0] = val_int(0); return 1; }
+        insert_entity(m, parent);
+        args[0] = val_int(store_entity(m));
+        return 1;
+    }
+
+    static engine::MD2Model *md2_of(long long h)
+    {
+        engine::Entity *e = entity_of(h);
+        engine::Model *m = e ? e->getModel() : nullptr;
+        return m ? m->getMD2Model() : nullptr;
+    }
+
+    static int c_AnimateMD2(VM *vm, Value *args, int nargs)
+    {
+        (void)vm; (void)nargs;
+        engine::MD2Model *m = md2_of(arg_int(args[0]));
+        if (m) m->startMD2Anim((int)arg_int(args[3]), (int)arg_int(args[4]), (int)arg_int(args[1]),
+                               arg_float(args[2]), arg_float(args[5]));
+        return 0;
+    }
+
+    static int c_MD2AnimTime(VM *vm, Value *args, int nargs)
+    {
+        (void)vm; (void)nargs;
+        engine::MD2Model *m = md2_of(arg_int(args[0]));
+        args[0] = val_float(m ? m->getMD2AnimTime() : 0.0f);
+        return 1;
+    }
+
+    static int c_MD2AnimLength(VM *vm, Value *args, int nargs)
+    {
+        (void)vm; (void)nargs;
+        engine::MD2Model *m = md2_of(arg_int(args[0]));
+        args[0] = val_int(m ? m->getMD2AnimLength() : 0);
+        return 1;
+    }
+
+    static int c_MD2Animating(VM *vm, Value *args, int nargs)
+    {
+        (void)vm; (void)nargs;
+        engine::MD2Model *m = md2_of(arg_int(args[0]));
+        args[0] = val_int(m && m->getMD2Animating() ? 1 : 0);
+        return 1;
+    }
+
     static int c_UpdateWorld(VM *vm, Value *args, int nargs)
     {
         (void)args; (void)nargs;
@@ -453,6 +506,12 @@ namespace bb3d
         {"LightColor%light%red%green%blue", c_LightColor},
         {"LightRange%light#range", c_LightRange},
         {"LightConeAngles%light#inner#outer", c_LightConeAngles},
+
+        {"%LoadMD2$file%parent=0", c_LoadMD2},
+        {"AnimateMD2%md2%mode=1#speed=1%first_frame=0%last_frame=9999#transition=0", c_AnimateMD2},
+        {"#MD2AnimTime%md2", c_MD2AnimTime},
+        {"%MD2AnimLength%md2", c_MD2AnimLength},
+        {"%MD2Animating%md2", c_MD2Animating},
 
         {"UpdateWorld#elapsed_time=1", c_UpdateWorld},
         {"RenderWorld#tween=1", c_RenderWorld},
