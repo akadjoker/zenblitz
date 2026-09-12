@@ -189,11 +189,35 @@ namespace engine
     void MeshRenderer::setLights(const ct::Vector<Light *> &lights)
     {
         mLights = lights;
+
+        int count = (int)mLights.size();
+        if (count > kMaxRenderLights) count = kMaxRenderLights;
+        mLightBlock.count = count;
+        for (int i = 0; i < count; ++i)
+        {
+            Light *l = mLights[i];
+            const Vector &pos = l->getRenderPosition();
+            const Vector &dir = l->getRenderDirection();
+            mLightBlock.posType[i][0] = pos.x;
+            mLightBlock.posType[i][1] = pos.y;
+            mLightBlock.posType[i][2] = pos.z;
+            mLightBlock.posType[i][3] = (float)(l->getType() - 1);
+            mLightBlock.colorRange[i][0] = l->getColor().x;
+            mLightBlock.colorRange[i][1] = l->getColor().y;
+            mLightBlock.colorRange[i][2] = l->getColor().z;
+            mLightBlock.colorRange[i][3] = l->getRange();
+            float innerCos = std::cos(l->getInnerAngle() * blitz::PI / 180.0f);
+            mLightBlock.dir[i][0] = dir.x;
+            mLightBlock.dir[i][1] = dir.y;
+            mLightBlock.dir[i][2] = dir.z;
+            mLightBlock.dir[i][3] = innerCos;
+        }
     }
 
     void MeshRenderer::beginFrame()
     {
         mStaged.clear();
+        mStagedCount = 0;
     }
 
     gpu::PipelineHandle MeshRenderer::pipelineFor(const PipelineKey &pk)
@@ -279,45 +303,29 @@ namespace engine
         u.fogFar = mPending.fogFar;
         u.flags = brush.getFX();
 
-        int count = (int)mLights.size();
-        if (count > kMaxRenderLights) count = kMaxRenderLights;
-        u.lightCount = count;
-        for (int i = 0; i < count; ++i)
-        {
-            Light *l = mLights[i];
-            const Vector &pos = l->getRenderPosition();
-            const Vector &dir = l->getRenderDirection();
-            u.lightPosType[i][0] = pos.x;
-            u.lightPosType[i][1] = pos.y;
-            u.lightPosType[i][2] = pos.z;
-            u.lightPosType[i][3] = (float)(l->getType() - 1);
-            u.lightColorRange[i][0] = l->getColor().x;
-            u.lightColorRange[i][1] = l->getColor().y;
-            u.lightColorRange[i][2] = l->getColor().z;
-            u.lightColorRange[i][3] = l->getRange();
-            float innerCos = std::cos(l->getInnerAngle() * blitz::PI / 180.0f);
-            u.lightDir[i][0] = dir.x;
-            u.lightDir[i][1] = dir.y;
-            u.lightDir[i][2] = dir.z;
-            u.lightDir[i][3] = innerCos;
-        }
+        u.lightCount = mLightBlock.count;
+        std::memcpy(u.lightPosType, mLightBlock.posType, sizeof(u.lightPosType));
+        std::memcpy(u.lightColorRange, mLightBlock.colorRange, sizeof(u.lightColorRange));
+        std::memcpy(u.lightDir, mLightBlock.dir, sizeof(u.lightDir));
 
-        mStaged.push_back(u);
+        std::uint64_t offset = (std::uint64_t)mStagedCount * mUniformStride;
+        if (mStaged.size() < offset + sizeof(Uniforms)) mStaged.resize(offset + mUniformStride);
+        std::memcpy(&mStaged[offset], &u, sizeof(Uniforms));
+        ++mStagedCount;
     }
 
     void MeshRenderer::flushUniforms(gpu::Device &dev)
     {
-        if (mStaged.empty()) return;
-        if (!ensureUniformBuffer(dev, (std::uint32_t)mStaged.size())) return;
+        if (mStagedCount == 0) return;
+        if (!ensureUniformBuffer(dev, mStagedCount)) return;
 
-        for (size_t i = 0; i < mStaged.size(); ++i)
-            dev.updateBuffer(mUniformBuffer, i * mUniformStride, {&mStaged[i], sizeof(Uniforms)});
+        dev.updateBuffer(mUniformBuffer, 0, {mStaged.data(), (std::uint64_t)mStagedCount * mUniformStride});
     }
 
     void MeshRenderer::draw(gpu::Device &dev, int index, const Surface *surface, const Brush &brush)
     {
         if (surface->gpuIndexCount() <= 0) return;
-        if (index < 0 || (size_t)index >= mStaged.size()) return;
+        if (index < 0 || (std::uint32_t)index >= mStagedCount) return;
 
         PipelineKey pk;
         pk.blend = brush.getBlend();

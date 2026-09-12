@@ -76,6 +76,17 @@ namespace engine
         PendingState mPending;
         ct::Vector<Light *> mLights;
 
+        // Pre-encoded once per setLights() call (once per frame), not
+        // re-derived (with a per-light std::cos) on every prepare().
+        struct LightBlock
+        {
+            std::int32_t count = 0;
+            float posType[kMaxRenderLights][4] = {};
+            float colorRange[kMaxRenderLights][4] = {};
+            float dir[kMaxRenderLights][4] = {};
+        };
+        LightBlock mLightBlock;
+
         struct Uniforms
         {
             float mvp[16];
@@ -93,7 +104,12 @@ namespace engine
             float lightColorRange[kMaxRenderLights][4];
             float lightDir[kMaxRenderLights][4];
         };
-        ct::Vector<Uniforms> mStaged;
+        // Staged uniforms, laid out at mUniformStride apart (not tightly
+        // packed as sizeof(Uniforms)) so flushUniforms can upload the
+        // whole thing in one updateBuffer and draw() can bind each
+        // entry's slot directly by offset.
+        ct::Vector<unsigned char> mStaged;
+        std::uint32_t mStagedCount = 0;
 
         gpu::PipelineHandle pipelineFor(const PipelineKey &pk);
         bool ensureUniformBuffer(gpu::Device &dev, std::uint32_t count);
