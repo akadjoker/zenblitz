@@ -43,6 +43,22 @@ namespace engine
     class Brush
     {
     public:
+        Brush() {}
+
+        // Combines surface brush `a` with model brush `b`, as the original
+        // Brush(a,b) constructor did: color/alpha multiply, shininess adds,
+        // b's blend/fx/textures override when set.
+        Brush(const Brush &a, const Brush &b)
+            : mColor(a.mColor * b.mColor), mAlpha(a.mAlpha * b.mAlpha),
+              mShininess(a.mShininess + b.mShininess), mBlend(b.mBlend ? b.mBlend : a.mBlend),
+              mFx(a.mFx | b.mFx), mMaxTex(a.mMaxTex)
+        {
+            for (int k = 0; k < kMaxBrushTextures; ++k) mTextures[k] = a.mTextures[k];
+            if (b.mMaxTex > mMaxTex) mMaxTex = b.mMaxTex;
+            for (int k = 0; k < mMaxTex; ++k)
+                if (b.mTextures[k].handle.valid()) mTextures[k] = b.mTextures[k];
+        }
+
         void setColor(const Vector &color) { mColor = color; }
         void setAlpha(float alpha) { mAlpha = alpha; }
         void setShininess(float shininess) { mShininess = shininess; }

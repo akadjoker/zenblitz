@@ -34,6 +34,15 @@ namespace engine
         void beginFrame();
         void endFrame();
 
+        /* RenderWorld: closes the Canvas 2D pass (flushing any pending
+           Batch draws first), so 3D code can do its own GPU uploads with
+           no pass open. beginWorldRender() reopens on the same texture
+           with Load once 3D is done, so 2D commands after RenderWorld
+           keep drawing over it. */
+        void flushCanvasPass();
+        bool beginWorldRender();
+        void endWorldRender();
+
         gpu::Device &device() { return mGraphics.device(); }
         kx::BatchRenderer &batch() { return mBatch; }
 

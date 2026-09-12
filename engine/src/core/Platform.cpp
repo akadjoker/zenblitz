@@ -122,9 +122,8 @@ namespace engine
         if (!mDevice.isOpen()) mOpen = false;
     }
 
-    void Platform::endFrame()
+    void Platform::flushCanvasPass()
     {
-        /* Flip: close the Cls pass, upload, reopen with Load, draw, close. */
         if (mGraphics.inFrame()) mGraphics.endFrame();
         mBatch.flip();
         if (mGraphics.reopenScreenPass())
@@ -132,6 +131,22 @@ namespace engine
             mBatch.draw();
             mGraphics.endFrame();
         }
+    }
+
+    bool Platform::beginWorldRender()
+    {
+        return mGraphics.reopenScreenPass();
+    }
+
+    void Platform::endWorldRender()
+    {
+        mGraphics.endFrame();
+    }
+
+    void Platform::endFrame()
+    {
+        /* Flip: close the Cls pass, upload, reopen with Load, draw, close. */
+        flushCanvasPass();
 
         /* the blit quad fills the window, not the logical screen size -
            switch the batch's projection to the window for just this draw. */

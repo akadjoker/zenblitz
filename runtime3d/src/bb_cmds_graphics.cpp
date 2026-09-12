@@ -7,6 +7,7 @@
 #include "object.h"
 #include "ct/hashmap.hpp"
 #include "engine/Platform.h"
+#include "engine/World.h"
 
 namespace { inline long long arg_int(zen::Value v) { return zen::is_int(v) ? v.as.integer
     : zen::is_float(v) ? (long long)v.as.number : 0; } }
@@ -16,6 +17,7 @@ using namespace zen;
 namespace bb3d
 {
     static ct::HashMap<VM *, engine::Platform *> g_platforms;
+    static ct::HashMap<VM *, engine::World *> g_worlds;
 
     engine::Platform *platform_for(VM *vm)
     {
@@ -24,6 +26,15 @@ namespace bb3d
         engine::Platform *p = new engine::Platform();
         g_platforms.put(vm, p);
         return p;
+    }
+
+    engine::World *world_for(VM *vm)
+    {
+        engine::World **found = g_worlds.find(vm);
+        if (found) return *found;
+        engine::World *w = new engine::World();
+        g_worlds.put(vm, w);
+        return w;
     }
 
     static int c_Graphics(VM *vm, Value *args, int nargs)
@@ -37,7 +48,13 @@ namespace bb3d
         (void)nargs;
         return 1;
     }
-    static int c_Graphics3D(VM *vm, Value *args, int nargs) { return c_Graphics(vm, args, nargs); }
+    static int c_Graphics3D(VM *vm, Value *args, int nargs)
+    {
+        int rv = c_Graphics(vm, args, nargs);
+        if (is_int(args[0]) && args[0].as.integer)
+            world_for(vm)->init(platform_for(vm)->device());
+        return rv;
+    }
 
     static int c_EndGraphics(VM *vm, Value *args, int nargs)
     {

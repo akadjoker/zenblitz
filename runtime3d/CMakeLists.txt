@@ -3,6 +3,7 @@ add_library(zenblitz_runtime3d STATIC
     src/bb_cmds_graphics.cpp
     src/bb_cmds_canvas.cpp
     src/bb_cmds_image.cpp
+    src/bb_cmds_world.cpp
 )
 target_include_directories(zenblitz_runtime3d PUBLIC include)
 target_link_libraries(zenblitz_runtime3d PUBLIC zen_static zenblitz_engine)

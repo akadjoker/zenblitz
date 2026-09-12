@@ -209,9 +209,7 @@ namespace engine
             for (size_t k = 0; k < mSurfaces.size(); ++k)
             {
                 Surface *s = mSurfaces[k];
-                Brush combined = s->getBrush();
-                combined.setAlpha(combined.getAlpha() * getRenderBrush().getAlpha());
-                mBrushes.push_back(combined);
+                mBrushes.push_back(Brush(s->getBrush(), getRenderBrush()));
             }
             mLocalBrushChanges = mBrushChanges;
         }
