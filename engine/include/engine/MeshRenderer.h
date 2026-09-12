@@ -5,16 +5,20 @@
 #include "engine/Brush.h"
 #include "engine/Light.h"
 #include "engine/Matrix4.h"
+#include "engine/ShaderDialect.h"
 #include <ct/vector.hpp>
 
 namespace engine
 {
     static constexpr int kMaxRenderLights = 4;
+    // 128 mat4 = 8 KB, half the 16 KB uniform block minimum WebGL2/GLES3
+    // guarantee. Models with more bones fall back to CPU skinning.
+    static constexpr int kMaxGpuBones = 128;
 
     class MeshRenderer
     {
     public:
-        bool init(gpu::Device &dev);
+        bool init(gpu::Device &dev, kx::ShaderDialect dialect);
         void shutdown();
 
         void setViewProjection(const Matrix4 &vp) { mPending.viewProjection = vp; }
@@ -29,16 +33,22 @@ namespace engine
 
         // Call once per frame, with no render pass open, before any prepare().
         void beginFrame();
+        // Stages one model's world-space bone matrices; returns the slot to
+        // pass to prepare()/draw(), or -1 if count is 0 or above
+        // kMaxGpuBones (caller then skins on the CPU instead).
+        int stageBones(const Matrix4 *mats, int count);
         // Stages one draw call's uniforms (reads the current
         // viewProjection/ambient/fog/lights) - call with no render pass
         // open, any number of times between beginFrame() and flushUniforms().
         void prepare(const Surface *surface, const Brush &brush, const Matrix4 &model);
-        // Uploads every staged draw call's uniforms in one buffer - call
-        // once, with no render pass open, after all prepare() calls.
+        // Uploads every staged uniform and bone block in one buffer each -
+        // call once, with no render pass open, after all prepare() calls.
         void flushUniforms(gpu::Device &dev);
         // Issues the Nth prepared draw call - call inside a render pass,
         // index matching prepare() call order since the last beginFrame().
-        void draw(gpu::Device &dev, int index, const Surface *surface, const Brush &brush);
+        // boneSlot from stageBones() selects the skinned pipeline; -1 draws
+        // the vertex buffer as is.
+        void draw(gpu::Device &dev, int index, const Surface *surface, const Brush &brush, int boneSlot);
 
     private:
         struct PipelineKey
@@ -46,21 +56,29 @@ namespace engine
             int blend = 0;
             bool doubleSided = false;
             bool hasTexture = false;
+            bool skinned = false;
             std::uint32_t key() const
             {
-                return (std::uint32_t)blend | (doubleSided ? 0x100u : 0u) | (hasTexture ? 0x200u : 0u);
+                return (std::uint32_t)blend | (doubleSided ? 0x100u : 0u) | (hasTexture ? 0x200u : 0u) |
+                       (skinned ? 0x400u : 0u);
             }
         };
         struct CachedPipeline
         {
             std::uint32_t key = 0;
             gpu::PipelineHandle pipeline;
+            std::int32_t uniformsSlot = 0;
+            std::int32_t bonesSlot = -1;
         };
 
         gpu::Device *mGpu = nullptr;
+        kx::ShaderDialect mDialect = kx::ShaderDialect::GLSL330;
         gpu::BufferHandle mUniformBuffer;
         std::uint64_t mUniformBufferCapacity = 0;
         std::uint32_t mUniformStride = 0;
+        gpu::BufferHandle mBoneBuffer;
+        std::uint64_t mBoneBufferCapacity = 0;
+        std::uint32_t mBoneStride = 0;
         gpu::SamplerHandle mSampler;
         gpu::TextureHandle mWhiteTexture;
         ct::Vector<CachedPipeline> mPipelines;
@@ -104,12 +122,13 @@ namespace engine
             float lightColorRange[kMaxRenderLights][4];
             float lightDir[kMaxRenderLights][4];
         };
-        // Staged uniforms, laid out at mUniformStride apart (not tightly
-        // packed as sizeof(Uniforms)) so flushUniforms can upload the
-        // whole thing in one updateBuffer and draw() can bind each
-        // entry's slot directly by offset.
+        // Staged blocks laid out at their GPU stride (not tightly packed)
+        // so flushUniforms uploads each buffer in one updateBuffer and
+        // draw() binds any entry by offset.
         ct::Vector<unsigned char> mStaged;
         std::uint32_t mStagedCount = 0;
+        ct::Vector<unsigned char> mBoneStaged;
+        std::uint32_t mBoneStagedCount = 0;
 
         // last handles bound by draw() this frame (0 = nothing bound yet)
         struct BoundState
@@ -118,8 +137,9 @@ namespace engine
         };
         BoundState mBound;
 
-        gpu::PipelineHandle pipelineFor(const PipelineKey &pk);
-        bool ensureUniformBuffer(gpu::Device &dev, std::uint32_t count);
+        const CachedPipeline *pipelineFor(const PipelineKey &pk);
+        bool ensureBuffer(gpu::Device &dev, gpu::BufferHandle &buffer, std::uint64_t &capacity,
+                          std::uint64_t needed, const char *debugName);
     };
 }
 

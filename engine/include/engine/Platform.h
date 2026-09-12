@@ -44,6 +44,7 @@ namespace engine
         void endWorldRender();
 
         gpu::Device &device() { return mGraphics.device(); }
+        kx::ShaderDialect shaderDialect() const { return mGraphics.shaderDialect(); }
         kx::BatchRenderer &batch() { return mBatch; }
 
         /* ARGB, 0 outside the window. Reads the previous frame's finished

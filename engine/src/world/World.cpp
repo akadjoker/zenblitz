@@ -439,6 +439,7 @@ namespace engine
             dc.brush = q[k].brush;
             dc.vpX = mPendingCamera.vpX; dc.vpY = mPendingCamera.vpY;
             dc.vpW = mPendingCamera.vpW; dc.vpH = mPendingCamera.vpH;
+            dc.boneSlot = mod->boneSlot();
             mDrawCalls.push_back(dc);
         }
         q.clear();
@@ -447,6 +448,11 @@ namespace engine
     void World::render(Model *mod, const RenderContext &rc, gpu::Device &dev)
     {
         bool trans = mod->render(rc);
+
+        // one bone block per skinned model per camera pass; the slot rides
+        // on the model so the transparent queue (flushed later) finds it
+        int boneCount = mod->gpuBoneCount();
+        mod->setBoneSlot(boneCount > 0 ? mRenderer.stageBones(mod->gpuBoneMatrices(), boneCount) : -1);
 
         if (mod->queueSize(Model::QueueOpaque))
             enqueueModelQueue(mod, Model::QueueOpaque, dev);
@@ -481,7 +487,7 @@ namespace engine
                 dev.setViewport(vp);
                 lastVpX = dc.vpX; lastVpY = dc.vpY; lastVpW = dc.vpW; lastVpH = dc.vpH;
             }
-            mRenderer.draw(dev, (int)k, dc.surface, dc.brush);
+            mRenderer.draw(dev, (int)k, dc.surface, dc.brush, dc.boneSlot);
         }
     }
 }

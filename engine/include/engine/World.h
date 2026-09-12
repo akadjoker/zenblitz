@@ -30,9 +30,10 @@ namespace engine
             Surface *surface;
             Brush brush;
             int vpX, vpY, vpW, vpH;
+            int boneSlot;
         };
 
-        bool init(gpu::Device &dev) { return mRenderer.init(dev); }
+        bool init(gpu::Device &dev, kx::ShaderDialect dialect) { return mRenderer.init(dev, dialect); }
         void shutdown() { mRenderer.shutdown(); }
 
         void clearCollisions();

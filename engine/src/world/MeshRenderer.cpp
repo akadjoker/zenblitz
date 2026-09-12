@@ -1,15 +1,13 @@
 #include "engine/MeshRenderer.h"
 #include <cstring>
 #include <cmath>
+#include <string>
 
 namespace engine
 {
-    static const char kVertexShader[] =
-        "#version 330 core\n"
-        "layout(location=0) in vec3 a_pos;\n"
-        "layout(location=1) in vec3 a_normal;\n"
-        "layout(location=2) in vec4 a_color;\n"
-        "layout(location=3) in vec2 a_uv;\n"
+    // Shader bodies without a #version line: shaderPrefix() prepends the
+    // dialect's version/precision and an optional SKINNED define.
+    static const char kUniformBlock[] =
         "layout(std140) uniform Uniforms {\n"
         "  mat4 u_mvp;\n"
         "  mat4 u_model;\n"
@@ -24,41 +22,54 @@ namespace engine
         "  vec4 u_lightPosType[4];\n"
         "  vec4 u_lightColorRange[4];\n"
         "  vec4 u_lightDir[4];\n"
-        "};\n"
+        "};\n";
+
+    static const char kVertexBody[] =
+        "layout(location=0) in vec3 a_pos;\n"
+        "layout(location=1) in vec3 a_normal;\n"
+        "layout(location=2) in vec4 a_color;\n"
+        "layout(location=3) in vec2 a_uv;\n"
+        "#ifdef SKINNED\n"
+        "layout(location=4) in vec4 a_bones;\n"
+        "layout(location=5) in vec4 a_weights;\n"
+        "layout(std140) uniform Bones { mat4 u_bones[128]; };\n"
+        "#endif\n"
         "out vec3 v_worldPos;\n"
         "out vec3 v_normal;\n"
         "out vec4 v_color;\n"
         "out vec2 v_uv;\n"
         "void main(){\n"
-        "  vec4 wp = u_model * vec4(a_pos,1.0);\n"
+        "  vec4 lp = vec4(a_pos,1.0);\n"
+        "  vec3 ln = a_normal;\n"
+        "#ifdef SKINNED\n"
+        "  int b0 = int(a_bones.x*255.0+0.5);\n"
+        "  if (b0 == 255) {\n"
+        "    lp = u_bones[0]*lp;\n"
+        "    ln = mat3(u_bones[0])*ln;\n"
+        "  } else {\n"
+        "    vec4 sp = vec4(0.0); vec3 sn = vec3(0.0);\n"
+        "    for (int i = 0; i < 4; ++i) {\n"
+        "      int b = int(a_bones[i]*255.0+0.5);\n"
+        "      if (b == 255) break;\n"
+        "      sp += a_weights[i]*(u_bones[b]*lp);\n"
+        "      sn += a_weights[i]*(mat3(u_bones[b])*ln);\n"
+        "    }\n"
+        "    lp = sp; ln = sn;\n"
+        "  }\n"
+        "#endif\n"
+        "  vec4 wp = u_model * lp;\n"
         "  v_worldPos = wp.xyz;\n"
-        "  v_normal = mat3(u_model) * a_normal;\n"
+        "  v_normal = mat3(u_model) * ln;\n"
         "  v_color = a_color;\n"
         "  v_uv = a_uv;\n"
-        "  gl_Position = u_mvp * vec4(a_pos,1.0);\n"
+        "  gl_Position = u_mvp * lp;\n"
         "}\n";
 
-    static const char kFragmentShader[] =
-        "#version 330 core\n"
+    static const char kFragmentBody[] =
         "in vec3 v_worldPos;\n"
         "in vec3 v_normal;\n"
         "in vec4 v_color;\n"
         "in vec2 v_uv;\n"
-        "layout(std140) uniform Uniforms {\n"
-        "  mat4 u_mvp;\n"
-        "  mat4 u_model;\n"
-        "  vec4 u_color;\n"
-        "  vec4 u_ambient;\n"
-        "  vec4 u_fogColor;\n"
-        "  int u_flags;\n"
-        "  int u_lightCount;\n"
-        "  int u_fogMode;\n"
-        "  float u_fogNear;\n"
-        "  float u_fogFar;\n"
-        "  vec4 u_lightPosType[4];\n"
-        "  vec4 u_lightColorRange[4];\n"
-        "  vec4 u_lightDir[4];\n"
-        "};\n"
         "uniform sampler2D u_texture;\n"
         "out vec4 o_color;\n"
         "const int FX_FULLBRIGHT=0x0001;\n"
@@ -127,13 +138,34 @@ namespace engine
         "  o_color = vec4(litColor, alpha);\n"
         "}\n";
 
-    bool MeshRenderer::init(gpu::Device &dev)
+    static std::string shaderSource(kx::ShaderDialect dialect, bool fragment, bool skinned)
+    {
+        std::string s;
+        if (dialect == kx::ShaderDialect::GLSLES300)
+        {
+            s += "#version 300 es\n";
+            s += "precision highp float;\n";
+            s += "precision highp int;\n";
+        }
+        else
+        {
+            s += "#version 330 core\n";
+        }
+        if (skinned) s += "#define SKINNED 1\n";
+        s += kUniformBlock;
+        s += fragment ? kFragmentBody : kVertexBody;
+        return s;
+    }
+
+    bool MeshRenderer::init(gpu::Device &dev, kx::ShaderDialect dialect)
     {
         mGpu = &dev;
+        mDialect = dialect;
 
         std::uint32_t align = dev.capabilities().uniformBufferOffsetAlignment;
         if (align == 0) align = 1;
         mUniformStride = ((std::uint32_t)sizeof(Uniforms) + align - 1) / align * align;
+        mBoneStride = ((std::uint32_t)(kMaxGpuBones * sizeof(Matrix4)) + align - 1) / align * align;
 
         gpu::SamplerDesc samplerDesc;
         samplerDesc.minFilter = gpu::Filter::Linear;
@@ -156,23 +188,23 @@ namespace engine
         return mSampler.valid() && mWhiteTexture.valid();
     }
 
-    bool MeshRenderer::ensureUniformBuffer(gpu::Device &dev, std::uint32_t count)
+    bool MeshRenderer::ensureBuffer(gpu::Device &dev, gpu::BufferHandle &buffer, std::uint64_t &capacity,
+                                    std::uint64_t needed, const char *debugName)
     {
-        std::uint64_t needed = (std::uint64_t)mUniformStride * count;
-        if (needed <= mUniformBufferCapacity && mUniformBuffer.valid()) return true;
+        if (needed <= capacity && buffer.valid()) return true;
 
-        if (mUniformBuffer.valid()) dev.destroy(mUniformBuffer);
+        if (buffer.valid()) dev.destroy(buffer);
 
-        std::uint64_t capacity = mUniformBufferCapacity ? mUniformBufferCapacity : mUniformStride * 64;
-        while (capacity < needed) capacity *= 2;
+        std::uint64_t cap = capacity ? capacity : needed;
+        while (cap < needed) cap *= 2;
 
         gpu::BufferDesc desc;
-        desc.size = capacity;
+        desc.size = cap;
         desc.usage = gpu::BufferUsageUniform;
-        desc.debugName = "meshrenderer.uniforms";
-        mUniformBuffer = dev.createBuffer(desc);
-        mUniformBufferCapacity = mUniformBuffer.valid() ? capacity : 0;
-        return mUniformBuffer.valid();
+        desc.debugName = debugName;
+        buffer = dev.createBuffer(desc);
+        capacity = buffer.valid() ? cap : 0;
+        return buffer.valid();
     }
 
     void MeshRenderer::shutdown()
@@ -181,8 +213,12 @@ namespace engine
         for (size_t k = 0; k < mPipelines.size(); ++k) mGpu->destroy(mPipelines[k].pipeline);
         mPipelines.clear();
         if (mUniformBuffer.valid()) mGpu->destroy(mUniformBuffer);
+        if (mBoneBuffer.valid()) mGpu->destroy(mBoneBuffer);
         if (mSampler.valid()) mGpu->destroy(mSampler);
         if (mWhiteTexture.valid()) mGpu->destroy(mWhiteTexture);
+        mUniformBuffer = gpu::BufferHandle();
+        mBoneBuffer = gpu::BufferHandle();
+        mUniformBufferCapacity = mBoneBufferCapacity = 0;
         mGpu = nullptr;
     }
 
@@ -218,30 +254,50 @@ namespace engine
     {
         mStaged.clear();
         mStagedCount = 0;
+        mBoneStaged.clear();
+        mBoneStagedCount = 0;
         // the Canvas Batch draws between our prepare() and draw() and
         // binds its own pipeline/buffers, so nothing can be assumed bound
         mBound = BoundState();
     }
 
-    gpu::PipelineHandle MeshRenderer::pipelineFor(const PipelineKey &pk)
+    int MeshRenderer::stageBones(const Matrix4 *mats, int count)
+    {
+        if (!mats || count <= 0 || count > kMaxGpuBones) return -1;
+        std::uint64_t offset = (std::uint64_t)mBoneStagedCount * mBoneStride;
+        if (mBoneStaged.size() < offset + mBoneStride) mBoneStaged.resize(offset + mBoneStride);
+        std::memcpy(&mBoneStaged[offset], mats, (size_t)count * sizeof(Matrix4));
+        return (int)mBoneStagedCount++;
+    }
+
+    const MeshRenderer::CachedPipeline *MeshRenderer::pipelineFor(const PipelineKey &pk)
     {
         std::uint32_t key = pk.key();
         for (size_t i = 0; i < mPipelines.size(); ++i)
-            if (mPipelines[i].key == key) return mPipelines[i].pipeline;
+            if (mPipelines[i].key == key) return &mPipelines[i];
+
+        std::string vs = shaderSource(mDialect, false, pk.skinned);
+        std::string fs = shaderSource(mDialect, true, pk.skinned);
 
         gpu::PipelineDesc desc;
-        desc.vertex.source = {kVertexShader, sizeof(kVertexShader) - 1};
-        desc.fragment.source = {kFragmentShader, sizeof(kFragmentShader) - 1};
-        desc.vertex.debugName = "mesh.vs";
+        desc.vertex.source = {vs.data(), vs.size()};
+        desc.fragment.source = {fs.data(), fs.size()};
+        desc.vertex.debugName = pk.skinned ? "mesh.skinned.vs" : "mesh.vs";
         desc.fragment.debugName = "mesh.fs";
-        desc.debugName = "mesh";
+        desc.debugName = pk.skinned ? "mesh.skinned" : "mesh";
         desc.vertexBufferCount = 1;
         desc.vertexBuffers[0].stride = sizeof(Surface::Vertex);
-        desc.vertexBuffers[0].attributeCount = 4;
+        desc.vertexBuffers[0].attributeCount = pk.skinned ? 6 : 4;
         desc.vertexBuffers[0].attributes[0] = {gpu::VertexFormat::Float32x3, (std::uint32_t)offsetof(Surface::Vertex, coords), 0};
         desc.vertexBuffers[0].attributes[1] = {gpu::VertexFormat::Float32x3, (std::uint32_t)offsetof(Surface::Vertex, normal), 1};
         desc.vertexBuffers[0].attributes[2] = {gpu::VertexFormat::Unorm8x4, (std::uint32_t)offsetof(Surface::Vertex, color), 2};
         desc.vertexBuffers[0].attributes[3] = {gpu::VertexFormat::Float32x2, (std::uint32_t)offsetof(Surface::Vertex, texCoords), 3};
+        if (pk.skinned)
+        {
+            // bone indices as Unorm8x4: the shader decodes int(x*255+0.5)
+            desc.vertexBuffers[0].attributes[4] = {gpu::VertexFormat::Unorm8x4, (std::uint32_t)offsetof(Surface::Vertex, boneBones), 4};
+            desc.vertexBuffers[0].attributes[5] = {gpu::VertexFormat::Float32x4, (std::uint32_t)offsetof(Surface::Vertex, boneWeights), 5};
+        }
         desc.topology = gpu::Topology::Triangles;
         desc.colorTargetCount = 1;
         desc.colorTargets[0].format = gpu::Format::RGBA8;
@@ -278,8 +334,16 @@ namespace engine
         CachedPipeline cached;
         cached.key = key;
         cached.pipeline = mGpu->createPipeline(desc);
+        if (cached.pipeline.valid())
+        {
+            // the GL backend assigns block bindings by active-block index,
+            // which the linker orders - look both up by name
+            std::int32_t u = mGpu->uniformBlockSlot(cached.pipeline, "Uniforms");
+            cached.uniformsSlot = u >= 0 ? u : 0;
+            cached.bonesSlot = pk.skinned ? mGpu->uniformBlockSlot(cached.pipeline, "Bones") : -1;
+        }
         mPipelines.push_back(cached);
-        return cached.pipeline;
+        return &mPipelines[mPipelines.size() - 1];
     }
 
     void MeshRenderer::prepare(const Surface *surface, const Brush &brush, const Matrix4 &model)
@@ -312,31 +376,41 @@ namespace engine
         std::memcpy(u.lightDir, mLightBlock.dir, sizeof(u.lightDir));
 
         std::uint64_t offset = (std::uint64_t)mStagedCount * mUniformStride;
-        if (mStaged.size() < offset + sizeof(Uniforms)) mStaged.resize(offset + mUniformStride);
+        if (mStaged.size() < offset + mUniformStride) mStaged.resize(offset + mUniformStride);
         std::memcpy(&mStaged[offset], &u, sizeof(Uniforms));
         ++mStagedCount;
     }
 
     void MeshRenderer::flushUniforms(gpu::Device &dev)
     {
-        if (mStagedCount == 0) return;
-        if (!ensureUniformBuffer(dev, mStagedCount)) return;
-
-        dev.updateBuffer(mUniformBuffer, 0, {mStaged.data(), (std::uint64_t)mStagedCount * mUniformStride});
+        if (mStagedCount)
+        {
+            std::uint64_t bytes = (std::uint64_t)mStagedCount * mUniformStride;
+            if (ensureBuffer(dev, mUniformBuffer, mUniformBufferCapacity, bytes, "meshrenderer.uniforms"))
+                dev.updateBuffer(mUniformBuffer, 0, {mStaged.data(), bytes});
+        }
+        if (mBoneStagedCount)
+        {
+            std::uint64_t bytes = (std::uint64_t)mBoneStagedCount * mBoneStride;
+            if (ensureBuffer(dev, mBoneBuffer, mBoneBufferCapacity, bytes, "meshrenderer.bones"))
+                dev.updateBuffer(mBoneBuffer, 0, {mBoneStaged.data(), bytes});
+        }
     }
 
-    void MeshRenderer::draw(gpu::Device &dev, int index, const Surface *surface, const Brush &brush)
+    void MeshRenderer::draw(gpu::Device &dev, int index, const Surface *surface, const Brush &brush, int boneSlot)
     {
         if (surface->gpuIndexCount() <= 0) return;
         if (index < 0 || (std::uint32_t)index >= mStagedCount) return;
+        if (boneSlot >= 0 && (std::uint32_t)boneSlot >= mBoneStagedCount) return;
 
         PipelineKey pk;
         pk.blend = brush.getBlend();
         pk.doubleSided = (brush.getFX() & FxDoubleSided) != 0;
         pk.hasTexture = brush.getTextureCount() > 0;
+        pk.skinned = boneSlot >= 0;
 
-        gpu::PipelineHandle pipeline = pipelineFor(pk);
-        if (!pipeline.valid()) return;
+        const CachedPipeline *cp = pipelineFor(pk);
+        if (!cp->pipeline.valid()) return;
 
         gpu::TextureHandle tex = pk.hasTexture ? brush.getTexture(0).handle : mWhiteTexture;
         if (!tex.valid()) tex = mWhiteTexture;
@@ -344,12 +418,16 @@ namespace engine
         // the GL backend re-issues glUseProgram/glBindTexture/glBindBuffer
         // on every call with no caching of its own, so skip binds that
         // haven't changed since the last draw this frame
-        if (pipeline.value() != mBound.pipeline)
+        if (cp->pipeline.value() != mBound.pipeline)
         {
-            dev.setPipeline(pipeline);
-            mBound.pipeline = pipeline.value();
+            dev.setPipeline(cp->pipeline);
+            mBound.pipeline = cp->pipeline.value();
         }
-        dev.bindUniformBuffer(0, mUniformBuffer, (std::uint64_t)index * mUniformStride, sizeof(Uniforms));
+        dev.bindUniformBuffer((std::uint32_t)cp->uniformsSlot, mUniformBuffer,
+                              (std::uint64_t)index * mUniformStride, sizeof(Uniforms));
+        if (pk.skinned && cp->bonesSlot >= 0)
+            dev.bindUniformBuffer((std::uint32_t)cp->bonesSlot, mBoneBuffer,
+                                  (std::uint64_t)boneSlot * mBoneStride, kMaxGpuBones * sizeof(Matrix4));
         if (tex.value() != mBound.texture)
         {
             dev.bindTexture(0, tex, mSampler);

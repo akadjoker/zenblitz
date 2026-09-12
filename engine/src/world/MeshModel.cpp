@@ -228,11 +228,13 @@ namespace engine
         }
 
         const ct::Vector<Object *> &bones = getAnimator()->getObjects();
+        mBoneMats.resize(bones.size());
         for (size_t k = 0; k < bones.size(); ++k)
         {
             Transform t = bones[k]->getRenderTform() * mBoneTforms[k];
             mSurfBones[k].coordTform = t;
             mSurfBones[k].normalTform = t.m.cofactor();
+            mBoneMats[k] = Matrix4::fromBlitz(t);
         }
 
         bool trans = false;
@@ -273,7 +275,10 @@ namespace engine
         ct::Vector<QueueEntry> &q = queue(type);
         for (size_t k = 0; k < q.size(); ++k)
         {
-            if (mSurfBones.empty())
+            // GPU skinning keeps the bind-pose vertex buffer static (uploaded
+            // once); only models with more bones than the shader's block
+            // holds are skinned on the CPU every frame.
+            if (mSurfBones.empty() || gpuSkinned())
                 q[k].surface->ensureGpu(dev);
             else
                 q[k].surface->ensureGpuSkinned(dev, mSurfBones);

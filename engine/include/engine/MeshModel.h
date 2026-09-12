@@ -4,6 +4,7 @@
 #include "engine/Model.h"
 #include "engine/MeshCollider.h"
 #include "engine/RenderContext.h"
+#include "engine/MeshRenderer.h"
 #include <ct/vector.hpp>
 #include <ct/hashmap.hpp>
 
@@ -56,8 +57,15 @@ namespace engine
 
         ct::Vector<Surface::Bone> mSurfBones;
         ct::Vector<Transform> mBoneTforms;
+        ct::Vector<Matrix4> mBoneMats;
+
+        bool gpuSkinned() const { return !mSurfBones.empty() && (int)mSurfBones.size() <= kMaxGpuBones; }
 
         const Box &getCullBox() const { return mCullBox.empty() ? getBox() : mCullBox; }
+
+    public:
+        int gpuBoneCount() const override { return gpuSkinned() ? (int)mBoneMats.size() : 0; }
+        const Matrix4 *gpuBoneMatrices() const override { return gpuSkinned() ? mBoneMats.data() : nullptr; }
     };
 }
 

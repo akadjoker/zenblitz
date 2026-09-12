@@ -112,8 +112,10 @@ namespace engine
 
     bool Surface::ensureGpuSkinned(gpu::Device &dev, const ct::Vector<Bone> &bones)
     {
+        // vertices are re-skinned every call; indices never change with
+        // skinning, so only mValidVs is reset here and the index buffer is
+        // uploaded once (or when triangles were added)
         mValidVs = 0;
-        mValidTs = 0;
 
         if (mMeshVs < (int)mVertices.size() || mMeshTs < (int)mTriangles.size())
         {
@@ -121,6 +123,7 @@ namespace engine
             if (mIndexBuffer.valid()) dev.destroy(mIndexBuffer);
             mMeshVs = (int)mVertices.size();
             mMeshTs = (int)mTriangles.size();
+            mValidTs = 0;
 
             gpu::BufferDesc vbDesc;
             vbDesc.size = (std::uint64_t)mMeshVs * sizeof(Vertex);
@@ -135,12 +138,12 @@ namespace engine
             mIndexBuffer = dev.createBuffer(ibDesc);
         }
 
-        ct::Vector<Vertex> skinned;
-        skinned.reserve(mVertices.size());
+        mSkinScratch.resize(mVertices.size());
         for (size_t k = 0; k < mVertices.size(); ++k)
         {
             const Vertex &v = mVertices[k];
-            Vertex out = v;
+            Vertex &out = mSkinScratch[k];
+            out = v;
             if (v.boneBones[0] == 255)
             {
                 const Bone &bone = bones[0];
@@ -166,13 +169,17 @@ namespace engine
                 out.coords = tv;
                 out.normal = tn.normalized();
             }
-            skinned.push_back(out);
         }
 
-        dev.updateBuffer(mVertexBuffer, 0, {skinned.data(), skinned.size() * sizeof(Vertex)});
-        dev.updateBuffer(mIndexBuffer, 0, {mTriangles.data(), mTriangles.size() * sizeof(Triangle)});
+        if (!mSkinScratch.empty())
+            dev.updateBuffer(mVertexBuffer, 0, {mSkinScratch.data(), mSkinScratch.size() * sizeof(Vertex)});
         mValidVs = (int)mVertices.size();
-        mValidTs = (int)mTriangles.size();
+        if (mValidTs < (int)mTriangles.size())
+        {
+            dev.updateBuffer(mIndexBuffer, (std::uint64_t)mValidTs * sizeof(Triangle),
+                             {&mTriangles[mValidTs], (mTriangles.size() - mValidTs) * sizeof(Triangle)});
+            mValidTs = (int)mTriangles.size();
+        }
         return mVertexBuffer.valid() && mIndexBuffer.valid();
     }
 

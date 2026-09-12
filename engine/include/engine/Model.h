@@ -5,6 +5,7 @@
 #include "engine/Brush.h"
 #include "engine/Surface.h"
 #include "engine/RenderContext.h"
+#include "engine/Matrix4.h"
 #include <ct/vector.hpp>
 
 namespace engine
@@ -47,6 +48,15 @@ namespace engine
         virtual void setRenderBrush(const Brush &b) { mRenderBrush = b; }
         virtual bool render(const RenderContext &rc) { (void)rc; return false; }
         virtual void renderQueue(int type) { (void)type; }
+
+        // World-space bone matrices for GPU skinning, valid after render()
+        // for this frame; count 0 means "not skinned on the GPU" (no bones,
+        // or more than kMaxGpuBones - the CPU path is used then).
+        virtual int gpuBoneCount() const { return 0; }
+        virtual const Matrix4 *gpuBoneMatrices() const { return nullptr; }
+        // Transient per-frame render state set by World from stageBones().
+        void setBoneSlot(int slot) { mBoneSlot = slot; }
+        int boneSlot() const { return mBoneSlot; }
         // Uploads whatever geometry queue(type) references to the GPU
         // (Surface::ensureGpu/ensureGpuSkinned) - call with no render pass
         // open, after render()/renderQueue() have filled the queue.
@@ -133,6 +143,7 @@ namespace engine
         bool mAutoFade = false;
         float mAutoFadeNr = 0.0f, mAutoFadeFr = 0.0f;
         ct::Vector<QueueEntry> mQueues[2];
+        int mBoneSlot = -1;
     };
 }
 

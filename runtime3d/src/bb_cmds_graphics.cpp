@@ -52,7 +52,7 @@ namespace bb3d
     {
         int rv = c_Graphics(vm, args, nargs);
         if (is_int(args[0]) && args[0].as.integer)
-            world_for(vm)->init(platform_for(vm)->device());
+            world_for(vm)->init(platform_for(vm)->device(), platform_for(vm)->shaderDialect());
         return rv;
     }
 

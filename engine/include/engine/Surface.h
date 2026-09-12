@@ -90,6 +90,9 @@ namespace engine
 
         gpu::BufferHandle mVertexBuffer;
         gpu::BufferHandle mIndexBuffer;
+        // CPU-skinning output, kept between frames so ensureGpuSkinned
+        // doesn't allocate a full vertex array every call
+        ct::Vector<Vertex> mSkinScratch;
     };
 }
 
