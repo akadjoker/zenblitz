@@ -27,6 +27,11 @@ namespace engine
         for (size_t k = 0; k < mSurfaces.size(); ++k) delete mSurfaces[k];
     }
 
+    void MeshModel::freeGpu(gpu::Device &dev)
+    {
+        for (size_t k = 0; k < mSurfaces.size(); ++k) mSurfaces[k]->freeGpu(dev);
+    }
+
     Surface *MeshModel::createSurface(const Brush &b)
     {
         Surface *s = new Surface();

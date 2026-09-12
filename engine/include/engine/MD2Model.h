@@ -17,6 +17,8 @@ namespace engine
         Entity *clone() override { return new MD2Model(*this); }
         MD2Model *getMD2Model() override { return this; }
 
+        void freeGpu(gpu::Device &dev) override;
+
         void animate(float elapsed) override;
         bool render(const RenderContext &rc) override;
         void uploadQueue(gpu::Device &dev, int type) override;

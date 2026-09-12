@@ -36,6 +36,13 @@ namespace engine
             int clear;
         };
 
+        World() = default;
+        // The ObjCollision pool is recycled between frames and never
+        // shrinks, so nothing else ever frees it.
+        ~World();
+        World(const World &) = delete;
+        World &operator=(const World &) = delete;
+
         bool init(gpu::Device &dev, kx::ShaderDialect dialect) { return mRenderer.init(dev, dialect); }
         void shutdown() { mRenderer.shutdown(); }
 

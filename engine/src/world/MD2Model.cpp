@@ -18,6 +18,16 @@ namespace engine
         if (!--mRep->refCount) delete mRep;
     }
 
+    void MD2Model::freeGpu(gpu::Device &dev)
+    {
+        // the Rep's frame buffers are shared by every model cloned from
+        // it, so only the last one may free them
+        if (mRep->refCount == 1) mRep->freeGpu(dev);
+        if (mTransVb.valid()) { dev.destroy(mTransVb); mTransVb = gpu::BufferHandle(); }
+        mTransDevice = nullptr;
+        mTransDirty = true;
+    }
+
     void MD2Model::captureCurrentPose()
     {
         const int n = mRep->numVertices();

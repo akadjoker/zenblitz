@@ -2,6 +2,7 @@
 #define ENGINE_ENTITY_H
 
 #include "engine/Geom.h"
+#include "gpu/GPU.h"
 #include <ct/vector.hpp>
 #include <string>
 
@@ -26,6 +27,16 @@ namespace engine
         virtual ~Entity();
 
         virtual Entity *clone() = 0;
+
+        // Releases GPU buffers this entity owns. Destructors can't do it
+        // (freeing a buffer needs the device), so the scene owner calls
+        // this on the whole tree before deleting it.
+        virtual void freeGpu(gpu::Device &dev) { (void)dev; }
+        void freeGpuTree(gpu::Device &dev)
+        {
+            freeGpu(dev);
+            for (Entity *c = mChildren; c; c = c->mSucc) c->freeGpuTree(dev);
+        }
 
         virtual Object *getObject() { return nullptr; }
         virtual Camera *getCamera() { return nullptr; }

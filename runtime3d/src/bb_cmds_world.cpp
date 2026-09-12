@@ -76,8 +76,13 @@ namespace bb3d
     // ~Entity already deletes its children, so deleting the orphan roots
     // walks the whole scene - deleting every handle instead would
     // double-free anything that is parented to something else.
-    void free_all_entities()
+    void free_all_entities(gpu::Device *dev)
     {
+        // GPU buffers first: a destructor can't release them (it has no
+        // device), so the whole tree is swept before anything is deleted.
+        if (dev)
+            for (engine::Entity *root = engine::Entity::orphans(); root; root = root->successor())
+                root->freeGpuTree(*dev);
         while (engine::Entity *root = engine::Entity::orphans()) delete root;
         g_entities.clear();
         g_handles.clear();
@@ -187,9 +192,15 @@ namespace bb3d
 
     static int c_FreeEntity(VM *vm, Value *args, int nargs)
     {
-        (void)vm; (void)nargs;
+        (void)nargs;
         engine::Entity *e = entity_of(arg_int(args[0]));
-        if (e) { g_entities.erase(arg_int(args[0])); g_handles.erase(e); delete e; }
+        if (e)
+        {
+            e->freeGpuTree(platform_for(vm)->device());
+            g_entities.erase(arg_int(args[0]));
+            g_handles.erase(e);
+            delete e;
+        }
         return 0;
     }
 

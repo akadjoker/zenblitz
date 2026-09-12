@@ -37,7 +37,7 @@ namespace bb3d
         return w;
     }
 
-    extern void free_all_entities();
+    extern void free_all_entities(gpu::Device *dev);
     extern void free_all_textures();
     extern void free_all_fonts();
 
@@ -50,12 +50,14 @@ namespace bb3d
     // World/Platform, so they go first.
     void shutdown_graphics(VM *vm)
     {
-        free_all_entities();
+        engine::World **w = g_worlds.find(vm);
+        engine::Platform **p = g_platforms.find(vm);
+
+        // the device has to outlive the GPU buffers the scene owns
+        free_all_entities(p && (*p)->isOpen() ? &(*p)->device() : nullptr);
         free_all_textures();
         free_all_fonts();
 
-        engine::World **w = g_worlds.find(vm);
-        engine::Platform **p = g_platforms.find(vm);
         if (w) (*w)->shutdown();
         if (p) (*p)->close();
         if (w) { delete *w; g_worlds.erase(vm); }

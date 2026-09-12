@@ -19,6 +19,12 @@ namespace engine
             e->enumVisible(mVisible);
     }
 
+    World::~World()
+    {
+        for (size_t k = 0; k < mFreeColls.size(); ++k) delete mFreeColls[k];
+        for (size_t k = 0; k < mUsedColls.size(); ++k) delete mUsedColls[k];
+    }
+
     ObjCollision *World::allocObjColl(Object *with, const Vector &coords, const Collision &coll)
     {
         ObjCollision *c;

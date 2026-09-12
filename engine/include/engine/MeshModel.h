@@ -22,6 +22,8 @@ namespace engine
         MeshModel *getMeshModel() override { return this; }
         Entity *clone() override { return new MeshModel(*this); }
 
+        void freeGpu(gpu::Device &dev) override;
+
         bool collide(const Line &line, float radius, Collision *currColl, const Transform &t) override;
 
         void setRenderBrush(const Brush &b) override;
