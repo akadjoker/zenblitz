@@ -168,6 +168,14 @@ registado.
    do Batch serve de *fallback* quando o programa não carregou nenhuma
    (`Text` antes de qualquer `LoadFont` deve continuar a desenhar algo).
 
+## Sombras (depois do Marco 4, não bloqueia nada acima)
+
+Shadow mapping estilo "sol" (luz direcional), qualidade mobile+desktop,
+compatível com WebGL. Ver `/media/projectos/projects/cpp/engines/Horde3D`
+(shadow mapping real, referência de arquitetura) e a técnica usada no
+mini_engine (a localizar/confirmar quando chegar a esta fase) antes de
+escrever de raiz.
+
 ## Editor (depois do engine, não bloqueia nada acima)
 
 O Blitz3D original tinha o BlitzIDE (Qt, 2613 linhas em
