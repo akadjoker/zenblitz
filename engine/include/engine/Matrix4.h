@@ -2,6 +2,7 @@
 #define ENGINE_MATRIX4_H
 
 #include "engine/Geom.h"
+#include <cmath>
 #include <cstring>
 
 namespace engine
@@ -57,6 +58,30 @@ namespace engine
             r.col3.x = -(right + left) / (right - left);
             r.col3.y = -(top + bottom) / (top - bottom);
             r.col3.z = -(farZ + nearZ) / (farZ - nearZ);
+            return r;
+        }
+
+        static Matrix4 perspective(float fovYDeg, float aspect, float nearZ, float farZ)
+        {
+            const float f = 1.0f / std::tan(fovYDeg * 0.5f * 3.14159265359f / 180.0f);
+            Matrix4 r;
+            r.col0 = Vec4f(f / aspect, 0, 0, 0);
+            r.col1 = Vec4f(0, f, 0, 0);
+            r.col2 = Vec4f(0, 0, (farZ + nearZ) / (nearZ - farZ), -1.0f);
+            r.col3 = Vec4f(0, 0, (2.0f * farZ * nearZ) / (nearZ - farZ), 0);
+            return r;
+        }
+
+        static Matrix4 lookAt(const blitz::Vector &eye, const blitz::Vector &target, const blitz::Vector &up)
+        {
+            blitz::Vector f = (target - eye); f = f * (1.0f / f.length());
+            blitz::Vector s = f.cross(up); s = s * (1.0f / s.length());
+            blitz::Vector u = s.cross(f);
+            Matrix4 r;
+            r.col0 = Vec4f(s.x, u.x, -f.x, 0);
+            r.col1 = Vec4f(s.y, u.y, -f.y, 0);
+            r.col2 = Vec4f(s.z, u.z, -f.z, 0);
+            r.col3 = Vec4f(-s.dot(eye), -u.dot(eye), f.dot(eye), 1);
             return r;
         }
 
