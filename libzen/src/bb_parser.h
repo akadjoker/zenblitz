@@ -8,16 +8,23 @@
 #include "bb_toker.h"
 #include "bb_nodes.h"
 
+namespace zen { class VM; }
+
 namespace bb
 {
     class Parser
     {
     public:
-        Parser(Toker &t);
+        /* `vm` is only used to reach the backend for directory listings,
+           which is how includes resolve regardless of filename case (see
+           findFileNoCase in the .cpp). Passing null just means includes
+           must match the spelling on disk exactly. */
+        Parser(Toker &t, zen::VM *vm = 0);
 
         ProgNode *parse(const string &main);
 
     private:
+        zen::VM *vm;
         string incfile;
         set<string> included;
         Toker *toker, *main_toker;

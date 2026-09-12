@@ -1,6 +1,10 @@
 #include "bb_parser.h"
+#include "vm.h" /* the backend, for case-insensitive include lookup */
 #include <climits>
 #include <cstdlib>
+#if defined(_WIN32)
+#include <windows.h>
+#endif
 
 namespace bb
 {
@@ -11,10 +15,18 @@ namespace bb
 
     static bool isTerm(int c) { return c == ':' || c == '\n'; }
 
+    /* Canonical path of an Include, so the same file reached through
+       different spellings is only parsed once. */
     static string fullPath(const string &f)
     {
+#if defined(_WIN32)
+        char buf[MAX_PATH];
+        DWORD n = GetFullPathNameA(f.c_str(), sizeof(buf), buf, nullptr);
+        if (n > 0 && n < sizeof(buf)) return buf;
+#else
         char buf[PATH_MAX];
         if (realpath(f.c_str(), buf)) return buf;
+#endif
         return f;
     }
 
@@ -24,7 +36,44 @@ namespace bb
         return p == string::npos ? "" : f.substr(0, p + 1);
     }
 
-    Parser::Parser(Toker &t) : toker(&t), main_toker(&t) {}
+    /* Blitz3D ran on Windows, where filenames ignore case, so its sources
+       spell includes however they like: `Include "KeyConstants.bb"` against
+       a file named keyconstants.bb. Real games depend on that, so look the
+       name up case-insensitively when the exact spelling is not on disk.
+       Path separators are also folded — Windows sources write "gfx\tiles.bb"
+       — and each component is matched in turn.
+
+       The directory listing comes from the VM backend (zen/backend.h): the
+       runtime carries no OS calls of its own, and the host that plugs a
+       backend in is the one that knows how to enumerate a directory there.
+       Returns the real path, or "" when nothing matches. */
+    static string findFileNoCase(zen::VM *vm, const string &dir, const string &name)
+    {
+        if (!vm) return "";
+        const zen::Backend &b = vm->backend();
+        if (!b.open_dir || !b.next_file || !b.close_dir) return "";
+
+        size_t slash = name.find_first_of("/\\");
+        string head = slash == string::npos ? name : name.substr(0, slash);
+        string rest = slash == string::npos ? "" : name.substr(slash + 1);
+        if (head.empty()) return rest.empty() ? "" : findFileNoCase(vm, dir, rest);
+        string base = dir.size() ? dir : "./";
+
+        zen::ZenDir d = b.open_dir(base.c_str(), b.userdata);
+        if (!d) return "";
+        string match;
+        string want = bb_tolower(head);
+        for (const char *e = b.next_file(d, b.userdata); e; e = b.next_file(d, b.userdata))
+        {
+            if (bb_tolower(string(e)) == want) { match = e; break; }
+        }
+        b.close_dir(d, b.userdata);
+        if (match.empty()) return "";
+        if (rest.empty()) return base + match;
+        return findFileNoCase(vm, base + match + "/", rest);
+    }
+
+    Parser::Parser(Toker &t, zen::VM *vm) : vm(vm), toker(&t), main_toker(&t) {}
 
     ProgNode *Parser::parse(const string &main)
     {
@@ -118,6 +167,11 @@ namespace bb
                     string d = dirOf(incfile) + inc;
                     std::ifstream probe(d.c_str());
                     if (probe.good()) cand = d;
+                    else
+                    {
+                        string found = findFileNoCase(vm, dirOf(incfile), inc);
+                        if (found.size()) cand = found;
+                    }
                 }
                 inc = fullPath(cand);
 
@@ -413,15 +467,32 @@ namespace bb
                 break;
             case GLOBAL:
                 if (scope != STMTS_PROG) ex("'Global' can only appear in main program");
-                do
+                /* `Global Dim a(8)`: Dim arrays are global anyway, so the
+                   two keywords together are redundant but legal, and real
+                   Blitz3D sources use them. Hand the Dim over to the array
+                   declaration rather than looking for a variable name. */
+                if (toker->next() == DIM)
                 {
-                    toker->next();
+                    do
+                    {
+                        toker->next();
+                        StmtNode *stmt = parseArrayDecl();
+                        stmt->pos = pos;
+                        pos = toker->pos();
+                        stmts->push_back(stmt);
+                    } while (toker->curr() == ',');
+                    break;
+                }
+                for (;;)
+                {
                     DeclNode *d = parseVarDecl(DECL_GLOBAL, false);
                     StmtNode *stmt = new DeclStmtNode(d);
                     stmt->pos = pos;
                     pos = toker->pos();
                     stmts->push_back(stmt);
-                } while (toker->curr() == ',');
+                    if (toker->curr() != ',') break;
+                    toker->next(); /* the keyword was consumed above, so it is the comma that moves us on */
+                }
                 break;
             case '.':
             {

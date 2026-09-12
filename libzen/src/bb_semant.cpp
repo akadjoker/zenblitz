@@ -4,6 +4,7 @@
 ** Blitz3D compiler node sources.
 */
 #include "bb_nodes.h"
+#include <climits>
 
 namespace bb
 {
@@ -242,14 +243,24 @@ namespace bb
             }
             else if (sem_type == Type::int_type)
             {
+                /* Folding happens in unsigned arithmetic: signed overflow is
+                   undefined, and the VM wraps (see OP_ADD/OP_MUL), so a
+                   constant expression must fold to the same value the
+                   program would have computed at run time. Division by a
+                   zero constant is left unfolded — the VM reports it as a
+                   runtime error, which is what Blitz3D does; folding it here
+                   would divide by zero inside the compiler instead. */
                 long long l = lc->intValue(), r = rc->intValue();
+                unsigned long long ul = (unsigned long long)l, ur = (unsigned long long)r;
                 switch (op)
                 {
-                case '+': expr = new IntConstNode(l + r); break;
-                case '-': expr = new IntConstNode(l - r); break;
-                case '*': expr = new IntConstNode(l * r); break;
-                case '/': expr = new IntConstNode(l / r); break;
-                case MOD: expr = new IntConstNode(l % r); break;
+                case '+': expr = new IntConstNode((long long)(ul + ur)); break;
+                case '-': expr = new IntConstNode((long long)(ul - ur)); break;
+                case '*': expr = new IntConstNode((long long)(ul * ur)); break;
+                /* also unfolded for the one signed division that overflows:
+                   LLONG_MIN / -1 has no representable result */
+                case '/': if (r != 0 && !(l == LLONG_MIN && r == -1)) expr = new IntConstNode(l / r); break;
+                case MOD: if (r != 0 && !(l == LLONG_MIN && r == -1)) expr = new IntConstNode(l % r); break;
                 }
             }
             else
@@ -265,6 +276,9 @@ namespace bb
                 case '^': expr = new FloatConstNode(pow(l, r)); break;
                 }
             }
+            /* expr stays null for what was deliberately left unfolded above:
+               keep this node so the operation happens at run time. */
+            if (!expr) return this;
             delete this;
             return expr;
         }
