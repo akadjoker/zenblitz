@@ -222,16 +222,29 @@ namespace bb3d
         return 1;
     }
 
-    // VWait/WaitKey/MouseWait block the calling native until the next
-    // frame / a key / a mouse click, pumping events (and pacing to
-    // setTargetFPS, same as Flip) each iteration ourselves rather than
-    // suspending the fiber - main3d.cpp's resume() loop does nothing else
-    // meanwhile, so there's no host-side work being starved by blocking
-    // here the way there would be in an embedding that shares the thread.
+    // VWait/WaitKey/MouseWait block the calling native until a vblank /
+    // a key / a mouse click, pumping events each iteration ourselves
+    // rather than suspending the fiber - main3d.cpp's resume() loop does
+    // nothing else meanwhile, so nothing is starved by blocking here.
+    // There is no software frame cap any more (Flip's vblank wait is the
+    // pacing), so these loops must sleep on their own: without it a
+    // WaitKey would spin a core at 100% until a key arrived.
+    static void vblank_sleep()
+    {
+        // one refresh period of the display, which is what Blitz3D's
+        // VWait waited for; SDL has no vblank wait without a swap, so
+        // sleep the period instead. Display 0 - the window's own display
+        // isn't reachable from here, and a multi-monitor mismatch only
+        // changes the sleep by a few ms.
+        SDL_DisplayMode mode;
+        int hz = (SDL_GetCurrentDisplayMode(0, &mode) == 0 && mode.refresh_rate > 0) ? mode.refresh_rate : 60;
+        SDL_Delay((Uint32)((1000 + hz / 2) / hz));
+    }
     static int c_VWait(VM *vm, Value *args, int nargs)
     {
         (void)args; (void)nargs;
         platform_for(vm)->pumpEvents();
+        vblank_sleep();
         return 0;
     }
     static int c_WaitKey(VM *vm, Value *args, int nargs)
@@ -245,6 +258,7 @@ namespace bb3d
             p->pumpEvents();
             for (int k = 1; k < 256; ++k)
                 if (p->keyHit(k)) { dik = k; break; }
+            if (!dik) SDL_Delay(1); // poll at ~1 kHz, not a busy spin
         }
         args[0] = val_int(dik);
         return 1;
@@ -267,6 +281,7 @@ namespace bb3d
                 wasDown[b] = down;
             }
             if (clicked) break;
+            SDL_Delay(1); // poll at ~1 kHz, not a busy spin
         }
         return 0;
     }
