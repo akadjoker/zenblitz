@@ -94,6 +94,18 @@ banks, graphics) and the known differences from Blitz3D are in
 Types, Data and global initial values are stored in the file; the Blitz
 natives are re-registered by the loader.
 
+## Standalone executables
+
+```bash
+./bin/zenblitz --build game game.bb          # Linux binary: runtime + bytecode
+./bin/zenblitz --build game.exe --stub zenblitz.exe game.bb   # with a Windows runtime
+./game arg1 arg2                             # CommandLine$() = "arg1 arg2"
+```
+
+Like the original Blitz3D (runtime + program), but with bytecode appended to
+the runtime binary instead of x86 code linked into it. The program never
+needs the compiler. `--debug` adds per-dimension array bounds checks.
+
 ## Known differences from Blitz3D
 
 - Integers are 64-bit and floats are 64-bit (no 32-bit overflow).

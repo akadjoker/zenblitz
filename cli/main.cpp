@@ -4,6 +4,9 @@
 **   ./zenblitz              → REPL (interactive)
 **   ./zenblitz file.bb     → compile and run file
 **   ./zenblitz -e "code"    → compile and run inline code
+**   ./zenblitz --dump out.zbc file.bb   → compile to bytecode
+**   ./zenblitz --build game file.bb     → standalone executable (runtime + bytecode)
+**   ./zenblitz --debug file.bb          → extra runtime checks (array bounds per dimension)
 */
 
 #include "vm.h"
@@ -14,6 +17,12 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#if defined(_WIN32)
+#include <windows.h>
+#else
+#include <unistd.h>
+#include <sys/stat.h>
+#endif
 
 using namespace zen;
 
@@ -59,6 +68,8 @@ static bool g_dis_only = false;
 static bool g_verbose = false;
 static const char *g_dump_path = nullptr;
 static bool g_strip_debug = false;
+static bool g_debug_checks = false;
+static const char *g_build_path = nullptr;
 static const char *g_search_paths[16];
 static int g_num_search_paths = 0;
 
@@ -95,6 +106,100 @@ static void disassemble_nested(ObjFunc *fn)
     }
 }
 
+/* =========================================================
+** Standalone executables: runtime binary + bytecode + trailer
+**   [zenblitz executable][.zbc bytes][u64 bytecode size]["ZBLZEXE1"]
+** ========================================================= */
+static const char EXE_MAGIC[8] = {'Z', 'B', 'L', 'Z', 'E', 'X', 'E', '1'};
+
+static char *self_path(char *buf, size_t size)
+{
+#if defined(__linux__)
+    ssize_t n = readlink("/proc/self/exe", buf, size - 1);
+    if (n <= 0) return nullptr;
+    buf[n] = '\0';
+    return buf;
+#elif defined(_WIN32)
+    if (GetModuleFileNameA(nullptr, buf, (DWORD)size) == 0) return nullptr;
+    return buf;
+#else
+    return nullptr;
+#endif
+}
+
+static int build_executable(const char *bytecode_path, const char *out_path)
+{
+    char self[4096];
+    if (!self_path(self, sizeof(self)))
+    {
+        fprintf(stderr, "zenblitz: cannot locate the runtime executable\n");
+        return 1;
+    }
+    long rt_size = 0, bc_size = 0;
+    char *rt = read_file(self, &rt_size);
+    if (!rt) return 1;
+    char *bc = read_file(bytecode_path, &bc_size);
+    if (!bc) { free(rt); return 1; }
+    /* a runtime that itself carries a program: keep only the runtime part */
+    long base_size = rt_size;
+    if (rt_size > 16 && memcmp(rt + rt_size - 8, EXE_MAGIC, 8) == 0)
+    {
+        uint64_t emb = 0;
+        memcpy(&emb, rt + rt_size - 16, 8);
+        base_size = rt_size - 16 - (long)emb;
+    }
+    FILE *out = fopen(out_path, "wb");
+    if (!out)
+    {
+        fprintf(stderr, "zenblitz: cannot write '%s'\n", out_path);
+        free(rt); free(bc);
+        return 1;
+    }
+    uint64_t sz = (uint64_t)bc_size;
+    bool ok = fwrite(rt, 1, (size_t)base_size, out) == (size_t)base_size &&
+              fwrite(bc, 1, (size_t)bc_size, out) == (size_t)bc_size &&
+              fwrite(&sz, 1, 8, out) == 8 &&
+              fwrite(EXE_MAGIC, 1, 8, out) == 8;
+    fclose(out);
+    free(rt); free(bc);
+    if (!ok)
+    {
+        fprintf(stderr, "zenblitz: write error on '%s'\n", out_path);
+        return 1;
+    }
+#ifndef _WIN32
+    chmod(out_path, 0755);
+#endif
+    printf("zenblitz: built '%s' (%ld bytes of bytecode)\n", out_path, bc_size);
+    return 0;
+}
+
+/* If this executable carries an embedded program, return it (malloc'd). */
+static char *embedded_program(long *out_size)
+{
+    char self[4096];
+    if (!self_path(self, sizeof(self))) return nullptr;
+    FILE *f = fopen(self, "rb");
+    if (!f) return nullptr;
+    fseek(f, 0, SEEK_END);
+    long total = ftell(f);
+    if (total < 16) { fclose(f); return nullptr; }
+    char trailer[16];
+    fseek(f, total - 16, SEEK_SET);
+    if (fread(trailer, 1, 16, f) != 16 || memcmp(trailer + 8, EXE_MAGIC, 8) != 0) { fclose(f); return nullptr; }
+    uint64_t sz = 0;
+    memcpy(&sz, trailer, 8);
+    if (sz == 0 || (long)sz > total - 16) { fclose(f); return nullptr; }
+    char *buf = (char *)malloc((size_t)sz + 1);
+    fseek(f, total - 16 - (long)sz, SEEK_SET);
+    size_t got = fread(buf, 1, (size_t)sz, f);
+    fclose(f);
+    if (got != sz) { free(buf); return nullptr; }
+    buf[sz] = '\0';
+    *out_size = (long)sz;
+    return buf;
+}
+
 static int run_source(const char *source, const char *filename,
                       int script_argc = 0, char **script_argv = nullptr)
 {
@@ -103,6 +208,7 @@ static int run_source(const char *source, const char *filename,
     install_args(vm, script_argc, script_argv);
 
     Compiler compiler;
+    compiler.set_debug(g_debug_checks);
     ObjFunc *fn = compiler.compile(&vm.get_gc(), &vm, source, filename);
 
     if (!fn)
@@ -118,6 +224,19 @@ static int run_source(const char *source, const char *filename,
         printf("--- execution ---\n");
     }
 
+    if (g_build_path)
+    {
+        char err[256] = {0};
+        const char *tmp = "/tmp/zenblitz_build.zbc";
+        if (!dump_bytecode_file(&vm, fn, tmp, true, nullptr, err, sizeof(err)))
+        {
+            fprintf(stderr, "zenblitz: build failed: %s\n", err[0] ? err : "unknown error");
+            return 1;
+        }
+        int rc = build_executable(tmp, g_build_path);
+        remove(tmp);
+        return rc;
+    }
     if (g_dump_path)
     {
         char err[256] = {0};
@@ -233,6 +352,16 @@ static void repl()
 
 int main(int argc, char **argv)
 {
+    {
+        long emb_size = 0;
+        char *emb = embedded_program(&emb_size);
+        if (emb)
+        {
+            int rc = run_bytecode((const uint8_t *)emb, (size_t)emb_size, argv[0], argc - 1, argv + 1);
+            free(emb);
+            return rc;
+        }
+    }
     if (argc == 1)
     {
         /* No arguments: REPL */
@@ -263,6 +392,14 @@ int main(int argc, char **argv)
         else if (strcmp(argv[i], "--strip-debug") == 0)
         {
             g_strip_debug = true;
+        }
+        else if (strcmp(argv[i], "--debug") == 0)
+        {
+            g_debug_checks = true;
+        }
+        else if (strcmp(argv[i], "--build") == 0 && i + 1 < argc)
+        {
+            g_build_path = argv[++i];
         }
         else if (strcmp(argv[i], "-v") == 0 || strcmp(argv[i], "--verbose") == 0)
         {

@@ -97,6 +97,7 @@ namespace bb
         ArrayInfo &arrayOf(Decl *d);
         BBTypeInfo *typeOf(Type *t);
         int gosubReg();
+        void boundsCheck(int idx, int gSize);
 
         /* var helpers */
         int fieldCount(StructType *s) { return s->fields->size(); }

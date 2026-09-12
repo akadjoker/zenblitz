@@ -742,16 +742,37 @@ namespace bb
         g.emitABx(OP_GETGLOBAL, arrReg, ai.gArr);
         int idx = g.allocTemp();
         g.exprInto(exprs->exprs[0], idx);
+        if (g.debug) g.boundsCheck(idx, ai.gSizes[0]);
         for (int k = 1; k < exprs->size(); ++k)
         {
             int s = g.allocTemp();
             g.emitABx(OP_GETGLOBAL, s, ai.gSizes[k]);
             g.emitABC(OP_MUL, idx, idx, s);
             g.exprInto(exprs->exprs[k], s);
+            if (g.debug) g.boundsCheck(s, ai.gSizes[k]);
             g.emitABC(OP_ADD, idx, idx, s);
             g.freeTo(s);
         }
         return idx;
+    }
+
+    /* --debug: 0 <= R[idx] < globals[gSize], else "Array index out of bounds" */
+    void BBGen::boundsCheck(int idx, int gSize)
+    {
+        int save = top();
+        int s = allocTemp();
+        emitABx(OP_GETGLOBAL, s, gSize);
+        int bad1 = emitFused(OP_LTJMPIFNOT, idx, s);
+        int bad2 = emitFused(OP_GTIJMPIFNOT, idx, (-1) & 0xFF);
+        int ok = emitJump(OP_JMP, 0);
+        patch(bad1);
+        patch(bad2);
+        int base = allocTemp();
+        int a = allocTemp();
+        loadStr(a, "Array index out of bounds");
+        callGlobal(base, 1, rt->g_rterror, 0);
+        patch(ok);
+        freeTo(save);
     }
 
     int ArrayVarNode::load(BBGen &g, int dest)
