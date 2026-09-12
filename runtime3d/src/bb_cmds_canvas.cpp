@@ -1,5 +1,5 @@
 /*
-** bb_cmds_canvas.cpp — Color, Plot, Line, Rect, Oval.
+** bb_cmds_canvas.cpp — Color, Plot, Line, Rect, Oval, Text.
 */
 #include "runtime.h"
 #include "vm.h"
@@ -10,7 +10,8 @@
 namespace bb3d { extern engine::Platform *platform_for(zen::VM *vm); }
 
 namespace { inline long long arg_int(zen::Value v) { return zen::is_int(v) ? v.as.integer
-    : zen::is_float(v) ? (long long)v.as.number : 0; } }
+    : zen::is_float(v) ? (long long)v.as.number : 0; }
+    inline const char *arg_cstr(zen::Value v) { return zen::is_string(v) ? zen::as_cstring(v) : ""; } }
 
 using namespace zen;
 
@@ -63,12 +64,21 @@ namespace bb3d
         return 0;
     }
 
+    static int c_Text(VM *vm, Value *args, int nargs)
+    {
+        (void)nargs;
+        float x = (float)arg_int(args[0]), y = (float)arg_int(args[1]);
+        platform_for(vm)->batch().drawText(x, y, 16.0f, arg_cstr(args[2]));
+        return 0;
+    }
+
     extern const zen::CommandDecl bb3d_cmds_canvas[] = {
         {"Color%red%green%blue", c_Color},
         {"Plot%x%y", c_Plot},
         {"Line%x1%y1%x2%y2", c_Line},
         {"Rect%x%y%width%height%solid=1", c_Rect},
         {"Oval%x%y%width%height%solid=1", c_Oval},
+        {"Text%x%y$text%centerx=0%centery=0", c_Text},
     };
     extern const int bb3d_cmds_canvas_count = (int)(sizeof(bb3d_cmds_canvas) / sizeof(bb3d_cmds_canvas[0]));
 }

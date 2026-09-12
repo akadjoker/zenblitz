@@ -56,6 +56,7 @@ namespace kx
         mGpu->destroy(mScreenTexture);
       mScreenTexture = gpu::TextureHandle();
       mScreenTextureWidth = mScreenTextureHeight = 0;
+      mScreenSizeSet = false;
       gpu::destroyDevice(mGpu);
       mGpu = nullptr;
     }
@@ -68,22 +69,32 @@ namespace kx
     mWindow->getSurface().drawableSize(mWidth, mHeight);
   }
 
+  void Graphics::setScreenSize(std::uint32_t width, std::uint32_t height)
+  {
+    mScreenTextureWidth = width;
+    mScreenTextureHeight = height;
+    mScreenSizeSet = true;
+    if (mScreenTexture.valid())
+    {
+      mGpu->destroy(mScreenTexture);
+      mScreenTexture = gpu::TextureHandle();
+    }
+  }
+
   bool Graphics::ensureScreenTexture()
   {
-    if (mScreenTexture.valid() && mScreenTextureWidth == mWidth && mScreenTextureHeight == mHeight)
-      return true;
+    if (!mScreenSizeSet)
+      setScreenSize(mWidth, mHeight);
     if (mScreenTexture.valid())
-      mGpu->destroy(mScreenTexture);
+      return true;
 
     gpu::TextureDesc desc;
-    desc.width = mWidth;
-    desc.height = mHeight;
+    desc.width = mScreenTextureWidth;
+    desc.height = mScreenTextureHeight;
     desc.format = gpu::Format::RGBA8;
     desc.usage = gpu::TextureUsageRenderTarget | gpu::TextureUsageSampled | gpu::TextureUsageCopySource;
     desc.debugName = "screen";
     mScreenTexture = mGpu->createTexture(desc);
-    mScreenTextureWidth = mWidth;
-    mScreenTextureHeight = mHeight;
     return mScreenTexture.valid();
   }
 

@@ -40,6 +40,7 @@ namespace engine
             mDevice.destroy();
             return false;
         }
+        mGraphics.setScreenSize((std::uint32_t)width, (std::uint32_t)height);
         mBatch.resize(width, height);
         mOpen = true;
         return true;
@@ -61,10 +62,12 @@ namespace engine
 
     void Platform::beginFrame()
     {
-        /* Cls: (re)open the screen pass with a clear. */
+        /* Cls: (re)open the screen pass with a clear. The batch's
+           projection tracks the logical screen resolution, not the
+           window's - resizing the window only rescales the final blit. */
         if (mGraphics.inFrame()) mGraphics.endFrame();
         mGraphics.beginFrame(mClearR, mClearG, mClearB, 1.0f);
-        int gw = (int)mGraphics.width(), gh = (int)mGraphics.height();
+        int gw = (int)mGraphics.screenWidth(), gh = (int)mGraphics.screenHeight();
         int bw, bh;
         mBatch.getWindowSize(bw, bh);
         if (gw > 0 && gh > 0 && (gw != bw || gh != bh)) mBatch.resize(gw, gh);
@@ -130,10 +133,16 @@ namespace engine
             mGraphics.endFrame();
         }
 
+        /* the blit quad fills the window, not the logical screen size -
+           switch the batch's projection to the window for just this draw. */
+        mBatch.resize((int)mGraphics.width(), (int)mGraphics.height());
         mBatch.loadIdentity();
         mBatch.setColor((unsigned char)255, (unsigned char)255, (unsigned char)255);
+        /* screenTexture is written with GL's bottom-left origin; the ortho
+           projection is top-left, so sample it flipped vertically here. */
         mBatch.drawTexture(mGraphics.screenTexture(), 0.0f, 0.0f,
-                           (float)mGraphics.width(), (float)mGraphics.height());
+                           (float)mGraphics.width(), (float)mGraphics.height(),
+                           0.0f, 1.0f, 1.0f, -1.0f);
         mBatch.flip();
 
         if (mGraphics.beginSurfaceBlit())

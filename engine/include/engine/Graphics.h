@@ -43,6 +43,13 @@ namespace kx
     std::uint32_t width() const { return mWidth; }
     std::uint32_t height() const { return mHeight; }
 
+    /* The screen texture's own resolution - fixed once set, independent of
+       the window/surface size. Call before/at the next beginFrame(); it
+       does not resize with the window. */
+    void setScreenSize(std::uint32_t width, std::uint32_t height);
+    std::uint32_t screenWidth() const { return mScreenTextureWidth; }
+    std::uint32_t screenHeight() const { return mScreenTextureHeight; }
+
     gpu::TextureHandle screenTexture() const { return mScreenTexture; }
 
     bool logErrors(const char *where);
@@ -60,6 +67,7 @@ namespace kx
     bool mSurfaceDepth = true;
     gpu::TextureHandle mScreenTexture;
     std::uint32_t mScreenTextureWidth = 0, mScreenTextureHeight = 0;
+    bool mScreenSizeSet = false;
   };
 
 } // namespace kx
