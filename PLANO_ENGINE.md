@@ -105,7 +105,9 @@ Cada marco é "corre e dá para ver/jogar", não uma pilha de código sem prova.
   `LoadImage`/`DrawImage`/`MaskImage` (textura GPU + colorkey);
   `LockBuffer`/`ReadPixel`/`WritePixel` (buffer CPU, upload preguiçoso);
   `ImagesCollide`/`ImagesOverlap` (bitmask CPU, do original).
-- Texto: `Text`, fonte embutida do Batch primeiro; fontes carregadas depois.
+- Texto: `stb_truetype` desde o início — `LoadFont`, `SetFont`, `Text` já
+  com fontes carregadas do disco; a fonte embutida do Batch fica só de
+  fallback para `Text` antes de qualquer `LoadFont`.
 - **Prova**: correr um sample 2D real (`Samples/Blitz 2D Samples/`) sem o
   editar. Comparar visualmente com o Blitz3D original em Wine.
 
@@ -149,15 +151,22 @@ compilam hoje sem engine, 273 falham só por comandos gráficos — essa lista
 confere as ~480 assinaturas `rtSym` do original contra o que ficou
 registado.
 
-## O que falta decidir (retomar quando chegar)
+## Decidido
 
-1. `zenblitz3d` linka `zen_static` (compilador + engine, corre `.bb`
-   direto) ou só `zen_vm` (o jogo distribui-se em `.zbc`)? Dá para os dois
-   executáveis — decidir antes do marco 0 porque afeta o CMake.
-2. Scancodes SDL → constantes do Blitz (`gxruntime/gxinput.cpp` do
-   original tem a tabela; copiar direto).
-3. Fonte do Marco 2: a fonte embutida do Batch chega para `Text`, ou o
-   `LoadFont`/`SetFont` do Blitz precisa de stb_truetype desde o início?
+1. **Compilador dentro do `zenblitz3d`** — linka `zen_static`, corre `.bb`
+   direto como o Blitz3D original (editar → play). Sem executável separado
+   "só runtime" para já.
+2. **Teclas**: `KeyDown(n)`/`KeyHit(n)` do original passam `n` direto ao
+   DirectInput — os números que os samples usam **são** os códigos `DIK_*`,
+   não uma tabela própria do Blitz. O `Platform` mapeia `SDL_Scancode` →
+   DIK ao ler o evento; a VM só vê o valor DIK. Tabela completa (SDL →
+   DIK, ~90 teclas úteis, os aliases do original) em
+   `PLANO_ENGINE_KEYS.md` — usar direto no Marco 1, já não é preciso
+   redescobrir os valores.
+3. **Fontes carregadas desde o início**: `stb_truetype` entra no Marco 2
+   junto com `LoadFont`/`SetFont`, não fica para depois. A fonte embutida
+   do Batch serve de *fallback* quando o programa não carregou nenhuma
+   (`Text` antes de qualquer `LoadFont` deve continuar a desenhar algo).
 
 ## Bug MSVC em aberto (não bloqueia o engine)
 
