@@ -123,6 +123,8 @@ namespace bb
     /* command tables (bb_cmds.cpp) */
     extern const BBCommand bb_cmds_basic[];
     extern const int bb_cmds_basic_count;
+    extern const BBCommand bb_cmds_io[];
+    extern const int bb_cmds_io_count;
 }
 
 #endif

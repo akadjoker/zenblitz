@@ -128,9 +128,14 @@ sem o compilador. A VM pode suspender numa nativa (`request_suspend`) para o
 loop da web. Core: 28 000 → 10 000 linhas; opcodes 114 → 69; tipos de
 objecto 17 → 7. fib(30) 93 ms → 54 ms.
 
-## 10. Próximos passos
+## 10. Feito depois da redução
 
-1. Peepholes: ADDI/SUBI, comparações com imediato, intrínsecos de matemática.
-2. `--debug`: bounds check por dimensão nos arrays (agora só o índice achatado).
-3. Fase 5-B (ficheiros, streams, banks sobre `ObjBuffer`).
-4. Listas e mapas por comandos (`CreateList`, `ListAdd`, ...), se quisermos.
+- Peepholes: ADDI/SUBI, comparações com imediato, intrínsecos de matemática.
+- Fase 5-B: ficheiros, streams, directorias e banks (`bb_cmds_io.cpp`,
+  banks sobre `ObjBuffer`), com teste `tests/files_banks.bb`.
+
+## 11. Próximos passos
+
+1. `--debug`: bounds check por dimensão nos arrays (agora só o índice achatado).
+2. Listas e mapas por comandos (`CreateList`, `ListAdd`, ...), se quisermos.
+3. Engine: ver `PLANO_BLITZ3D.md`.

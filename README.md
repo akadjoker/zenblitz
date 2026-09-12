@@ -75,6 +75,10 @@ The old Zen-syntax test-suite is kept in `tests/legacy_zen/` for reference.
   (`Left`, `Mid`, `Instr`, `Replace`, `Hex`, ...), maths (`Sin` in degrees,
   `Rnd/Rand` with Blitz's own generator, ...), `MilliSecs`, `Delay`,
   `CommandLine`, timers, `RuntimeError`.
+- Files and banks: `OpenFile/ReadFile/WriteFile`, `ReadLine/WriteLine`,
+  `ReadInt/ReadFloat/ReadString` and the `Write*` forms, `Eof`, `SeekFile`,
+  `FilePos`, `ReadDir/NextFile`, `FileType/FileSize/CopyFile/DeleteFile`,
+  `CreateBank`, `Peek*/Poke*`, `CopyBank`, `ResizeBank`, `ReadBytes/WriteBytes`.
 
 The mapping from Blitz constructs to VM bytecode, the planned phases (files,
 banks, graphics) and the known differences from Blitz3D are in

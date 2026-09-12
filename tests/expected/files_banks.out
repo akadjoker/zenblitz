@@ -1,0 +1,24 @@
+size=51
+type=1 dir=2 none=0
+first line
+second line
+123456
+65535
+200
+1.5
+packed string
+eof=1
+pos=6 line
+copy=51
+deleted=0
+lines read: 3
+found a.txt: 1
+dir gone: 1
+bank size 16
+255 4660 -2 2.5
+resized 32 keeps -2
+copied -2
+wrote 12
+read 12
+255 -2 2.5
+done

@@ -596,6 +596,7 @@ namespace bb
         rt->g_dataptr = vm->def_global("__DATAPTR", val_int(0));
 
         rt->registerCommands(bb_cmds_basic, bb_cmds_basic_count);
+        rt->registerCommands(bb_cmds_io, bb_cmds_io_count);
         return rt;
     }
 
