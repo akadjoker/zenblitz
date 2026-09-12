@@ -13,6 +13,9 @@
 #include "engine/Camera.h"
 #include "engine/Light.h"
 #include "engine/MD2Model.h"
+#include "engine/LoaderB3D.h"
+#include "engine/LoaderB3DS.h"
+#include <string>
 
 namespace bb3d
 {
@@ -386,6 +389,52 @@ namespace bb3d
         return 0;
     }
 
+    namespace
+    {
+        std::string lowerExt(const std::string &f)
+        {
+            size_t dot = f.find_last_of('.');
+            if (dot == std::string::npos) return std::string();
+            std::string ext = f.substr(dot + 1);
+            for (char &c : ext) if (c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 'a');
+            return ext;
+        }
+    }
+
+    static int c_LoadMesh(VM *vm, Value *args, int nargs)
+    {
+        (void)nargs;
+        const char *file = zen::is_string(args[0]) ? zen::as_cstring(args[0]) : "";
+        engine::Entity *parent = entity_of(arg_int(args[1]));
+
+        std::string ext = lowerExt(file);
+        engine::Entity *e = nullptr;
+        if (ext == "md2")
+        {
+            engine::MD2Model *m = new engine::MD2Model(file);
+            if (!m->getValid()) delete m;
+            else e = m;
+        }
+        else if (ext == "3ds")
+        {
+            engine::LoaderB3DS loader;
+            e = loader.load(file, engine::Transform(), 0, &platform_for(vm)->device());
+        }
+        else
+        {
+            // .b3d and anything else fall back to the B3D loader, same as
+            // LoadMesh in the original (only .b3d/.3ds/.x were ever real
+            // mesh formats it dispatched by extension).
+            engine::LoaderB3D loader;
+            e = loader.load(file, engine::Transform(), 0, &platform_for(vm)->device());
+        }
+
+        if (!e) { args[0] = val_int(0); return 1; }
+        insert_entity(e, parent);
+        args[0] = val_int(store_entity(e));
+        return 1;
+    }
+
     static int c_LoadMD2(VM *vm, Value *args, int nargs)
     {
         (void)vm; (void)nargs;
@@ -507,6 +556,7 @@ namespace bb3d
         {"LightRange%light#range", c_LightRange},
         {"LightConeAngles%light#inner#outer", c_LightConeAngles},
 
+        {"%LoadMesh$file%parent=0", c_LoadMesh},
         {"%LoadMD2$file%parent=0", c_LoadMD2},
         {"AnimateMD2%md2%mode=1#speed=1%first_frame=0%last_frame=9999#transition=0", c_AnimateMD2},
         {"#MD2AnimTime%md2", c_MD2AnimTime},

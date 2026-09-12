@@ -2,6 +2,7 @@
 #pragma once
 
 #include "detail/utils.hpp"
+#include <string>
 
 namespace ct
 {
@@ -52,6 +53,24 @@ namespace ct
         std::uint64_t operator()(T *p) const
         {
             return detail::hash_mix(reinterpret_cast<std::uintptr_t>(p));
+        }
+    };
+
+    template <>
+    struct Hash<std::string>
+    {
+        // FNV-1a over the bytes - simple, no external dependency, good
+        // enough distribution for the short keys (names, chunk tags,
+        // material names) this container is actually keyed by.
+        std::uint64_t operator()(const std::string &s) const
+        {
+            std::uint64_t h = 1469598103934665603ull;
+            for (unsigned char c : s)
+            {
+                h ^= c;
+                h *= 1099511628211ull;
+            }
+            return h;
         }
     };
 
