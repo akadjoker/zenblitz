@@ -16,6 +16,7 @@
 #include "engine/LoaderB3D.h"
 #include "engine/LoaderB3DS.h"
 #include <string>
+#include <cstdio>
 
 namespace bb3d
 {
@@ -483,7 +484,14 @@ namespace bb3d
             e = loader.load(file, engine::Transform(), 0, &platform_for(vm)->device());
         }
 
-        if (!e) { args[0] = val_int(0); return 1; }
+        if (!e)
+        {
+            char msg[512];
+            snprintf(msg, sizeof(msg), "LoadMesh: could not load \"%s\"", file);
+            zen::backend_log(vm->backend(), zen::LOG_WARN, msg);
+            args[0] = val_int(0);
+            return 1;
+        }
         insert_entity(e, parent);
         args[0] = val_int(store_entity(e));
         return 1;
@@ -491,11 +499,19 @@ namespace bb3d
 
     static int c_LoadMD2(VM *vm, Value *args, int nargs)
     {
-        (void)vm; (void)nargs;
+        (void)nargs;
         const char *file = zen::is_string(args[0]) ? zen::as_cstring(args[0]) : "";
         engine::Entity *parent = entity_of(arg_int(args[1]));
         engine::MD2Model *m = new engine::MD2Model(file);
-        if (!m->getValid()) { delete m; args[0] = val_int(0); return 1; }
+        if (!m->getValid())
+        {
+            delete m;
+            char msg[512];
+            snprintf(msg, sizeof(msg), "LoadMD2: could not load \"%s\"", file);
+            zen::backend_log(vm->backend(), zen::LOG_WARN, msg);
+            args[0] = val_int(0);
+            return 1;
+        }
         insert_entity(m, parent);
         args[0] = val_int(store_entity(m));
         return 1;

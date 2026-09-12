@@ -12,6 +12,7 @@
 #include "engine/Platform.h"
 #include "engine/Texture.h"
 #include "engine/Model.h"
+#include <cstdio>
 
 namespace bb3d
 {
@@ -67,20 +68,31 @@ namespace bb3d
         return found ? *found : nullptr;
     }
 
+    static void warn_load_failed(VM *vm, const char *cmd, const char *file)
+    {
+        char msg[512];
+        snprintf(msg, sizeof(msg), "%s: could not load \"%s\"", cmd, file);
+        zen::backend_log(vm->backend(), zen::LOG_WARN, msg);
+    }
+
     static int c_LoadTexture(VM *vm, Value *args, int nargs)
     {
-        (void)vm; (void)nargs;
-        engine::Texture *t = engine::Texture::load(arg_cstr(args[0]), (int)arg_int(args[1]));
+        (void)nargs;
+        const char *file = arg_cstr(args[0]);
+        engine::Texture *t = engine::Texture::load(file, (int)arg_int(args[1]));
+        if (!t) warn_load_failed(vm, "LoadTexture", file);
         args[0] = val_int(t ? store_texture(t) : 0);
         return 1;
     }
 
     static int c_LoadAnimTexture(VM *vm, Value *args, int nargs)
     {
-        (void)vm; (void)nargs;
-        engine::Texture *t = engine::Texture::loadAnim(arg_cstr(args[0]), (int)arg_int(args[1]),
+        (void)nargs;
+        const char *file = arg_cstr(args[0]);
+        engine::Texture *t = engine::Texture::loadAnim(file, (int)arg_int(args[1]),
                                                        (int)arg_int(args[2]), (int)arg_int(args[3]),
                                                        (int)arg_int(args[4]), (int)arg_int(args[5]));
+        if (!t) warn_load_failed(vm, "LoadAnimTexture", file);
         args[0] = val_int(t ? store_texture(t) : 0);
         return 1;
     }

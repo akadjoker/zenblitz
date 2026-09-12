@@ -29,6 +29,8 @@ namespace engine
         bool getMD2Animating() const { return mAnimMode != 0; }
         float getMD2AnimTime() const { return mAnimTime; }
         bool getValid() const { return mRep->valid(); }
+        // the Rep's box spans every frame of the animation
+        const Box &getBox() const { return mRep->getBox(); }
 
     private:
         MD2Rep *mRep;
