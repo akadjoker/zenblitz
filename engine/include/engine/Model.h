@@ -81,9 +81,13 @@ namespace engine
                     if (alpha <= 0) return false;
                 }
             }
-            if (mWBrush) mRenderBrush = mBrush;
+            if (mWBrush) setRenderBrush(mBrush);
             if (alpha != mRenderBrush.getAlpha())
-                mRenderBrush.setAlpha(alpha);
+            {
+                Brush b = mRenderBrush;
+                b.setAlpha(alpha);
+                setRenderBrush(b);
+            }
             else if (!mWBrush)
                 return true;
 

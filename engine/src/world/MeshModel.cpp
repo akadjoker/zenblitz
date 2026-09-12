@@ -33,6 +33,7 @@ namespace engine
         mSurfaces.push_back(s);
         s->setBrush(b);
         ++mGeomChanges;
+        ++mBrushChanges;
         return s;
     }
 
@@ -50,6 +51,7 @@ namespace engine
     void MeshModel::paint(const Brush &b)
     {
         for (size_t k = 0; k < mSurfaces.size(); ++k) mSurfaces[k]->setBrush(b);
+        ++mBrushChanges;
     }
 
     void MeshModel::add(const MeshModel &t)
@@ -179,7 +181,7 @@ namespace engine
 
     void MeshModel::setRenderBrush(const Brush &b)
     {
-        --mLocalBrushChanges;
+        ++mBrushChanges;
         Model::setRenderBrush(b);
     }
 

@@ -1,4 +1,5 @@
 #include "engine/Surface.h"
+#include <ct/sort.hpp>
 #include <cmath>
 
 namespace engine
@@ -24,8 +25,31 @@ namespace engine
 
     void Surface::updateNormals()
     {
-        ct::Vector<Vector> accum(mVertices.size());
-        for (size_t k = 0; k < mVertices.size(); ++k) accum.push_back(Vector());
+        const size_t n = mVertices.size();
+
+        // group vertices by coincident position: sort indices by coords
+        // (Vector::operator< already has an epsilon), then each run of
+        // equal-position indices shares one accumulator slot. O(n log n)
+        // instead of the O(n^2) linear-scan-per-triangle-vertex this
+        // replaces.
+        ct::Vector<int> order(n);
+        for (size_t k = 0; k < n; ++k) order.push_back((int)k);
+        ct::sort(order.begin(), order.end(),
+                 [this](int a, int b) { return mVertices[a].coords < mVertices[b].coords; });
+
+        ct::Vector<int> group(n);
+        group.resize(n);
+        int groupCount = 0;
+        for (size_t k = 0; k < n; ++k)
+        {
+            if (k > 0 && !(mVertices[order[k - 1]].coords == mVertices[order[k]].coords))
+                ++groupCount;
+            group[order[k]] = groupCount;
+        }
+        if (n) ++groupCount;
+
+        ct::Vector<Vector> accum(groupCount);
+        accum.resize(groupCount);
 
         for (size_t k = 0; k < mTriangles.size(); ++k)
         {
@@ -33,20 +57,14 @@ namespace engine
             const Vector &v0 = mVertices[t.verts[0]].coords;
             const Vector &v1 = mVertices[t.verts[1]].coords;
             const Vector &v2 = mVertices[t.verts[2]].coords;
-            Vector n = (v1 - v0).cross(v2 - v0);
-            if (n.length() <= blitz::EPSILON) continue;
-            n.normalize();
+            Vector fn = (v1 - v0).cross(v2 - v0);
+            if (fn.length() <= blitz::EPSILON) continue;
+            fn.normalize();
             for (int i = 0; i < 3; ++i)
-            {
-                for (size_t j = 0; j < mVertices.size(); ++j)
-                {
-                    if (mVertices[j].coords == mVertices[t.verts[i]].coords)
-                        accum[(int)j] += n;
-                }
-            }
+                accum[group[t.verts[i]]] += fn;
         }
-        for (size_t k = 0; k < mVertices.size(); ++k)
-            mVertices[k].normal = accum[(int)k].normalized();
+        for (size_t k = 0; k < n; ++k)
+            mVertices[k].normal = accum[group[(int)k]].normalized();
     }
 
     bool Surface::ensureGpu(gpu::Device &dev)

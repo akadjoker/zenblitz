@@ -30,6 +30,8 @@ add_library(zenblitz_engine STATIC
     src/world/MeshRenderer.cpp
     src/world/World.cpp
     src/world/MeshUtil.cpp
+    src/world/MeshLoader.cpp
+    src/world/LoaderB3D.cpp
 )
 
 target_include_directories(zenblitz_engine PUBLIC
