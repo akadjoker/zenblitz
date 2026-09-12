@@ -219,31 +219,34 @@ namespace kx
       mMatrixStack.pop_back();
     }
     else
-      mCurrentMatrix = Math::Mat4::Identity();
+      mCurrentMatrix = Matrix4::identity();
   }
 
   void BatchRenderer::loadIdentity()
   {
-    mCurrentMatrix = Math::Mat4::Identity();
+    mCurrentMatrix = Matrix4::identity();
   }
 
   void BatchRenderer::translate(float x, float y, float z)
   {
-    mCurrentMatrix = mCurrentMatrix * Math::Mat4::Translation(Math::Vec3(x, y, z));
+    mCurrentMatrix = mCurrentMatrix * Matrix4::translation(Vector(x, y, z));
   }
 
   void BatchRenderer::rotate(float angleDeg, float axisX, float axisY, float axisZ)
   {
-    const Math::Vec3 axis(axisX, axisY, axisZ);
-    if (axis.LengthSquared() <= 0.000001f)
+    Vector axis(axisX, axisY, axisZ);
+    if (axis.dot(axis) <= 0.000001f)
       return;
-    mCurrentMatrix =
-        mCurrentMatrix * Math::Quaternion::FromAxisAngle(axis.Normalized(), angleDeg * kDeg2Rad).ToMat4();
+    /* blitz::Matrix(angle, axis) is Blitz3D's own axis-angle rotation
+       (Geom.h) — used here instead of a quaternion, same result, one less
+       type in the whole engine. */
+    blitz::Matrix rot(angleDeg * kDeg2Rad, axis.normalized());
+    mCurrentMatrix = mCurrentMatrix * Matrix4::fromBlitz(rot, Vector());
   }
 
   void BatchRenderer::scale(float x, float y, float z)
   {
-    mCurrentMatrix = mCurrentMatrix * Math::Mat4::Scale(Math::Vec3(x, y, z));
+    mCurrentMatrix = mCurrentMatrix * Matrix4::scale(Vector(x, y, z));
   }
 
   void BatchRenderer::setColor(unsigned char r, unsigned char g, unsigned char b, unsigned char a)
@@ -793,7 +796,7 @@ namespace kx
     end();
   }
 
-  void BatchRenderer::drawTriangle3D(const Math::Vec3 &a, const Math::Vec3 &b, const Math::Vec3 &c)
+  void BatchRenderer::drawTriangle3D(const Vector &a, const Vector &b, const Vector &c)
   {
     begin(ModeTriangles);
     vertex3(a.x, a.y, a.z);
@@ -802,8 +805,8 @@ namespace kx
     end();
   }
 
-  void BatchRenderer::drawTriangle3D(const Math::Vec3 &a, const Math::Vec2 &uvA, const Math::Vec3 &b, const Math::Vec2 &uvB,
-                                     const Math::Vec3 &c, const Math::Vec2 &uvC)
+  void BatchRenderer::drawTriangle3D(const Vector &a, const Vec2f &uvA, const Vector &b, const Vec2f &uvB,
+                                     const Vector &c, const Vec2f &uvC)
   {
     begin(ModeTriangles);
     setTexcoord(uvA.x, uvA.y);
@@ -815,8 +818,8 @@ namespace kx
     end();
   }
 
-  void BatchRenderer::drawTriangle3D(const Math::Vec3 &a, const Math::Vec2 &uvA, std::uint32_t colorA, const Math::Vec3 &b,
-                                     const Math::Vec2 &uvB, std::uint32_t colorB, const Math::Vec3 &c, const Math::Vec2 &uvC,
+  void BatchRenderer::drawTriangle3D(const Vector &a, const Vec2f &uvA, std::uint32_t colorA, const Vector &b,
+                                     const Vec2f &uvB, std::uint32_t colorB, const Vector &c, const Vec2f &uvC,
                                      std::uint32_t colorC)
   {
     begin(ModeTriangles);
@@ -1253,7 +1256,7 @@ namespace kx
     mStats = Stats();
   }
 
-  void BatchRenderer::setProjection(const Math::Mat4 &matrix)
+  void BatchRenderer::setProjection(const Matrix4 &matrix)
   {
     mProjection = matrix;
   }
@@ -1274,7 +1277,7 @@ namespace kx
 
   void BatchRenderer::updateProjection()
   {
-    mProjection = Math::Mat4::Ortho(0.0f, static_cast<float>(mWindowWidth), static_cast<float>(mWindowHeight), 0.0f, -1.0f, 1.0f);
+    mProjection = Matrix4::ortho(0.0f, static_cast<float>(mWindowWidth), static_cast<float>(mWindowHeight), 0.0f, -1.0f, 1.0f);
   }
 
   bool BatchRenderer::ensureGpuBuffers(std::uint64_t vertexBytes, std::uint64_t indexBytes)
@@ -1347,7 +1350,7 @@ namespace kx
       mGpu->updateBuffer(mVertexBuffer, 0, {mVertices.data(), mVertices.size() * sizeof(Vertex)});
     if (!mIndices.empty())
       mGpu->updateBuffer(mIndexBuffer, 0, {mIndices.data(), mIndices.size() * sizeof(std::uint16_t)});
-    mGpu->updateBuffer(mUniformBuffer, 0, {mProjection.Data(), sizeof(Math::Mat4)});
+    mGpu->updateBuffer(mUniformBuffer, 0, {mProjection.data(), sizeof(Matrix4)});
 
     if (mConfig.enableProfiling)
     {
@@ -1418,7 +1421,7 @@ namespace kx
         continue;
       }
       mGpu->setPipeline(pipeline);
-      mGpu->bindUniformBuffer(0, mUniformBuffer, 0, sizeof(Math::Mat4));
+      mGpu->bindUniformBuffer(0, mUniformBuffer, 0, sizeof(Matrix4));
       mGpu->bindTexture(0, call.texture.valid() ? call.texture : mWhiteTexture, mSampler);
       mGpu->bindVertexBuffer(0, mVertexBuffer, 0);
 
@@ -1439,7 +1442,7 @@ namespace kx
   void BatchRenderer::setupBuffers()
   {
     gpu::BufferDesc uniformDesc;
-    uniformDesc.size = sizeof(Math::Mat4);
+    uniformDesc.size = sizeof(Matrix4);
     uniformDesc.usage = gpu::BufferUsageUniform;
     uniformDesc.debugName = "batch.uniforms";
     mUniformBuffer = mGpu->createBuffer(uniformDesc);
@@ -1515,20 +1518,20 @@ namespace kx
 
   void BatchRenderer::applyTransform(float &x, float &y, float &z)
   {
-    const Math::Vec3 transformed = mCurrentMatrix.TransformPoint(Math::Vec3(x, y, z));
+    const Vector transformed = mCurrentMatrix.transformPoint(Vector(x, y, z));
     x = transformed.x;
     y = transformed.y;
     z = transformed.z;
   }
 
-  Math::Vec4 fontGlyphUVRect(unsigned char code)
+  FloatRect fontGlyphUVRect(unsigned char code)
   {
     if (code < 32 || code > 127 || code == ' ')
-      return Math::Vec4(0.0f, 0.0f, 0.0f, 0.0f);
+      return FloatRect{0.0f, 0.0f, 0.0f, 0.0f};
     const float cw = 8.0f / static_cast<float>(kFontAtlasWidth);
     const float ch = 8.0f / static_cast<float>(kFontAtlasHeight);
     const int g = code - 32;
-    return Math::Vec4(static_cast<float>(g % kFontCols) * cw, static_cast<float>(g / kFontCols) * ch, cw, ch);
+    return FloatRect{static_cast<float>(g % kFontCols) * cw, static_cast<float>(g / kFontCols) * ch, cw, ch};
   }
 
   void BatchRenderer::drawText(float x, float y, float size, const char *text)
@@ -1551,10 +1554,10 @@ namespace kx
       unsigned char code = static_cast<unsigned char>(*c);
       if (code < 32 || code > 127)
         code = '?';
-      const Math::Vec4 rect = fontGlyphUVRect(code);
-      if (rect.z > 0.0f)
+      const FloatRect rect = fontGlyphUVRect(code);
+      if (rect.width > 0.0f)
       {
-        const float u0 = rect.x, v0 = rect.y, u1 = rect.x + rect.z, v1 = rect.y + rect.w;
+        const float u0 = rect.x, v0 = rect.y, u1 = rect.x + rect.width, v1 = rect.y + rect.height;
         emitTexturedTriangle(penX, penY, u0, v0, penX + size, penY, u1, v0, penX, penY + size, u0, v1);
         emitTexturedTriangle(penX + size, penY, u1, v0, penX + size, penY + size, u1, v1, penX, penY + size, u0, v1);
       }

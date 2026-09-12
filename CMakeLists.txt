@@ -64,17 +64,18 @@ endif()
 # OFF by default so every existing target (zenblitz, zenblitz-rt, and every
 # CI job — Android, Emscripten, MSVC included) keeps building without SDL or
 # a GPU backend, exactly as verified today. See PLANO_ENGINE.md.
+#
+# Math: engine/ uses blitz::Vector/Matrix (Geom.h, ported from Blitz3D
+# itself) for everything the game/engine code touches, and engine::Matrix4
+# (Matrix4.h) as the one GPU-facing 4x4 the Batch's uniform buffer needs —
+# there is no general-purpose math library dependency (no extern/math).
 option(ZEN_BUILD_ENGINE "Build zenblitz3d (engine + SDL + GPU)" OFF)
 if(ZEN_BUILD_ENGINE)
     set(GPU_BUILD_OPENGL ON CACHE BOOL "" FORCE)
     set(GPU_BUILD_SDL ON CACHE BOOL "" FORCE)
     set(GPU_BUILD_DEMOS OFF CACHE BOOL "" FORCE)
     set(GPU_BUILD_OPENGL_TESTS OFF CACHE BOOL "" FORCE)
-    set(MATHC_NATIVE_ARCH OFF CACHE BOOL "" FORCE) # -march=native would break other machines/CI
-    set(MATHC_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-    set(MATHC_BUILD_BENCH OFF CACHE BOOL "" FORCE)
     add_subdirectory(extern/GPU/gpu)
-    add_subdirectory(extern/math)
     add_subdirectory(engine)
     add_subdirectory(runtime3d)
 endif()

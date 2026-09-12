@@ -31,6 +31,11 @@ namespace kx
     bool hasFocus() const;
 
     void update();
+    /* Applies one SDL_Event's window/app-level effect (close, close-key,
+       minimize/restore/resize). engine::Platform owns SDL_PollEvent and
+       calls this per event; Device::update() no longer polls itself, so
+       exactly one place consumes the queue. */
+    void handleEvent(const SDL_Event &event);
     void flip();
 
     SDL_Window *getNativeWindow() const { return mWindow.handle(); }

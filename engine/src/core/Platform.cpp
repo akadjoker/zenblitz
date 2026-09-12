@@ -102,12 +102,14 @@ namespace engine
 
     void Platform::pumpEvents()
     {
+        mDevice.update(); /* timing + window-resize bookkeeping; no longer polls itself */
         SDL_Event e;
         while (SDL_PollEvent(&e))
         {
-            if (e.type == SDL_QUIT) { mOpen = false; continue; }
-            handleEvent(&e);
+            mDevice.handleEvent(e); /* close request, close key, minimize/restore/resize */
+            handleEvent(&e);        /* DIK keyboard, mouse */
         }
+        if (!mDevice.isOpen()) mOpen = false;
     }
 
     void Platform::endFrame()

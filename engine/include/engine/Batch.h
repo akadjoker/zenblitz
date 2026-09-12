@@ -4,7 +4,8 @@
 
 #include "gpu/GPU.h"
 
-#include "mathc.h"
+#include "engine/Geom.h"
+#include "engine/Matrix4.h"
 
 #include <ct/vector.hpp>
 
@@ -13,6 +14,9 @@
 
 namespace kx
 {
+  using blitz::Vector;
+  using engine::Vec2f;
+  using engine::Matrix4;
 
   struct FloatRect
   {
@@ -22,7 +26,7 @@ namespace kx
     float height = 0.0f;
   };
 
-  Math::Vec4 fontGlyphUVRect(unsigned char code);
+  FloatRect fontGlyphUVRect(unsigned char code);
 
   class BatchRenderer
   {
@@ -116,11 +120,11 @@ namespace kx
     void drawPolyline(const float *xyPairs, int pointCount);
 
     void drawLine3D(float x0, float y0, float z0, float x1, float y1, float z1);
-    void drawTriangle3D(const Math::Vec3 &a, const Math::Vec3 &b, const Math::Vec3 &c);
-    void drawTriangle3D(const Math::Vec3 &a, const Math::Vec2 &uvA, const Math::Vec3 &b, const Math::Vec2 &uvB,
-                        const Math::Vec3 &c, const Math::Vec2 &uvC);
-    void drawTriangle3D(const Math::Vec3 &a, const Math::Vec2 &uvA, std::uint32_t colorA, const Math::Vec3 &b,
-                        const Math::Vec2 &uvB, std::uint32_t colorB, const Math::Vec3 &c, const Math::Vec2 &uvC,
+    void drawTriangle3D(const Vector &a, const Vector &b, const Vector &c);
+    void drawTriangle3D(const Vector &a, const Vec2f &uvA, const Vector &b, const Vec2f &uvB,
+                        const Vector &c, const Vec2f &uvC);
+    void drawTriangle3D(const Vector &a, const Vec2f &uvA, std::uint32_t colorA, const Vector &b,
+                        const Vec2f &uvB, std::uint32_t colorB, const Vector &c, const Vec2f &uvC,
                         std::uint32_t colorC);
 
     void drawWireBox(float minX, float minY, float minZ, float maxX, float maxY, float maxZ);
@@ -150,8 +154,8 @@ namespace kx
     gpu::TextureHandle fontTexture() const { return mFontTexture; }
     gpu::TextureHandle whiteTexture() const { return mWhiteTexture; }
 
-    void setProjection(const Math::Mat4 &matrix);
-    const Math::Mat4 &getProjection() const { return mProjection; }
+    void setProjection(const Matrix4 &matrix);
+    const Matrix4 &getProjection() const { return mProjection; }
 
     void resetStats();
     const Stats &getStats() const { return mStats; }
@@ -220,8 +224,8 @@ namespace kx
     ct::Vector<Vertex> mVertices;
     ct::Vector<std::uint16_t> mIndices;
     ct::Vector<DrawCall> mDrawCalls;
-    ct::Vector<Math::Mat4> mMatrixStack;
-    Math::Mat4 mCurrentMatrix = Math::Mat4::Identity();
+    ct::Vector<Matrix4> mMatrixStack;
+    Matrix4 mCurrentMatrix = Matrix4::identity();
 
     std::uint32_t mCurrentColor = 0xFFFFFFFFu;
     gpu::TextureHandle mCurrentTexture;
@@ -232,7 +236,7 @@ namespace kx
 
     int mWindowWidth = 800;
     int mWindowHeight = 600;
-    Math::Mat4 mProjection = Math::Mat4::Identity();
+    Matrix4 mProjection = Matrix4::identity();
     bool mDepthTestEnabled = false;
     bool mDepthWriteEnabled = false;
     bool mBlendEnabled = true;

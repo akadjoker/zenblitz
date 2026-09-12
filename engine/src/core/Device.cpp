@@ -1,6 +1,5 @@
 #include "engine/Device.h"
 
-#include "engine/Input.h"
 #include "engine/Log.h"
 
 #include <cmath>
@@ -81,7 +80,6 @@ namespace kx
     mHeight = height;
     mRunning = true;
 
-    Input::init();
     mCurrent = getTime();
     mPrevious = mCurrent;
     mReady = true;
@@ -122,6 +120,50 @@ namespace kx
     return (SDL_GetWindowFlags(mWindow.handle()) & SDL_WINDOW_INPUT_FOCUS) != 0;
   }
 
+  /* Applies one SDL_Event's window/app-level effect (close request, the
+     configured close key, minimize/restore/resize bookkeeping) — the part
+     of the old per-event update() loop that still matters once
+     engine::Platform (not Device) owns SDL_PollEvent, so there is exactly
+     one place consuming the queue instead of two competing for it. Called
+     from Platform::pumpEvents() for every event it reads; keyboard/mouse
+     dispatch (kx::Input, mathc Vec2-based) lived in the same loop and is
+     gone along with kx::Input, since Platform's own DIK-based handling
+     covers that already. */
+  void Device::handleEvent(const SDL_Event &e)
+  {
+    if (e.type == SDL_QUIT)
+      mRunning = false;
+    if (e.type == SDL_KEYDOWN && e.key.keysym.sym == mCloseKey)
+      mRunning = false;
+
+    if (e.type == SDL_WINDOWEVENT)
+    {
+      switch (e.window.event)
+      {
+      case SDL_WINDOWEVENT_MINIMIZED:
+        mMinimized = true;
+        break;
+      case SDL_WINDOWEVENT_RESTORED:
+      case SDL_WINDOWEVENT_MAXIMIZED:
+        mMinimized = false;
+        break;
+      case SDL_WINDOWEVENT_CLOSE:
+        mRunning = false;
+        break;
+      case SDL_WINDOWEVENT_SIZE_CHANGED:
+        if (e.window.data1 != mWidth || e.window.data2 != mHeight)
+        {
+          mWidth = e.window.data1;
+          mHeight = e.window.data2;
+          mResized = true;
+        }
+        break;
+      default:
+        break;
+      }
+    }
+  }
+
   void Device::update()
   {
     if (!mReady)
@@ -130,80 +172,6 @@ namespace kx
     mCurrent = getTime();
     mUpdate = mCurrent - mPrevious;
     mPrevious = mCurrent;
-
-    Input::update();
-
-    SDL_Event e;
-    while (SDL_PollEvent(&e))
-    {
-      if (e.type == SDL_QUIT)
-        mRunning = false;
-      if (e.type == SDL_KEYDOWN && e.key.keysym.sym == mCloseKey)
-        mRunning = false;
-
-      switch (e.type)
-      {
-      case SDL_KEYDOWN:
-        Input::onKeyDown(e.key);
-        break;
-      case SDL_KEYUP:
-        Input::onKeyUp(e.key);
-        break;
-      case SDL_MOUSEBUTTONDOWN:
-        Input::onMouseDown(e.button);
-        break;
-      case SDL_MOUSEBUTTONUP:
-        Input::onMouseUp(e.button);
-        break;
-      case SDL_MOUSEMOTION:
-        Input::onMouseMove(e.motion);
-        break;
-      case SDL_MOUSEWHEEL:
-        Input::onMouseWheel(e.wheel);
-        break;
-      case SDL_TEXTINPUT:
-        Input::onTextInput(e.text);
-        break;
-      case SDL_FINGERDOWN:
-        Input::onTouchDown(e.tfinger);
-        break;
-      case SDL_FINGERUP:
-        Input::onTouchUp(e.tfinger);
-        break;
-      case SDL_FINGERMOTION:
-        Input::onTouchMove(e.tfinger);
-        break;
-      default:
-        break;
-      }
-
-      if (e.type == SDL_WINDOWEVENT)
-      {
-        switch (e.window.event)
-        {
-        case SDL_WINDOWEVENT_MINIMIZED:
-          mMinimized = true;
-          break;
-        case SDL_WINDOWEVENT_RESTORED:
-        case SDL_WINDOWEVENT_MAXIMIZED:
-          mMinimized = false;
-          break;
-        case SDL_WINDOWEVENT_CLOSE:
-          mRunning = false;
-          break;
-        case SDL_WINDOWEVENT_SIZE_CHANGED:
-          if (e.window.data1 != mWidth || e.window.data2 != mHeight)
-          {
-            mWidth = e.window.data1;
-            mHeight = e.window.data2;
-            mResized = true;
-          }
-          break;
-        default:
-          break;
-        }
-      }
-    }
 
     if (mWindow.valid())
     {

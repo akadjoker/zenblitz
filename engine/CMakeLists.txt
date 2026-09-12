@@ -6,11 +6,11 @@ cmake_minimum_required(VERSION 3.21)
 # Graphics, Batch, Input, Log, BlitzKeys).
 add_library(zenblitz_engine STATIC
     src/core/Device.cpp
-    src/core/Input.cpp
     src/core/Log.cpp
     src/core/BlitzKeys.cpp
     src/core/Platform.cpp
     src/core/Profiler.cpp
+    src/core/Geom.cpp
     src/render/Graphics.cpp
     src/render/Batch.cpp
 )
@@ -22,5 +22,5 @@ target_include_directories(zenblitz_engine PUBLIC
 
 # gpu_sdl (GPUSDLWindow, which engine::Device wraps) links SDL2 and the
 # umbrella `gpu` target itself; nothing else to add here.
-target_link_libraries(zenblitz_engine PUBLIC gpu_sdl mathc)
+target_link_libraries(zenblitz_engine PUBLIC gpu_sdl)
 target_compile_options(zenblitz_engine PRIVATE $<$<CONFIG:Release>:-O3>)
