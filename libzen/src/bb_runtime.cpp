@@ -4,7 +4,6 @@
 #include "bb_runtime.h"
 #include "object.h"
 #include <cctype>
-#include <unordered_map>
 
 using namespace zen;
 
@@ -16,19 +15,18 @@ namespace bb
 
     BBRuntime *bb_runtime_for(VM *vm)
     {
-        static map<VM *, BBRuntime *> per_vm;
-        map<VM *, BBRuntime *>::iterator it = per_vm.find(vm);
-        if (it != per_vm.end()) { g_rt = it->second; return it->second; }
+        static ct::HashMap<VM *, BBRuntime *> per_vm;
+        BBRuntime **found = per_vm.find(vm);
+        if (found) { g_rt = *found; return *found; }
         BBRuntime *rt = bb_runtime_create(vm);
-        per_vm[vm] = rt;
+        per_vm.put(vm, rt);
         return rt;
     }
 
     /* ================= output ================= */
     void bb_print(VM *vm, const char *s, int n)
     {
-        const ZenCallbacks &cb = vm->get_callbacks();
-        cb.print(s, n, cb.userdata);
+        backend_print(vm->backend(), s, n);
     }
 
     /* ================= helpers on instances ================= */
@@ -79,8 +77,11 @@ namespace bb
         return arr;
     }
 
-    /* ================= handles ================= */
-    static std::unordered_map<long long, ObjStruct *> handle_map;
+    /* ================= handles =================
+    ** Blitz's Handle()/Object() hand the program a plain integer it may
+    ** store anywhere, including in a file, so these stay small and
+    ** sequential rather than becoming slot handles. */
+    static ct::HashMap<long long, ObjStruct *> handle_map;
     static long long next_handle = 0;
 
     /* ================= natives: types/objects ================= */
@@ -235,7 +236,7 @@ namespace bb
         if (is_int(h) && h.as.integer) { args[0] = h; return 1; }
         ++next_handle;
         inst->fields[ti->nfields + HF_HANDLE] = val_int(next_handle);
-        handle_map[next_handle] = inst;
+        handle_map.put(next_handle, inst);
         args[0] = val_int(next_handle);
         return 1;
     }
@@ -246,9 +247,9 @@ namespace bb
         long long h = bb_arg_int(args[0]);
         BBTypeInfo *ti = type_arg(args[1]);
         if (!ti) { vm->runtime_error("Object: bad type"); return -1; }
-        std::unordered_map<long long, ObjStruct *>::iterator it = handle_map.find(h);
-        if (it == handle_map.end() || it->second->def != ti->def) { args[0] = val_nil(); return 1; }
-        args[0] = val_obj((Obj *)it->second);
+        ObjStruct **found = handle_map.find(h);
+        if (!found || (*found)->def != ti->def) { args[0] = val_nil(); return 1; }
+        args[0] = val_obj((Obj *)*found);
         return 1;
     }
 
@@ -479,18 +480,18 @@ namespace bb
         ObjStructDef *def = b.end();
         BBTypeInfo *ti = make_info(vm, def, name);
         types.push_back(ti);
-        typeByDef[def] = ti;
+        typeByDef.put(def, ti);
         return (int)types.size() - 1;
     }
 
     BBTypeInfo *BBRuntime::typeForDef(ObjStructDef *def)
     {
-        map<ObjStructDef *, BBTypeInfo *>::iterator it = typeByDef.find(def);
-        if (it != typeByDef.end()) return it->second;
+        BBTypeInfo **found = typeByDef.find(def);
+        if (found) return *found;
         if (!def->name || strncmp(def->name->chars, "_t", 2) != 0) return 0;
         BBTypeInfo *ti = make_info(vm, def, def->name->chars + 2);
         types.push_back(ti);
-        typeByDef[def] = ti;
+        typeByDef.put(def, ti);
         return ti;
     }
 
@@ -554,7 +555,9 @@ namespace bb
             Decl *d = env->funcDecls->insertDecl(lname, ft, DECL_FUNC);
             if (!d)
             {
-                fprintf(stderr, "bb: duplicate command '%s'\n", name.c_str());
+                char msg[256];
+                snprintf(msg, sizeof(msg), "bb: duplicate command '%s'", name.c_str());
+                backend_log(vm->backend(), LOG_WARN, msg);
                 continue;
             }
             d->offset = vm->def_native(("_f" + lname).c_str(), cmds[i].fn, -1);

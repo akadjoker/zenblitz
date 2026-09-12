@@ -13,6 +13,7 @@
 #include "bb_type.h"
 #include "vm.h"
 #include "memory.h"
+#include "ct/hashmap.hpp"
 
 namespace bb
 {
@@ -66,7 +67,7 @@ namespace bb
         int g_data, g_dataptr;
 
         vector<BBTypeInfo *> types;
-        map<zen::ObjStructDef *, BBTypeInfo *> typeByDef;
+        ct::HashMap<zen::ObjStructDef *, BBTypeInfo *> typeByDef;
 
         bool isRuntimeDecl(Decl *d) const { return env->funcDecls->findDecl(d->name) == d; }
         int registerType(const string &name, const vector<int> &kinds,
