@@ -104,6 +104,9 @@ namespace engine
         desc.format = gpu::Format::RGBA8;
         desc.initialData = {use->pixels, (size_t)use->get_size()};
         desc.debugName = "bb.texture";
+        // CopySource lets tools/tests read texture contents back via
+        // Device::readTexture; harmless for a normal sampled texture.
+        desc.usage = gpu::TextureUsageSampled | gpu::TextureUsageCopySource;
 
         mGpuFrames[frame] = dev.createTexture(desc);
         mGpuOwner = &dev;

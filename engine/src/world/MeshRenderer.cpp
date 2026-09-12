@@ -414,6 +414,10 @@ namespace engine
             std::int32_t u = mGpu->uniformBlockSlot(cached.pipeline, "Uniforms");
             cached.uniformsSlot = u >= 0 ? u : 0;
             cached.bonesSlot = pk.skinned ? mGpu->uniformBlockSlot(cached.pipeline, "Bones") : -1;
+            // same story as uniform blocks: the GL linker assigns texture
+            // units by active-sampler order, not source declaration order
+            std::int32_t t = mGpu->textureSlot(cached.pipeline, "u_texture");
+            cached.textureSlot = t >= 0 ? t : 0;
         }
         mPipelines.push_back(cached);
         return &mPipelines[mPipelines.size() - 1];
@@ -561,10 +565,11 @@ namespace engine
         if (skinned && cp->bonesSlot >= 0)
             dev.bindUniformBuffer((std::uint32_t)cp->bonesSlot, mBoneBuffer,
                                   (std::uint64_t)boneSlot * mBoneStride, kMaxGpuBones * sizeof(Matrix4));
-        if (tex.value() != mBound.texture)
+        if (tex.value() != mBound.texture || cp->textureSlot != mBound.textureSlot)
         {
-            dev.bindTexture(0, tex, mSampler);
+            dev.bindTexture((std::uint32_t)cp->textureSlot, tex, mSampler);
             mBound.texture = tex.value();
+            mBound.textureSlot = cp->textureSlot;
         }
         if (geom.vb.value() != mBound.vb || geom.vbOffset != mBound.vbOffset)
         {

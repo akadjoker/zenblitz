@@ -84,6 +84,7 @@ namespace engine
             gpu::PipelineHandle pipeline;
             std::int32_t uniformsSlot = 0;
             std::int32_t bonesSlot = -1;
+            std::int32_t textureSlot = 0;
         };
 
         gpu::Device *mGpu = nullptr;
@@ -157,6 +158,7 @@ namespace engine
         {
             std::uint64_t pipeline = 0, texture = 0, indexBuffer = 0;
             std::uint64_t vb = 0, vbOffset = 0, vb2 = 0, vb2Offset = 0, uvb = 0;
+            std::int32_t textureSlot = -1;
         };
         BoundState mBound;
 

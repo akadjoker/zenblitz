@@ -203,7 +203,10 @@ namespace engine
         if (x < 0 || y < 0 || x >= mGraphics.width() || y >= mGraphics.height()) return 0;
         gpu::TextureRegion region;
         region.x = (std::uint32_t)x;
-        region.y = (std::uint32_t)y;
+        // screenTexture is written with GL's bottom-left origin (see the
+        // comment in endFrame); callers pass top-left coordinates like
+        // everywhere else, so flip here rather than surprise every caller.
+        region.y = (std::uint32_t)(mGraphics.height() - 1 - y);
         region.width = 1;
         region.height = 1;
         unsigned char pixel[4] = {0, 0, 0, 0};

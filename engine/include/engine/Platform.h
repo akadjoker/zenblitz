@@ -47,10 +47,12 @@ namespace engine
         kx::ShaderDialect shaderDialect() const { return mGraphics.shaderDialect(); }
         kx::BatchRenderer &batch() { return mBatch; }
 
-        /* ARGB, 0 outside the window. Reads the previous frame's finished
-           screen texture (see Graphics::screenTexture) — the presentation
-           surface itself cannot be read back on any backend this GPU
-           library exposes. */
+        /* ARGB, 0 outside the window. (x,y) is top-left like every other
+           screen coordinate the engine uses; internally flipped to sample
+           the previous frame's finished screen texture (see
+           Graphics::screenTexture), which GL writes bottom-up — the
+           presentation surface itself cannot be read back on any backend
+           this GPU library exposes. */
         unsigned readScreenPixel(int x, int y);
 
         bool keyDown(int dik) const;
