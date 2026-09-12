@@ -7,8 +7,12 @@ set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-# Common warnings
-add_compile_options(-Wall -Wextra -Wno-unused-parameter)
+# Common warnings (MSVC spells them differently and rejects the GCC forms)
+if(MSVC)
+    add_compile_options(/W3)
+else()
+    add_compile_options(-Wall -Wextra -Wno-unused-parameter)
+endif()
 
 # --- Build types ---
 # Default to Release: a bare `cmake -B build` used to select Debug, which
