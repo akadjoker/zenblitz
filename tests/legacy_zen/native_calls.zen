@@ -1,0 +1,18 @@
+// native_calls.zen — Teste de script a chamar funções C++ (natives)
+
+def on_ready() {
+    print("native_calls: on_ready OK");
+}
+
+def on_update(dt) {
+    print("native_calls: on_update dt=" + str(dt));
+}
+
+def get_player_pos() {
+    return 42.0;
+}
+
+def handle_event(event_type, data) {
+    print("Event: " + str(event_type) + " data=" + str(data));
+    return true;
+}

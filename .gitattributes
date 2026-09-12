@@ -1,0 +1,5 @@
+# Keep test inputs/snapshots and shell scripts byte-identical on every
+# platform (Windows runners default to core.autocrlf=true).
+*.sh            text eol=lf
+*.zen           text eol=lf
+tests/expected/** text eol=lf

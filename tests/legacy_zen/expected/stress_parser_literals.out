@@ -1,0 +1,13 @@
+hex: 255 3735928559 9223372036854775807
+int: 9223372036854775807 -9223372036854775807
+float: 1e+10 1e-10 3.14159 0.5 1e+308
+esc: tab	nl\n-literal AB éü
+raw: C:\no\escape\n say "hi"
+interp: sum=7 prod=12 nest=11
+interp2: arr=2 cond=yes
+empty: 0 0 0
+single: 1 1 1
+mixed: 3 true
+comments: 10
+braces: empty-ish 34 34
+unicode: true true

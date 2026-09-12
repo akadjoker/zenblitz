@@ -1,0 +1,46 @@
+// stress: operator precedence / associativity torture
+print("p1:", 1 + 2 * 3 - 4 / 2);            // 1+6-2.0 = 5.0
+print("p2:", 2 ** 3 ** 2);                  // right assoc: 2**9 = 512
+print("p3:", -2 ** 2);                      // -(2**2) = -4
+print("p4:", 10 div 3, 10 % 3, 10 / 4);     // 3 1 2.5
+print("p5:", 1 << 4 | 1 << 2 & 0xFF ^ 3);   // precedence: | ^ & << mix
+print("p6:", ~0, ~~5, -(-(-3)));
+print("p7:", 3 < 5 == true, 1 + 1 == 2 and 2 + 2 == 4 or false);
+print("p8:", not false and not not true);
+print("p9:", 5 & 3 | 8 ^ 2);
+print("p10:", 1 << 62, (1 << 62) * 2);      // wrap at 64-bit
+print("p11:", "a" + 1 + 2.5 + true);        // coercion chain
+
+// short-circuit returns the deciding value
+print("sc1:", nil or "fallback", false or 0, 7 and "kept");
+print("sc2:", nil and error("never"), true or error("never"));
+
+// in / not in
+var arr = [1, 2, 3];
+var m = {"k": 1};
+print("in1:", 2 in arr, 9 in arr, 9 not in arr);
+print("in2:", "k" in m, "z" not in m);
+
+// compound assignment cascade
+var x = 100;
+x += 10; x -= 5; x *= 3; x /= 5; x = floor(x);
+x %= 7; x **= 3; x &= 0xF; x |= 0x30; x ^= 0x11;
+print("comp:", x);
+
+// ?. safe navigation
+class Node { var next; var val = 1; }
+var n = Node();
+print("safe1:", n?.val, n?.next?.val, nil?.anything);
+
+// chained comparisons via and
+var v = 5;
+print("range:", 0 < v and v < 10);
+
+// ternary chains and mixing
+var g = 85;
+var grade = g >= 90 ? "A" : g >= 80 ? "B" : g >= 70 ? "C" : "F";
+print("ternary:", grade);
+
+// unary/power/call mix
+def two() { return 2; }
+print("mix:", -two() ** two(), (-two()) ** two());

@@ -1,0 +1,6 @@
+print(format("Hello %s, you are %d years old!", "World", 42));
+print(format("Pi is %.4f", 3.14159));
+print(format("Hex: %x Dec: %d", 255, 255));
+print(format("[%10s]", "right"));
+print(format("[%-10s]", "left"));
+print(format("%%"));

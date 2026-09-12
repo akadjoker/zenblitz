@@ -1,0 +1,111 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# This repo is the core only (libzen + the plain zen CLI), so every job is
+# headless by construction. Native/graphics modules and their runners are
+# built and tested in the zenvm-modules repository.
+
+jobs:
+  linux:
+    name: Linux (gcc, Release)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build --target zen -j"$(nproc)"
+
+      - name: Snapshot tests
+        run: ZEN_TEST_VERBOSE=1 tests/run_zen_tests.sh bin/zen
+
+  linux-sanitize:
+    name: Linux (gcc, ASan+UBSan)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Debug build type enables -fsanitize=address,undefined (see CMakeLists)
+      - name: Configure
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Debug
+
+      - name: Build
+        run: cmake --build build --target zen -j"$(nproc)"
+
+      - name: Snapshot tests (sanitized)
+        run: |
+          export ASAN_OPTIONS=detect_leaks=0
+          ZEN_TEST_VERBOSE=1 tests/run_zen_tests.sh bin/zen
+
+  # Feeds arbitrary bytes to the compiler + VM under ASan+UBSan, with GC
+  # forced on every allocation (ZEN_DEBUG_STRESS_GC) so marking bugs surface
+  # immediately instead of waiting for a real threshold-triggered collection.
+  # Bounded to a smoke run — deep fuzzing is a local/scheduled concern, not
+  # every PR's.
+  linux-fuzz:
+    name: Linux (clang, fuzz + stress-GC)
+    runs-on: ubuntu-latest
+    env:
+      ASAN_OPTIONS: halt_on_error=1:detect_leaks=0
+      UBSAN_OPTIONS: halt_on_error=1
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -B build -DCMAKE_CXX_COMPILER=clang++ -DZEN_BUILD_FUZZ=ON
+
+      - name: Build
+        run: cmake --build build --target fuzz_zen -j"$(nproc)"
+
+      - name: Fuzz the compiler + VM (bounded)
+        run: ./bin/fuzz_zen -max_total_time=60 -max_len=4096 -timeout=5
+
+  windows:
+    name: Windows (MinGW, Release)
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: false
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
+
+      - name: Configure
+        run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build --target zen -j"$(nproc)"
+
+      # Failures are re-emitted as ::error:: annotations so they are visible
+      # through the public API (job logs need authentication).
+      - name: Snapshot tests
+        run: |
+          set +e
+          ZEN_TEST_VERBOSE=1 tests/run_zen_tests.sh bin/zen.exe | tee test_out.txt
+          rc=${PIPESTATUS[0]}
+          fails=$(grep '\[FAIL\]' test_out.txt | paste -sd'|' -)
+          [ -n "$fails" ] && echo "::error::snapshot failures: $fails"
+          # one annotation per failing test with its ACTUAL output on this
+          # platform (verbose diffs don't surface reliably under msys2)
+          grep '\[FAIL\]' test_out.txt | awk '{print $2}' | head -8 | while read -r t; do
+            out=$(timeout 30 bin/zen.exe "tests/$t.zen" </dev/null 2>&1 | head -12 | sed 's/%/%25/g' | sed ':a;N;$!ba;s/\n/%0A/g')
+            echo "::error::ACTUAL $t:%0A$out"
+          done
+          summary=$(tail -n 12 test_out.txt | sed ':a;N;$!ba;s/\n/%0A/g')
+          echo "::notice::summary:%0A$summary"
+          exit $rc

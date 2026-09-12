@@ -1,0 +1,5 @@
+File "tests/test_plugin.zen", line 1
+  import hello;
+              ^
+Error at ';': Unknown module.
+zen: compilation failed.

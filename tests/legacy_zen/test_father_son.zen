@@ -1,0 +1,31 @@
+// Test: father.field / son.field access between processes
+
+process child(x, y, msg) {
+    print("child: my x=", x, " y=", y);
+    print("child: father.x=", father.x);
+    print("child: father.y=", father.y);
+
+    // modify father's x
+    father.x = 999;
+    print("child: set father.x=999");
+
+    frame;
+
+    print("child: after frame, father.x=", father.x);
+    print("child done");
+}
+
+process parent(x, y, name) {
+    print("parent: x=", x, " y=", y);
+    child(10, 20, "hello");
+    print("parent: son.x=", son.x);
+    print("parent: son.y=", son.y);
+
+    frame;
+
+    // After child ran, it should have set our x to 999
+    print("parent: after frame, my x=", x);
+    print("parent done");
+}
+
+parent(100, 200, "test");

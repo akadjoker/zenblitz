@@ -1,0 +1,9 @@
+ok: 100k strings
+ok: 50k closures
+ok: 50k arrays
+ok: 50k maps
+ok: 10k buffer+array
+ok: 50k closure+upvalue
+ok: 1M buffer writes
+ok: 50k small buffers
+ALL GC STRESS TESTS PASSED

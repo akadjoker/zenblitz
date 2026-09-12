@@ -1,0 +1,8 @@
+import math;
+
+var a = math.random(200, 240);
+print(a);
+var b = math.random(200, 240);
+print(b);
+var c = math.random(200, 240);
+print(c);

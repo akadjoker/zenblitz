@@ -1,0 +1,22 @@
+v1(1.0,10.0) v2(2.0,20.0) v3(3.0,30.0) v4(4.0,40.0) v5(5.0,50.0)
+first=v1 last=v5
+after first = v2
+before = v1
+before first null? 1
+after last null? 1
+v1 v3 v5
+a null? 1 b null? 1
+a<>Null? 0
+a is null (if)
+b null (if)
+v5 v3
+inner 5 7 0
+vec str: [5.0,50.0,"v5",0]
+null str: 0 0
+handle=1
+object name=v5
+bad handle null? 1
+after delete each: 1
+count=0
+defaults: 0.0 |0
+w null 1

@@ -1,0 +1,123 @@
+// test_generics.zen — reified generics: <T> is a REAL type-argument list,
+// counted separately from the value arguments. f<T>(x) is NOT f(T, x).
+// Must-pass shapes only; the error cases live in tests/test_generics_errors.sh
+// because they need substring matching on compile/runtime messages.
+
+class Transform {}
+class Sprite {}
+
+// --- Basic shape: 1 type param, 0 value params ---
+def create<T>() {
+    return T();
+}
+
+var t = create<Transform>();
+assert(t is Transform, "create<Transform>() builds a Transform");
+
+// --- 1 type param, N value params (the realistic engine shape) ---
+def create_with<T>(a, b, c) {
+    var inst = T();
+    return a + b + c;
+}
+
+assert(create_with<Transform>(1, 2, 3) == 6, "type arg plus three value args");
+
+// --- The type param is usable as a value without being a value argument ---
+def type_of<T>(value) {
+    assert(T != nil, "T is bound");
+    return value;
+}
+
+assert(type_of<Transform>(42) == 42, "T bound, value passes through");
+
+// --- Two type params really are two, not folded into value arity ---
+def pair<T, U>(a, b) {
+    assert(T == Transform, "first type arg");
+    assert(U == Sprite, "second type arg");
+    return a + b;
+}
+
+assert(pair<Transform, Sprite>(1, 2) == 3, "two type args, two value args");
+
+// --- Generic forwarding: a generic function passing its own type param
+// straight into another generic call. ---
+def relay<T>(value) {
+    return create_with<T>(value, value, value);
+}
+
+assert(relay<Transform>(9) == 27, "type param forwarded to another generic call");
+
+// --- Generic METHOD on a class (the get_component<T> shape) ---
+class Entity {
+    def get_component<T>() {
+        return T;
+    }
+}
+
+var e = Entity();
+assert(e.get_component<Transform>() == Transform, "generic method returns its type arg");
+assert(e.get_component<Sprite>() == Sprite, "same method, different type arg");
+
+// --- Generic method with value arguments alongside the type argument ---
+class Box {
+    var v;
+    def init(v) { self.v = v; return self; }
+    def combine<T>(a, b) {
+        assert(T == Sprite, "type arg reaches the method body");
+        return self.v + a + b;
+    }
+}
+
+var box = Box(10);
+assert(box.combine<Sprite>(1, 2) == 13, "self, type arg and value args all bind correctly");
+
+// --- A generic method is only recognised where the receiver's class is known
+// at compile time. Inference covers `var e = Entity()`; a parameter needs the
+// `: Type` annotation, which is what makes obj.method<T>(...) work across a
+// function boundary. ---
+def component_of(ent: Entity) {
+    return ent.get_component<Transform>();
+}
+
+assert(component_of(Entity()) == Transform, "annotated parameter unlocks the generic method call");
+
+// --- Inherited generic methods resolve through the flattened vtable ---
+class Derived : Entity {}
+
+assert(Derived().get_component<Sprite>() == Sprite, "generic method inherited from a parent");
+
+// --- CRITICAL regression: calling a script-defined generic METHOD must not
+// corrupt the caller's own registers on return. OP_INVOKE_GENERIC is a 3-word
+// instruction; advancing the instruction pointer by only 2 words left the
+// caller's saved resume address pointing mid-instruction, so returning from
+// the call decoded the raw ngeneric operand as a bogus next instruction
+// (typically clobbering R[0], i.e. `self` inside a method). A live local and
+// `self` must both survive the call untouched. ---
+class Holder {
+    var tag;
+    def init() { self.tag = "holder-tag"; return self; }
+    def use() {
+        var keep_me = 999;
+        var ent = Entity();
+        var x = ent.get_component<Sprite>();
+        assert(keep_me == 999, "local survives the generic method call");
+        assert(x == Sprite, "the call returned its type arg");
+        return self.tag;
+    }
+}
+
+assert(Holder().use() == "holder-tag", "self survives the generic method call");
+
+// --- `<` and `>` remain ordinary comparisons everywhere else, including next
+// to real generic calls, and even where the operands are classes. Adjacency
+// AND "the callee is a known generic" both matter — a class name alone never
+// makes '<' type-argument syntax. ---
+assert(1 < 2, "plain less-than");
+assert(!(5 < 3), "plain less-than, false");
+assert((2 > 1) == true, "plain greater-than");
+
+var x = 1;
+var y = 2;
+assert((x < y) == true, "comparison between two locals");
+
+print("PASS: generics");

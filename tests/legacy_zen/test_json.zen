@@ -1,0 +1,23 @@
+import json;
+
+// parse
+var obj = json.parse('{"name":"zen","nums":[1,2,3],"nested":{"a":true,"b":null}}');
+print(obj["name"]);
+print(obj["version"]);
+print(obj["nums"][2]);
+print(obj["nested"]["a"]);
+
+// stringify compact
+print(json.stringify(obj));
+
+// stringify pretty
+print(json.stringify(obj, 2));
+
+// roundtrip
+var arr = [1, 2.5, "hello", true, nil];
+var s = json.stringify(arr);
+print(s);
+var back = json.parse(s);
+print(back[0]);
+print(back[2]);
+print(back[4]);

@@ -1,0 +1,2 @@
+tests/errors_type_mismatch.bb:5:1: error: Illegal type conversion
+zenblitz: compilation failed.

@@ -1,0 +1,2 @@
+tests/errors_undefined_func.bb:2:1: error: Function 'foo' not found
+zenblitz: compilation failed.

@@ -1,0 +1,19 @@
+wrap1: -9223372036854775808
+wrap2: 9223372036854775807
+wrap3: -9223372036854775808
+shift: 1 2147483648 4611686018427387904
+shift-neg: -4 -1
+div0: false
+mod0: false
+fdiv0: true true true
+fext: true true
+tiny: true true
+nan-cmp: false true false false
+mixed: true true true
+coerce: 7.5 7 7 8
+pow: 1 1 0.5 64
+pow-big: 9.22337e+18 true
+neg: 5 -3 -2 -3 -1
+bits: 9223372036854775807 0 -9223372036854775808
+accum: true
+roundtrip: true true

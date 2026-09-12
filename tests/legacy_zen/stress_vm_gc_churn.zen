@@ -1,0 +1,86 @@
+// stress: GC churn, cycles, and liveness under pressure
+// deterministic output only (no timing)
+
+// 1. short-lived garbage storm
+var keep = [];
+foreach (i in 0..20000) {
+    var tmp = [i, i * 2, "s" + i];
+    if (i % 1000 == 0) { keep.push(tmp); }
+}
+print("storm:", keep.len(), keep[10][0], keep[10][2]);
+
+// 2. self-referencing array (cycle)
+var cyc = [1, 2];
+cyc.push(cyc);
+print("cycle-arr:", cyc.len(), cyc[2][2][2][0]);
+
+// 3. mutual cycle via maps
+var ma = {"name": "a"};
+var mb = {"name": "b"};
+ma["peer"] = mb;
+mb["peer"] = ma;
+print("cycle-map:", ma["peer"]["peer"]["name"], mb["peer"]["name"]);
+
+// 4. instance cycles
+class Link { var next; var id = 0; }
+var head = Link();
+head.id = 1;
+var cur = head;
+foreach (i in 0..500) {
+    var n = Link();
+    n.id = i + 2;
+    cur.next = n;
+    cur = n;
+}
+cur.next = head;  // close the ring
+var walk = head;
+foreach (i in 0..502) { walk = walk.next; }
+print("ring:", head.id, walk.id);
+
+// 5. closures capturing dead scopes
+var fns = [];
+foreach (i in 0..100) {
+    var big = [0, 1, 2, 3, 4, 5, 6, 7];
+    var captured = i;
+    fns.push(def() { return captured * 2 + big[1]; });
+}
+var total = 0;
+foreach (f in fns) { total += f(); }
+print("closures:", total);
+
+// 6. string churn — interning + concat garbage
+var acc = "";
+foreach (i in 0..2000) {
+    acc = "x" + i;
+}
+print("interning:", acc);
+
+// 7. abandoned fibers mid-yield (must be collectable without crash)
+def gen() { yield 1; yield 2; yield 3; }
+foreach (i in 0..1000) {
+    var f = spawn gen;
+    resume(f);           // leave suspended at first yield, then abandon
+}
+print("fibers-abandoned: ok");
+
+// 8. grow-then-release pressure
+var hold = [];
+foreach (i in 0..50) {
+    var block = [];
+    foreach (j in 0..500) { block.push({"i": i, "j": j}); }
+    hold.push(block);
+}
+hold.clear();
+foreach (i in 0..5000) { var t = [i]; }   // churn after release
+print("release: ok");
+
+// 9. deep structure kept alive through it all
+var deep = {"lvl": 0};
+var d = deep;
+foreach (i in 0..200) {
+    d["next"] = {"lvl": i + 1};
+    d = d["next"];
+}
+var probe = deep;
+foreach (i in 0..200) { probe = probe["next"]; }
+print("deep-alive:", probe["lvl"]);

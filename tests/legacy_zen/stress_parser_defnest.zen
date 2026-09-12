@@ -1,0 +1,203 @@
+// stress: function-definition nesting cap — must error gracefully, never segfault
+def f0() {
+def f1() {
+def f2() {
+def f3() {
+def f4() {
+def f5() {
+def f6() {
+def f7() {
+def f8() {
+def f9() {
+def f10() {
+def f11() {
+def f12() {
+def f13() {
+def f14() {
+def f15() {
+def f16() {
+def f17() {
+def f18() {
+def f19() {
+def f20() {
+def f21() {
+def f22() {
+def f23() {
+def f24() {
+def f25() {
+def f26() {
+def f27() {
+def f28() {
+def f29() {
+def f30() {
+def f31() {
+def f32() {
+def f33() {
+def f34() {
+def f35() {
+def f36() {
+def f37() {
+def f38() {
+def f39() {
+def f40() {
+def f41() {
+def f42() {
+def f43() {
+def f44() {
+def f45() {
+def f46() {
+def f47() {
+def f48() {
+def f49() {
+def f50() {
+def f51() {
+def f52() {
+def f53() {
+def f54() {
+def f55() {
+def f56() {
+def f57() {
+def f58() {
+def f59() {
+def f60() {
+def f61() {
+def f62() {
+def f63() {
+def f64() {
+def f65() {
+def f66() {
+def f67() {
+def f68() {
+def f69() {
+def f70() {
+def f71() {
+def f72() {
+def f73() {
+def f74() {
+def f75() {
+def f76() {
+def f77() {
+def f78() {
+def f79() {
+def f80() {
+def f81() {
+def f82() {
+def f83() {
+def f84() {
+def f85() {
+def f86() {
+def f87() {
+def f88() {
+def f89() {
+def f90() {
+def f91() {
+def f92() {
+def f93() {
+def f94() {
+def f95() {
+def f96() {
+def f97() {
+def f98() {
+def f99() {
+return 0;
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+print("unreachable-if-capped");

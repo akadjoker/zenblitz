@@ -1,0 +1,18 @@
+{"name":"zen","nums":[1,2,3],"nested":{"a":true,"b":null}}
+---
+{
+  "name": "zen",
+  "nums": [
+    1,
+    2,
+    3
+  ],
+  "nested": {
+    "a": true,
+    "b": null
+  }
+}
+---
+[1,2.5,"hello",true,null]
+---
+"escape\nnewline\ttab"

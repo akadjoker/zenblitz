@@ -1,0 +1,23 @@
+1. Div by zero: inf
+2. Array len: 5
+3. Empty collections: arr=0 map_has_key=false set_has=false
+4. Nil checks: true
+5. Strings: empty=0 unicode=28
+   multiline lines: 1
+6. Numbers: neg_zero=-0 small=2.22507e-308
+7. Overflow: 2147483647 + 1 = 2147483648
+8. Short-circuit: inf
+9. Triple: 1 2 3
+10. Maybe nil: found=found missing=nil isNil=true
+11. Empty str: len=0 upper='' lower=''
+12. Singles: arr=42 map=val set=1
+13. NaN-like: true false
+14. Types: string string nil
+15. Empty fn called OK
+16. Deep access: deep_value
+17. Mixed set: has_a=true has_1=true has_t=true has_nil=true
+18. Map: has_normal=true
+19. AP: popped=2 last=1 empty=nil
+20. Long string: len=10000
+
+=== EDGE CASE TESTS PASSED ===

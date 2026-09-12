@@ -1,0 +1,20 @@
+// Test: process definitions survive bytecode dump/load and can be advanced from script.
+
+var total = 0;
+
+process worker(start, step) {
+    total = total + start;
+    frame;
+    total = total + step;
+}
+
+worker(10, 1);
+worker(20, 2);
+
+print("alive0={advance_process()}");
+print("total0={total}");
+print("alive1={advance_process()}");
+print("total1={total}");
+print("alive2={advance_process()}");
+print("total2={total}");
+print("ok: bytecode processes");

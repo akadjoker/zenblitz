@@ -1,0 +1,17 @@
+def bench(n) {
+    var a = 0.0;
+    var b = 1.5;
+    var c = 0.7;
+    for (var i = 0; i < n; i = i + 1) {
+        a = a + b * c - 0.3;
+        b = b * 0.999 + 0.001;
+        c = c + a * 0.0001;
+    }
+    return a + b + c;
+}
+var N = 1000000;
+var t0 = clock();
+var r = bench(N);
+var t1 = clock();
+print("seconds={t1-t0}");
+print("result={r}");

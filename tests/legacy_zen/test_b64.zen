@@ -1,0 +1,11 @@
+import base64;
+var enc = base64.encode("Hello, World!");
+print(enc);
+var dec = base64.decode(enc);
+print(dec);
+print(base64.encode(""));
+print(base64.decode(""));
+print(base64.encode("a"));
+print(base64.decode("YQ=="));
+print(base64.encode("ab"));
+print(base64.decode("YWI="));

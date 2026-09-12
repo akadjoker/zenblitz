@@ -1,0 +1,70 @@
+class Player : ScriptComponent {
+    var speed;
+    var shoot_cd;
+    var shoot_timer;
+
+    def init() {
+        self.speed = 220.0;
+        self.shoot_cd = 0.15;
+        self.shoot_timer = 0.0;
+        print("create player");
+
+    }
+
+    def update(dt) 
+    {
+        
+        var t = self.getComponent<Transform>();
+        if (key_down(68)) { t.translate(self.speed * dt, 0); }
+        if (key_down(65)) { t.translate(-self.speed * dt, 0); }
+        if (key_down(87)) { t.translate(0, -self.speed * dt); }
+        if (key_down(83)) { t.translate(0, self.speed * dt); }
+
+        self.shoot_timer = self.shoot_timer - dt;
+        if (key_down(32) && self.shoot_timer <= 0.0) 
+        {
+            for(var i=0;i<1000;i=i+1)
+            {
+
+                var bcmp = createInstance("Bullet");
+	         
+                createGameObject("BulletGO", t.x + 20, t.y, bcmp);
+                self.shoot_timer = self.shoot_cd;
+            }
+        }
+        
+    }
+
+}
+
+class Bullet : ScriptComponent {
+    var vx;
+
+    def init() 
+    {
+        self.vx = 460.0;
+      //  print("create bullet");
+    }
+
+    def update(dt) 
+    {
+        
+        var t = self.getComponent<Transform>();
+        
+        t.x = t.x + self.vx * dt;
+        if (t.x > 1260) 
+       {
+           //destroyGameObject(self.gameObject);
+           t.x = t.x - 1260;
+       }
+
+       
+        
+    }
+
+}
+
+var playerCmp = createInstance("Player");
+createGameObject("PlayerGO", 220, 400, playerCmp);
+
+ 

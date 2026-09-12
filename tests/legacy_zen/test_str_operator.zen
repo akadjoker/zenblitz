@@ -1,0 +1,33 @@
+// Test: class __str__ used by print, interpolation, and concatenation paths.
+
+class Vec2 {
+    var x;
+    var y;
+
+    def init(x, y) {
+        self.x = x;
+        self.y = y;
+    }
+
+    def __str__() {
+        return "Vec2(" + self.x + "," + self.y + ")";
+    }
+
+    def __add__(other) {
+        return Vec2(self.x + other.x, self.y + other.y);
+    }
+
+}
+
+def make_vec() {
+    return Vec2(3, 4);
+}
+
+var a = Vec2(1, 2);
+var b = make_vec();
+var c = a + b;
+
+print(a);
+print("b={b}");
+print("c={c}");
+print("ok: __str__ operator");

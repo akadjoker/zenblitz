@@ -1,0 +1,31 @@
+// player.zen — ScriptComponent para Player
+// C++ vai chamar on_ready, on_update, on_draw por index O(1)
+
+var hp = 100;
+var speed = 5.0;
+var x = 0.0;
+var y = 0.0;
+var name = "Player1";
+
+def on_ready() {
+    print("[" + name + "] ready! HP=" + str(hp) + " speed=" + str(speed));
+}
+
+def on_update(dt) {
+    x = x + speed * dt;
+    y = y + speed * dt;
+}
+
+def on_draw() {
+    print("[" + name + "] pos=(" + str(x) + ", " + str(y) + ") hp=" + str(hp));
+}
+
+def on_hit(damage) {
+    hp = hp - damage;
+    if (hp <= 0) {
+        print("[" + name + "] DEAD!");
+        return false;
+    }
+    print("[" + name + "] hit! HP=" + str(hp));
+    return true;
+}

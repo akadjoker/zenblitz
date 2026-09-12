@@ -1,0 +1,35 @@
+// Test: signal, let_me_alone, get_id
+
+process worker(x, y) {
+    loop {
+        print("worker id=", id, " x=", x);
+        x = x + 1;
+        frame;
+    }
+}
+
+process boss(x, y) {
+    // spawn 3 workers
+    worker(10, 0);
+    worker(20, 0);
+    worker(30, 0);
+    frame;
+
+    // After one frame, get_id should find a worker
+    var wid = get_id(worker);
+    print("boss: found worker id=", wid);
+
+    // Kill that one worker by ID
+    signal(wid, S_KILL);
+    print("boss: killed worker ", wid);
+    frame;
+
+    // Now let_me_alone — kill all remaining workers
+    print("boss: let_me_alone!");
+    let_me_alone();
+    frame;
+
+    print("boss: done, should be alone");
+}
+
+boss(0, 0);

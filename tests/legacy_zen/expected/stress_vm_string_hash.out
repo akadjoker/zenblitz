@@ -1,0 +1,8 @@
+short: 1 true
+equal: true 200 200
+map-cross1: 111
+map-cross2: 222
+set-cross: true
+del-cross: 0
+method-key: 7 7
+upper-key: 9

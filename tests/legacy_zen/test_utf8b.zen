@@ -1,0 +1,7 @@
+import utf8;
+var s = "caf\xc3\xa9";
+print(utf8.len(s));
+print(utf8.codepoints(s));
+var arr = [99, 97, 102, 233];
+print(utf8.encode(arr));
+print(utf8.decode(s, 3));

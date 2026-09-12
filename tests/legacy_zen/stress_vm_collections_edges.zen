@@ -1,0 +1,83 @@
+// stress: collection edge cases — bounds, empties, aliasing, big sizes
+// arrays: out-of-bounds must be catchable
+var a = [1, 2, 3];
+var (ok1, e1) = pcall(def() { return a[99]; });
+var (ok2, e2) = pcall(def() { a[99] = 1; });
+var (ok3, e3) = pcall(def() { return a[-1]; });
+print("arr-oob:", ok1, ok2, ok3);
+
+// pop/remove on empty
+var empty = [];
+var (ok4, e4) = pcall(def() { return empty.pop(); });
+print("pop-empty:", ok4, empty.len());
+
+// slice edges
+print("slice:", a.slice(0, 3).len(), a.slice(1).len(), a.slice(3).len(), a.slice(0, 0).len());
+
+// insert at head/tail, remove at edges
+var b = [1, 2, 3];
+b.insert(0, 0);
+b.insert(4, 4);
+print("insert:", b.join("-"));
+b.remove(0);
+b.remove(b.len() - 1);
+print("remove:", b.join("-"));
+
+// aliasing: two names, one array
+var c = b;
+c.push(99);
+print("alias:", b.len() == c.len(), b[b.len() - 1]);
+
+// join/split round trip with empty pieces
+var parts = "a,,b,".split(",");
+print("split:", parts.len(), "[" + parts.join("|") + "]");
+
+// big array: fill, index, reverse, sort
+var big = [];
+foreach (i in 0..10000) { big.push(9999 - i); }
+big.sort();
+print("big-sorted:", big[0], big[9999], big.len());
+big.reverse();
+print("big-rev:", big[0], big[9999]);
+print("contains:", big.contains(5000), big.contains(-1), big.index_of(9999));
+
+// map with many keys + delete storm
+var m = {};
+foreach (i in 0..5000) { m.set("k" + i, i); }
+print("map-size:", m.size(), m.get("k4999"), m.get("missing", -7));
+foreach (i in 0..5000) { if (i % 2 == 0) { m.delete("k" + i); } }
+print("map-half:", m.size(), m.has("k2"), m.has("k3"));
+
+// int and string keys coexist
+var mk = {};
+mk.set(1, "int-key");
+mk.set("1", "str-key");
+print("keys:", mk.size(), mk.get(1), mk.get("1"));
+
+// nested mutation through alias chain
+var grid = [[0, 0], [0, 0]];
+var row = grid[1];
+row[1] = 5;
+print("nested-mut:", grid[1][1]);
+
+// sets: dedup, delete, values
+var s = #{1, 2, 2, 3, 3, 3};
+s.add(4);
+s.delete(1);
+print("set:", s.size(), s.has(2), s.has(1));
+
+// buffers: bounds + fill + types
+var buf = Int32Array(10);
+buf.fill(7);
+var (ok5, e5) = pcall(def() { return buf[10]; });
+var (ok6, e6) = pcall(def() { buf[-1] = 0; });
+print("buf:", buf[0], buf.len(), buf.byte_len(), ok5, ok6);
+var u8 = Uint8Array(4);
+u8[0] = 255;
+u8[1] = 256;      // wraps or clamps — locked by snapshot
+print("u8:", u8[0], u8[1]);
+
+// del statement on map/array members
+var dm = {"x": 1, "y": 2};
+del dm["x"];
+print("del:", dm.size(), dm.has("x"));

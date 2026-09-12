@@ -1,0 +1,7 @@
+var info = mem_info();
+print("used: " + str(info.get("used")));
+print("next_gc: " + str(info.get("next_gc")));
+print("objects: " + str(info.get("objects")));
+var freed = collect();
+print("freed: " + str(freed));
+print("after: " + str(mem_used()));

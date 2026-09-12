@@ -1,0 +1,5 @@
+File "tests/struct_test.zen", line 2
+  var c = Color(255, 128, 64);
+          ^^^^^
+Error at 'Color': undefined variable (never declared with var/def/class)
+zen: compilation failed.

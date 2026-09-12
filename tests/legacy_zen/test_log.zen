@@ -1,0 +1,33 @@
+import logger;
+
+// nivel por defeito é debug
+print(logger.getLevel());
+
+// mensagens basicas (saem para stdout/stderr mas o teste verifica que nao crasham)
+logger.info("server started");
+logger.warn("low memory");
+logger.debug("x = 42");
+
+// mudar nivel — debug e info sao suprimidos
+logger.setLevel("warn");
+print(logger.getLevel());
+logger.debug("this is suppressed");
+logger.info("this too");
+logger.warn("this appears");
+logger.error("this appears too");
+
+// voltar a debug
+logger.setLevel("debug");
+print(logger.getLevel());
+
+// none suprime tudo
+logger.setLevel("none");
+logger.error("also suppressed");
+print(logger.getLevel());
+
+// log para ficheiro
+logger.setLevel("info");
+logger.setFile("zen_tmp_test.log");
+logger.info("written to file");
+logger.close();
+print("ok");

@@ -1,0 +1,48 @@
+// stress: numeric edge cases (int64 wrap, div/mod by zero, float extremes)
+print("wrap1:", 9223372036854775807 + 1);       // wraps to min
+print("wrap2:", -9223372036854775807 - 2);      // wraps to max
+print("wrap3:", 4611686018427387904 * 2);       // 2^62*2 wraps negative
+
+print("shift:", 1 << 0, 1 << 31, 1 << 62);
+print("shift-neg:", -8 >> 1, -1 >> 63);
+
+// division / modulo by zero — must be catchable, never crash
+var (okd, ed) = pcall(def() { return 1 div 0; });
+print("div0:", okd == false);
+var (okm, em) = pcall(def() { return 1 % 0; });
+print("mod0:", okm == false);
+// float div-by-zero → inf/nan (printed via comparisons: nan/inf spelling
+// differs between libc implementations, keep snapshots portable)
+var pinf = 1 / 0;
+var ninf = -1 / 0;
+var fnan = 0 / 0;
+print("fdiv0:", pinf > 1e308, ninf < -1e308, fnan != fnan);
+
+// float extremes
+print("fext:", 1e308 * 10 > 1e308, -1e308 * 10 < -1e308);   // overflow to inf
+print("tiny:", 1e-308 / 1e10 > 0.0, 1e-308 / 1e10 >= 0.0);
+var nan = 0.0 / 0.0;
+print("nan-cmp:", nan == nan, nan != nan, nan < 1.0, nan > 1.0);
+
+// mixed int/float comparison + coercion
+print("mixed:", 1 == 1.0, 2 < 2.5, 3.0 >= 3);
+print("coerce:", 7 + 0.5, 7 * 1.0, floor(7.9), ceil(7.1));
+
+// power edges
+print("pow:", 2 ** 0, 0 ** 0, 2 ** -1, (-8) ** 2);
+print("pow-big:", 2 ** 63, 10 ** 100 > 1e99);
+
+// abs / floor / ceil on negatives
+print("neg:", abs(-5), floor(-2.5), ceil(-2.5), -7 div 2, -7 % 2);
+
+// bit ops on extremes
+print("bits:", 0x7FFFFFFFFFFFFFFF & -1, -1 ^ -1, ~0x7FFFFFFFFFFFFFFF);
+
+// accumulate rounding: repeated float ops stay finite
+var acc = 0.0;
+foreach (i in 0..10000) { acc += 0.1; }
+print("accum:", acc > 999.9 and acc < 1000.1);
+
+// int identity through arithmetic
+var big = 1234567890123456789;
+print("roundtrip:", big * 1 + 0 - 0 == big, big div 1 == big);

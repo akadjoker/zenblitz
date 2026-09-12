@@ -1,0 +1,20 @@
+p1: 5
+p2: 512
+p3: -4
+p4: 3 1 2.5
+p5: 23
+p6: -1 5 -3
+p7: true true
+p8: true
+p9: 11
+p10: 4611686018427387904 -9223372036854775808
+p11: a12.5true
+sc1: fallback 0 kept
+sc2: nil true
+in1: true false true
+in2: true true
+comp: 33
+safe1: 1 nil nil
+range: true
+ternary: C
+mix: -4 4

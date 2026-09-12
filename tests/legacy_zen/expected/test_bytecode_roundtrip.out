@@ -1,0 +1,8 @@
+Counter(hits=40)
+41
+after=Counter(hits=41)
+15
+1,2,3,4
+3
+579
+ok: bytecode roundtrip

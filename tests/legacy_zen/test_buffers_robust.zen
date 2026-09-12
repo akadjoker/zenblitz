@@ -1,0 +1,204 @@
+// ============================================================
+// Buffer Robustness Tests — typed arrays, bounds, all types
+// ============================================================
+
+// --- 1. All Buffer Types ---
+var i8  = Int8Array(4);
+var i16 = Int16Array(4);
+var i32 = Int32Array(4);
+var u8  = Uint8Array(4);
+var u16 = Uint16Array(4);
+var u32 = Uint32Array(4);
+var f32 = Float32Array(4);
+var f64 = Float64Array(4);
+print("1. All buffer types created OK");
+
+// --- 2. Write/Read Int8 ---
+i8[0] = 127;
+i8[1] = -128;
+i8[2] = 0;
+i8[3] = -1;
+print("2. Int8: {i8[0]} {i8[1]} {i8[2]} {i8[3]}");
+
+// --- 3. Write/Read Uint8 ---
+u8[0] = 0;
+u8[1] = 127;
+u8[2] = 128;
+u8[3] = 255;
+print("3. Uint8: {u8[0]} {u8[1]} {u8[2]} {u8[3]}");
+
+// --- 4. Write/Read Int16 ---
+i16[0] = 32767;
+i16[1] = -32768;
+i16[2] = 0;
+i16[3] = 1000;
+print("4. Int16: {i16[0]} {i16[1]} {i16[2]} {i16[3]}");
+
+// --- 5. Write/Read Int32 ---
+i32[0] = 2147483647;
+i32[1] = -2147483648;
+i32[2] = 0;
+i32[3] = 12345;
+print("5. Int32: {i32[0]} {i32[1]} {i32[2]} {i32[3]}");
+
+// --- 6. Write/Read Float32 ---
+f32[0] = 3.14;
+f32[1] = -2.71;
+f32[2] = 0.0;
+f32[3] = 1000.5;
+print("6. Float32: {f32[0]} {f32[1]} {f32[2]} {f32[3]}");
+
+// --- 7. Write/Read Float64 ---
+f64[0] = 3.141592653589793;
+f64[1] = -2.718281828459045;
+f64[2] = 0.0;
+f64[3] = 1.23456789012345;
+print("7. Float64: {f64[0]} {f64[1]} {f64[2]} {f64[3]}");
+
+// --- 8. Buffer Length / Byte Length ---
+var buf32 = Int32Array(10);
+var buf64 = Float64Array(10);
+var buf8  = Uint8Array(10);
+print("8. Lengths: Int32 len={buf32.len()} bytes={buf32.byte_len()}");
+print("   Float64 len={buf64.len()} bytes={buf64.byte_len()}");
+print("   Uint8   len={buf8.len()}  bytes={buf8.byte_len()}");
+
+// --- 9. Fill and Iterate ---
+var iter = Int32Array(8);
+var idx = 0;
+while (idx < iter.len()) {
+    iter[idx] = idx * idx;
+    idx = idx + 1;
+}
+var result = "";
+idx = 0;
+while (idx < iter.len()) {
+    if (idx > 0) { result = result + ","; }
+    result = result + str(iter[idx]);
+    idx = idx + 1;
+}
+print("9. Squared: {result}");
+
+// --- 10. Large Buffer Sequential Write ---
+var big = Int32Array(100000);
+var i = 0;
+while (i < big.len()) {
+    big[i] = i;
+    i = i + 1;
+}
+print("10. Large buffer write OK, first={big[0]} last={big[99999]}");
+
+// --- 11. Large Buffer Sum ---
+var sum_buf = Int32Array(1000);
+i = 0;
+while (i < 1000) {
+    sum_buf[i] = i;
+    i = i + 1;
+}
+var total = 0;
+i = 0;
+while (i < 1000) {
+    total = total + sum_buf[i];
+    i = i + 1;
+}
+print("11. Buffer sum(0..999) = {total}");
+
+// --- 12. Float Buffer Arithmetic ---
+var fa = Float64Array(5);
+fa[0] = 1.0;
+fa[1] = 2.0;
+fa[2] = 3.0;
+fa[3] = 4.0;
+fa[4] = 5.0;
+var fa_sum = fa[0] + fa[1] + fa[2] + fa[3] + fa[4];
+print("12. Float sum = {fa_sum}");
+
+// --- 13. Buffer Zero Init ---
+var zero = Int32Array(10);
+var all_zero = true;
+i = 0;
+while (i < zero.len()) {
+    if (zero[i] != 0) {
+        all_zero = false;
+    }
+    i = i + 1;
+}
+print("13. Zero init: {all_zero}");
+
+// --- 14. Buffer as Matrix ---
+var mat = Float64Array(9);  // 3x3
+i = 0;
+while (i < 9) {
+    mat[i] = i + 1;
+    i = i + 1;
+}
+// M[1][2] = index 5 = 6
+print("14. Matrix M[1][2] = {mat[5]}");
+
+// --- 15. Multiple Buffers GC Pressure ---
+i = 0;
+var survivors = [];
+while (i < 10) {
+    var tmp = Int32Array(1000);
+    tmp[0] = i;
+    tmp[999] = i * 2;
+    if (i % 3 == 0) {
+        survivors.push(tmp);
+    }
+    i = i + 1;
+}
+collect();
+print("15. GC pressure: survivors={survivors.len()} ok");
+
+// --- 16. Buffer Overwrite ---
+var ow = Int32Array(4);
+ow[0] = 999;
+ow[0] = 111;
+print("16. Overwrite: {ow[0]}");
+
+// --- 17. Uint16 Range ---
+var u16b = Uint16Array(4);
+u16b[0] = 0;
+u16b[1] = 65535;
+u16b[2] = 32768;
+u16b[3] = 1;
+print("17. Uint16: {u16b[0]} {u16b[1]} {u16b[2]} {u16b[3]}");
+
+// --- 18. Float64 Special Values ---
+var fv = Float64Array(3);
+fv[0] = 0.0;
+fv[1] = 1.0 / 0.0;
+fv[2] = -1.0 / 0.0;
+print("18. Float specials: zero={fv[0]} inf={fv[1]} neg_inf={fv[2]}");
+
+// --- 19. Buffer Copy via Loop ---
+var src = Int32Array(5);
+var dst = Int32Array(5);
+i = 0;
+while (i < 5) {
+    src[i] = (i + 1) * 10;
+    i = i + 1;
+}
+i = 0;
+while (i < 5) {
+    dst[i] = src[i];
+    i = i + 1;
+}
+var match = true;
+i = 0;
+while (i < 5) {
+    if (dst[i] != src[i]) { match = false; }
+    i = i + 1;
+}
+print("19. Buffer copy match: {match}");
+
+// --- 20. Uint32 Range ---
+var u32b = Uint32Array(4);
+u32b[0] = 0;
+u32b[1] = 4294967295;
+u32b[2] = 2147483648;
+u32b[3] = 1;
+print("20. Uint32: {u32b[0]} {u32b[1]} {u32b[2]} {u32b[3]}");
+
+print("");
+print("=== BUFFER TESTS PASSED ===");

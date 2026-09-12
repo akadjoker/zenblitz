@@ -1,0 +1,64 @@
+// Stress test: class instances created inside processes + forced GC
+class Particle {
+    var x;
+    var y;
+    var vel;
+
+    def init(x, y) {
+        self.x = x;
+        self.y = y;
+        self.vel = 2;
+    }
+
+    def update() {
+        self.x = self.x + self.vel;
+        self.y = self.y + 1;
+        return self.x < 1000;
+    }
+}
+
+struct Color { r, g, b, a }
+
+var total_ticks = 0;
+
+process particle_spawner() {
+    var count = 0;
+    loop {
+        // Create class instances inside process
+        var p = Particle(count, count * 2);
+        p.update();
+
+        // Create struct inside process (the bug we fixed)
+        var c = Color(count, 100, 200, 255);
+
+        count = count + 1;
+        if (count > 500) {
+            break;
+        }
+        total_ticks = total_ticks + 1;
+        frame;
+    }
+}
+
+process gc_trigger() {
+    var i = 0;
+    loop {
+        // Force GC every few frames
+        if (i % 5 == 0) {
+            collect();
+        }
+        i = i + 1;
+        if (i > 500) {
+            break;
+        }
+        frame;
+    }
+}
+
+particle_spawner();
+particle_spawner();
+particle_spawner();
+gc_trigger();
+
+// expect: total_ticks == 1500
+print(total_ticks);

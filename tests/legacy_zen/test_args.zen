@@ -1,0 +1,28 @@
+import math;
+
+process test_args(a, b, c, d, e) {
+    print(a);
+    print(b);
+    print(c);
+    print(d);
+    print(e);
+    frame;
+}
+
+// Test 1: literal values
+print("--- test1: literals ---");
+test_args(10, 20, 30, 40, 50);
+
+// Test 2: expressions
+print("--- test2: expressions ---");
+test_args(1 + 2, 10 - 5, 3 * 4, 100, math.random(200, 240));
+
+// Test 3: nested calls as args
+print("--- test3: nested calls ---");
+test_args(math.random(10), math.random(20), math.random(30), math.random(40), math.random(200, 240));
+
+// Need one tick to run
+process driver() {
+    frame;
+}
+driver();

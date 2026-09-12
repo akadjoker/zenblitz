@@ -1,0 +1,8 @@
+print(mem_used());
+print(mem_info());
+var x = [];
+for (var i = 0; i < 1000; i = i + 1) { x.push("hello" + str(i)); }
+print(mem_used());
+var freed = collect();
+print("freed: " + str(freed));
+print(mem_info());

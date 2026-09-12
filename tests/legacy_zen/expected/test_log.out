@@ -1,0 +1,11 @@
+debug
+[INFO] server started
+[WARN] low memory
+[DEBUG] x = 42
+warn
+[WARN] this appears
+[ERROR] this appears too
+debug
+none
+[INFO] written to file
+ok

@@ -1,0 +1,18 @@
+arr-oob: true false true
+pop-empty: false 0
+slice: 3 2 0 0
+insert: 0-1-2-3-4
+remove: 1-2-3
+alias: true 99
+split: 4 [a||b|]
+big-sorted: 0 9999 10000
+big-rev: 9999 0
+contains: true false 0
+map-size: 5000 4999 -7
+map-half: 2500 false true
+keys: 2 int-key str-key
+nested-mut: 5
+set: 3 true false
+buf: 7 10 40 false false
+u8: 255 0
+del: 1 false

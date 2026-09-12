@@ -1,0 +1,8 @@
+listen: true
+connect: true
+accept: true
+poll: true
+recv: ola-zen
+recv2: resposta
+nodelay: true
+done

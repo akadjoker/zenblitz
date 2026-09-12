@@ -1,0 +1,6 @@
+global=Box(13)
+assign=Box(12)
+local=Box(12)
+returned=Box(13)
+eq=true
+ok: class operator hints

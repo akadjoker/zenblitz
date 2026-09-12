@@ -1,0 +1,9 @@
+storm: 20 10000 s10000
+cycle-arr: 3 1
+cycle-map: a a
+ring: 1 2
+closures: 10000
+interning: x1999
+fibers-abandoned: ok
+release: ok
+deep-alive: 200

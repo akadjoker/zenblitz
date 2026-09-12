@@ -1,0 +1,49 @@
+// Test: bytecode roundtrip covers classes, __str__, closures, upvalues, arrays, maps, and buffers.
+
+class Counter {
+    var name;
+    var value;
+
+    def init(name, start) {
+        self.name = name;
+        self.value = start;
+    }
+
+    def inc() {
+        self.value = self.value + 1;
+        return self.value;
+    }
+
+    def __str__() {
+        return "Counter(" + self.name + "=" + self.value + ")";
+    }
+}
+
+def make_adder(base) {
+    def add(x) {
+        return base + x;
+    }
+    return add;
+}
+
+var counter = Counter("hits", 40);
+print(counter);
+print(counter.inc());
+print("after={counter}");
+
+var add10 = make_adder(10);
+print(add10(5));
+
+var arr = [1, 2, 3];
+arr.push(4);
+print(arr.join(","));
+
+var map = {"a": 1, "b": 2};
+print(map["a"] + map["b"]);
+
+var buf = Int32Array(4);
+buf[0] = 123;
+buf[3] = 456;
+print(buf[0] + buf[3]);
+
+print("ok: bytecode roundtrip");

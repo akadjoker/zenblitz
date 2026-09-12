@@ -1,0 +1,22 @@
+1. Recursive sum(100) = 5050
+2. Factorial(10) = 3628800
+3. Fibonacci(20) = 6765
+4. Tree depth(500) = 500
+5. Sum list = 55
+6. Flatten: 1,2,3,4,5,6,7
+7. Binary search(13) = 6
+8. Reverse: olleh
+9. Tail sum(10000) = 50005000
+10. Power(2,10) = 1024
+11. Copy: 100,200,300,400,500
+12. Max: 9
+13. Count 2s: 4
+14. Merge sort: 1,2,3,4,5,6,7,8,9
+15. Hanoi(15) moves = 32767
+16. GCD(1071, 462) = 21
+17. Palindrome: racecar=true hello=false
+18. Linked list len = 5
+19. Tree sum = 18
+20. Mutual: even(42)=true odd(43)=true
+
+=== RECURSION TESTS PASSED ===

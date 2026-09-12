@@ -1,0 +1,17 @@
+// test_struct_native.zen — struct definido no script, acesso O(1)
+struct Color { r, g, b }
+
+var c = Color(255, 128, 64);
+print(c.r);
+print(c.g);
+print(c.b);
+
+// Mutate
+c.r = 0;
+c.g = 42;
+print(c.r);
+print(c.g);
+
+// Compound
+c.b += 10;
+print(c.b);

@@ -1,0 +1,20 @@
+import fs;
+import path;
+
+// path module
+print(path.join("home", "user", "docs"));
+print(path.dirname("/home/user/file.txt"));
+print(path.basename("/home/user/file.txt"));
+print(path.filename("/home/user/file.txt"));
+print(path.ext("/home/user/file.txt"));
+print(path.normalize("/home/user/../admin/./docs"));
+
+// fs module
+fs.write("zen_tmp_fs.txt", "hello zen!");
+print(fs.exists("zen_tmp_fs.txt"));
+print(fs.size("zen_tmp_fs.txt"));
+print(fs.read("zen_tmp_fs.txt"));
+print(fs.isfile("zen_tmp_fs.txt"));
+print(fs.isdir("tests"));
+fs.remove("zen_tmp_fs.txt");
+print(fs.exists("zen_tmp_fs.txt"));

@@ -1,0 +1,9 @@
+import json;
+var obj = json.parse('{"name":"zen","nums":[1,2,3],"nested":{"a":true,"b":null}}');
+print(json.stringify(obj));
+print("---");
+print(json.stringify(obj, 2));
+print("---");
+print(json.stringify([1, 2.5, "hello", true, nil]));
+print("---");
+print(json.stringify("escape\nnewline\ttab"));

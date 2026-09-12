@@ -1,0 +1,27 @@
+// net module loopback smoke test — TCP listen/connect/accept/send/recv/poll
+// on 127.0.0.1 only (no external network); exercises the winsock path on
+// Windows CI and the POSIX path elsewhere.
+import net;
+
+var srv = net.tcp_listen(48123);
+print("listen:", srv >= 0);
+
+var cli = net.tcp_connect("127.0.0.1", 48123);
+print("connect:", cli >= 0);
+
+var acc = net.tcp_accept(srv);
+print("accept:", acc >= 0);
+
+net.send(cli, "ola-zen");
+print("poll:", net.poll(acc, 2000));
+print("recv:", net.recv(acc, 64));
+
+net.send(acc, "resposta");
+print("recv2:", net.recv(cli, 64));
+
+print("nodelay:", net.set_nodelay(cli, true));
+
+net.close(cli);
+net.close(acc);
+net.close(srv);
+print("done");

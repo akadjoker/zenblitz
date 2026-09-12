@@ -1,0 +1,149 @@
+File "tests/stress_parser_defnest.zen", line 66
+  def f64() {
+         ^
+Error at '(': functions nested too deeply
+File "tests/stress_parser_defnest.zen", line 67
+  def f65() {
+         ^
+Error at '(': functions nested too deeply
+File "tests/stress_parser_defnest.zen", line 68
+  def f66() {
+         ^
+Error at '(': functions nested too deeply
+File "tests/stress_parser_defnest.zen", line 69
+  def f67() {
+         ^
+Error at '(': functions nested too deeply
+File "tests/stress_parser_defnest.zen", line 70
+  def f68() {
+         ^
+Error at '(': functions nested too deeply
+File "tests/stress_parser_defnest.zen", line 71
+  def f69() {
+         ^
+Error at '(': functions nested too deeply
+File "tests/stress_parser_defnest.zen", line 72
+  def f70() {
+         ^
+Error at '(': functions nested too deeply
+File "tests/stress_parser_defnest.zen", line 73
+  def f71() {
+         ^
+Error at '(': functions nested too deeply
+File "tests/stress_parser_defnest.zen", line 74
+  def f72() {
+         ^
+Error at '(': functions nested too deeply
+File "tests/stress_parser_defnest.zen", line 75
+  def f73() {
+         ^
+Error at '(': functions nested too deeply
+File "tests/stress_parser_defnest.zen", line 76
+  def f74() {
+         ^
+Error at '(': functions nested too deeply
+File "tests/stress_parser_defnest.zen", line 77
+  def f75() {
+         ^
+Error at '(': functions nested too deeply
+File "tests/stress_parser_defnest.zen", line 78
+  def f76() {
+         ^
+Error at '(': functions nested too deeply
+File "tests/stress_parser_defnest.zen", line 79
+  def f77() {
+         ^
+Error at '(': functions nested too deeply
+File "tests/stress_parser_defnest.zen", line 80
+  def f78() {
+         ^
+Error at '(': functions nested too deeply
+File "tests/stress_parser_defnest.zen", line 81
+  def f79() {
+         ^
+Error at '(': functions nested too deeply
+File "tests/stress_parser_defnest.zen", line 82
+  def f80() {
+         ^
+Error at '(': functions nested too deeply
+File "tests/stress_parser_defnest.zen", line 83
+  def f81() {
+         ^
+Error at '(': functions nested too deeply
+File "tests/stress_parser_defnest.zen", line 84
+  def f82() {
+         ^
+Error at '(': functions nested too deeply
+File "tests/stress_parser_defnest.zen", line 85
+  def f83() {
+         ^
+Error at '(': functions nested too deeply
+File "tests/stress_parser_defnest.zen", line 86
+  def f84() {
+         ^
+Error at '(': functions nested too deeply
+File "tests/stress_parser_defnest.zen", line 87
+  def f85() {
+         ^
+Error at '(': functions nested too deeply
+File "tests/stress_parser_defnest.zen", line 88
+  def f86() {
+         ^
+Error at '(': functions nested too deeply
+File "tests/stress_parser_defnest.zen", line 89
+  def f87() {
+         ^
+Error at '(': functions nested too deeply
+File "tests/stress_parser_defnest.zen", line 90
+  def f88() {
+         ^
+Error at '(': functions nested too deeply
+File "tests/stress_parser_defnest.zen", line 91
+  def f89() {
+         ^
+Error at '(': functions nested too deeply
+File "tests/stress_parser_defnest.zen", line 92
+  def f90() {
+         ^
+Error at '(': functions nested too deeply
+File "tests/stress_parser_defnest.zen", line 93
+  def f91() {
+         ^
+Error at '(': functions nested too deeply
+File "tests/stress_parser_defnest.zen", line 94
+  def f92() {
+         ^
+Error at '(': functions nested too deeply
+File "tests/stress_parser_defnest.zen", line 95
+  def f93() {
+         ^
+Error at '(': functions nested too deeply
+File "tests/stress_parser_defnest.zen", line 96
+  def f94() {
+         ^
+Error at '(': functions nested too deeply
+File "tests/stress_parser_defnest.zen", line 97
+  def f95() {
+         ^
+Error at '(': functions nested too deeply
+File "tests/stress_parser_defnest.zen", line 98
+  def f96() {
+         ^
+Error at '(': functions nested too deeply
+File "tests/stress_parser_defnest.zen", line 99
+  def f97() {
+         ^
+Error at '(': functions nested too deeply
+File "tests/stress_parser_defnest.zen", line 100
+  def f98() {
+         ^
+Error at '(': functions nested too deeply
+File "tests/stress_parser_defnest.zen", line 101
+  def f99() {
+         ^
+Error at '(': functions nested too deeply
+File "tests/stress_parser_defnest.zen", line 167
+  }
+  ^
+Error at '}': Expected end of file.
+zen: compilation failed.

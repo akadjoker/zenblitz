@@ -1,0 +1,370 @@
+// ============================================================
+// Class Robustness Tests — inheritance, polymorphism, composition
+// ============================================================
+
+// --- 1. Simple Class ---
+class Person {
+    var name;
+    var age;
+    def init(name, age) {
+        self.name = name;
+        self.age = age;
+    }
+    def greet() {
+        return "Hi, I'm " + self.name;
+    }
+}
+var p = Person("Alice", 30);
+print("1. Person: {p.greet()}");
+
+// --- 2. Class with Methods ---
+class BankAccount {
+    var balance;
+    def init(initial) {
+        self.balance = initial;
+    }
+    def deposit(amount) {
+        self.balance = self.balance + amount;
+        return self;
+    }
+    def withdraw(amount) {
+        if (amount > self.balance) {
+            return nil;
+        }
+        self.balance = self.balance - amount;
+        return self;
+    }
+    def balance_now() {
+        return self.balance;
+    }
+}
+var acct = BankAccount(1000);
+acct.deposit(500);
+acct.withdraw(200);
+print("2. Bank account: {acct.balance_now()}");
+
+// --- 3. Class Composition ---
+class Engine {
+    var horsepower;
+    def init(hp) { self.horsepower = hp; }
+    def start() { return "Engine started"; }
+}
+class Car {
+    var model;
+    var engine;
+    def init(model, hp) {
+        self.model = model;
+        self.engine = Engine(hp);
+    }
+    def drive() {
+        return self.model + " (" + self.engine.start() + ")";
+    }
+}
+var car = Car("Tesla", 300);
+print("3. Car: {car.drive()}");
+
+// --- 4. Class with __str__ ---
+class Vector {
+    var x;
+    var y;
+    def init(x, y) {
+        self.x = x;
+        self.y = y;
+    }
+    def __str__() {
+        return "Vector(" + str(self.x) + "," + str(self.y) + ")";
+    }
+}
+var v = Vector(3, 4);
+print("4. Vector: {v}");
+
+// --- 5. Class Inheritance ---
+class Shape {
+    def calc_area() {
+        return 0;
+    }
+}
+class Circle : Shape {
+    var radius;
+    def init(r) {
+        self.radius = r;
+    }
+    def calc_area() {
+        return 3.14159265358979 * self.radius * self.radius;
+    }
+}
+var c = Circle(5);
+print("5. Circle area={c.calc_area()}");
+
+// --- 6. Polymorphism ---
+def describe_shape(shape) {
+    return shape.calc_area();
+}
+print("6. Polymorphism: circle={describe_shape(c)}");
+
+// --- 7. Class with Private-like Fields ---
+class Secret {
+    var _data;
+    def init(data) {
+        self._data = data;
+    }
+    def read_data() {
+        return self._data;
+    }
+    def write_data(new_data) {
+        self._data = new_data;
+        return self;
+    }
+}
+var secret = Secret("hidden");
+print("7. Secret: {secret.read_data()}");
+
+// --- 8. Class Factory Pattern ---
+def create_circle(r) {
+    return Circle(r);
+}
+var cc = create_circle(1);
+print("8. Factory: {cc.calc_area()}");
+
+// --- 9. Class with Self-Returning Methods ---
+class Builder {
+    var value;
+    def init(v) {
+        self.value = v;
+    }
+    def assign(v) {
+        self.value = v;
+        return self;
+    }
+    def add(n) {
+        self.value = self.value + n;
+        return self;
+    }
+    def multiply(n) {
+        self.value = self.value * n;
+        return self;
+    }
+    def result() {
+        return self.value;
+    }
+}
+var b = Builder(10);
+b.assign(5).add(3).multiply(2);
+print("9. Builder: {b.result()}");
+
+// --- 10. Class with Multiple Instances ---
+var people = [];
+people.push(Person("Alice", 30));
+people.push(Person("Bob", 25));
+people.push(Person("Charlie", 35));
+var names = "";
+var i = 0;
+while (i < people.len()) {
+    if (i > 0) { names = names + ", "; }
+    names = names + people[i].name;
+    i = i + 1;
+}
+print("10. People: {names}");
+
+// --- 11. Class with Equality ---
+class Point {
+    var x;
+    var y;
+    def init(x, y) {
+        self.x = x;
+        self.y = y;
+    }
+    def equals(other) {
+        return self.x == other.x && self.y == other.y;
+    }
+}
+var p1 = Point(1, 2);
+var p2 = Point(1, 2);
+var p3 = Point(3, 4);
+print("11. Equality: {p1.equals(p2)} {p1.equals(p3)}");
+
+// --- 12. Class with Operator Overloading ---
+class Vec2 {
+    var x;
+    var y;
+    def init(x, y) {
+        self.x = x;
+        self.y = y;
+    }
+    def __add__(other) {
+        return Vec2(self.x + other.x, self.y + other.y);
+    }
+    def __sub__(other) {
+        return Vec2(self.x - other.x, self.y - other.y);
+    }
+    def __mul__(scalar) {
+        return Vec2(self.x * scalar, self.y * scalar);
+    }
+    def __str__() {
+        return "V(" + str(self.x) + "," + str(self.y) + ")";
+    }
+}
+var va = Vec2(1, 2);
+var vb = Vec2(3, 4);
+var vc = va + vb;
+print("12. Operators: {vc}");
+
+// --- 13. Class with Computed Property ---
+class Temperature {
+    var celsius;
+    def init(c) {
+        self.celsius = c;
+    }
+    def fahrenheit() {
+        return self.celsius * 9 / 5 + 32;
+    }
+}
+var temp = Temperature(100);
+print("13. Temp: {temp.celsius}C = {temp.fahrenheit()}F");
+
+// --- 14. Class with Nil-safe Methods ---
+class Nullable {
+    var value;
+    def init(v) {
+        self.value = v;
+    }
+    def unwrap(default_val) {
+        if (self.value == nil) {
+            return default_val;
+        }
+        return self.value;
+    }
+}
+var nullable = Nullable(nil);
+print("14. Nullable: {nullable.unwrap("default")}");
+
+// --- 15. Class with Array of Children ---
+class Family {
+    var members;
+    def init(name) {
+        self.members = [];
+        self.members.push(name);
+    }
+    def add(name) {
+        self.members.push(name);
+    }
+    def count() {
+        return self.members.len();
+    }
+    def list_members() {
+        return self.members.join(", ");
+    }
+}
+var family = Family("Smith");
+family.add("Alice");
+family.add("Bob");
+family.add("Charlie");
+print("15. Family ({family.count()}): {family.list_members()}");
+
+// --- 16. Class with Dynamic Field ---
+class Dynamic {
+    def init() {}
+    def store(key, val) {
+        self[key] = val;
+    }
+    def fetch(key) {
+        return self[key];
+    }
+}
+var dyn = Dynamic();
+dyn.store("x", 10);
+dyn.store("y", 20);
+print("16. Dynamic: x={dyn.fetch("x")} y={dyn.fetch("y")}");
+
+// --- 17. Class with Error Handling ---
+class SafeDiv {
+    def init(a, b) {
+        if (b == 0) {
+            self.result = nil;
+        } else {
+            self.result = a / b;
+        }
+    }
+    def value() {
+        return self.result;
+    }
+}
+var safe = SafeDiv(10, 3);
+var fail = SafeDiv(10, 0);
+print("17. Safe div: {safe.value()} {fail.value()}");
+
+// --- 18. Class Singleton Pattern ---
+var _instance = nil;
+class Singleton {
+    var data;
+    def init() {
+        if (_instance != nil) {
+            return _instance;
+        }
+        self.data = "singleton";
+        _instance = self;
+    }
+}
+var s1 = Singleton();
+var s2 = Singleton();
+print("18. Singleton: {s1.data} same={s1 == s2}");
+
+// --- 19. Class with Method Chaining ---
+class Query {
+    var sql;
+    def init(table) {
+        self.sql = "SELECT * FROM " + table;
+    }
+    def where(cond) {
+        self.sql = self.sql + " WHERE " + cond;
+        return self;
+    }
+    def order(col) {
+        self.sql = self.sql + " ORDER BY " + col;
+        return self;
+    }
+    def limit(n) {
+        self.sql = self.sql + " LIMIT " + str(n);
+        return self;
+    }
+    def exec() {
+        return self.sql;
+    }
+}
+var q = Query("users").where("active=true").order("name").limit(10);
+print("19. Query: {q.exec()}");
+
+// --- 20. Class with GC Pressure ---
+class Particle {
+    var x;
+    var y;
+    var life;
+    def init(x, y) {
+        self.x = x;
+        self.y = y;
+        self.life = 100;
+    }
+    def update() {
+        self.life = self.life - 1;
+        return self.life > 0;
+    }
+}
+var particles = [];
+var i = 0;
+while (i < 1000) {
+    particles.push(Particle(i, i * 2));
+    i = i + 1;
+}
+collect();
+var alive = 0;
+i = 0;
+while (i < particles.len()) {
+    if (particles[i].update()) {
+        alive = alive + 1;
+    }
+    i = i + 1;
+}
+print("20. Particles alive: {alive}");
+
+print("");
+print("=== CLASS ROBUSTNESS TESTS PASSED ===");

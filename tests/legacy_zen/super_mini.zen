@@ -1,0 +1,35 @@
+class Animal {
+    var name;
+    var energy;
+    def init(name, energy) {
+        self.name = name;
+        self.energy = energy;
+    }
+}
+
+class Dog : Animal {
+    var breed;
+    def init(name, energy, breed) {
+        super.init(name, energy);
+        self.breed = breed;
+    }
+}
+
+class Puppy : Dog {
+    var toy;
+    def init(name, energy, breed, toy) {
+        super.init(name, energy, breed);
+        self.toy = toy;
+    }
+}
+
+var d = Dog("Rex", 100, "Lab");
+print(d.name);
+print(d.energy);
+print(d.breed);
+
+var p = Puppy("Buddy", 50, "Poodle", "ball");
+print(p.name);
+print(p.energy);
+print(p.breed);
+print(p.toy);

@@ -1,0 +1,34 @@
+// callbacks.zen — Teste de múltiplos callbacks do engine
+
+var score = 0;
+var level = 1;
+var paused = false;
+
+def on_ready() {
+    print("Game started! Level " + str(level));
+}
+
+def on_update(dt) {
+    if (paused) { return; }
+    score = score + int(dt * 100);
+}
+
+def on_draw() {
+    print("Score: " + str(score) + " Level: " + str(level));
+}
+
+def on_pause() {
+    paused = true;
+    print("PAUSED");
+}
+
+def on_resume() {
+    paused = false;
+    print("RESUMED");
+}
+
+def on_level_up() {
+    level = level + 1;
+    print("Level UP! Now " + str(level));
+    return level;
+}

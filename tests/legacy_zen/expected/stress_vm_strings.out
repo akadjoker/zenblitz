@@ -1,0 +1,17 @@
+grow: 4000
+sub: hello el o [] []
+sub-oob-catchable-or-empty: true []
+find: 2 -1 0 bbbbbb
+replace-empty: true
+replace-self: aa
+split1: 1 2 1
+split2: x+y+z
+chars: z.e.n.
+trim: [pad] MIXED mixed
+startend: true true false
+interp-loop: 100 i=99 sq=9801
+join5k: 5000
+eq: true true true true true
+str: 42 2.5 true nil <array> <map>
+esc: 2 11
+uni: 6 true true

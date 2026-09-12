@@ -1,0 +1,33 @@
+// Test: import math (dot access)
+import math;
+print(math.PI);
+print(math.TAU);
+print(math.E);
+print(math.PI2);
+print(math.random(1, 10));
+print(math.min(3, 7));
+print(math.max(3, 7));
+print(math.clamp(15, 0, 10));
+print(math.clamp(-5, 0, 10));
+print(math.lerp(0.0, 10.0, 0.5));
+print(math.sign(-42));
+print(math.sign(0));
+print(math.sign(99));
+print(math.map_range(5.0, 0.0, 10.0, 0.0, 100.0));
+
+// Test: using math (bare names)
+using math;
+print(PI);
+print(random(1, 100));
+print(min(10, 20));
+print(max(10, 20));
+print(clamp(50, 0, 100));
+print(lerp(0.0, 1.0, 0.25));
+print(sign(-1));
+
+// Test: seed reproducibility
+math.seed(12345);
+var a = math.random(1, 1000);
+math.seed(12345);
+var b = math.random(1, 1000);
+print(a == b);

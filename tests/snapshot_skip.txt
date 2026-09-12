@@ -1,0 +1,24 @@
+# Tests skipped by tests/run_zen_tests.sh (snapshot suite).
+# One basename (with .zen) per line. Lines starting with '#' are comments.
+#
+# Reason: non-deterministic output (timing, wall clock, perf measurement).
+# These should still run and be checked manually for correctness.
+
+benchmark.zen
+test_os_time.zen
+test_gc.zen
+test_gc2.zen
+bench_num.zen
+bench_struct_nofuse.zen
+bench_struct_nofuse2.zen
+
+# Reason: needs the process runner loop (zen_game), which lives in
+# zenvm-modules, not the plain `zen` CLI.
+test_process.zen
+
+# Reason: these call Color(), a native struct that no host in this repo
+# registers — the scripts have never run. Kept as a reminder, not a gate.
+struct_test.zen
+struct_native_binding.zen
+bench_fib.bb
+bench_loop.bb

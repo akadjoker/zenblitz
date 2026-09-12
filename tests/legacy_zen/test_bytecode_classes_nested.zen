@@ -1,0 +1,49 @@
+// Test: bytecode preserves multiple classes, vtables, selectors, nested returns, and __str__.
+
+class Point {
+    var x;
+    var y;
+
+    def init(x, y) {
+        self.x = x;
+        self.y = y;
+    }
+
+    def __add__(other) {
+        return Point(self.x + other.x, self.y + other.y);
+    }
+
+    def __str__() {
+        return "Point(" + self.x + "," + self.y + ")";
+    }
+}
+
+class Sprite {
+    var name;
+    var pos;
+
+    def init(name, pos) {
+        self.name = name;
+        self.pos = pos;
+    }
+
+    def move(delta) {
+        self.pos = self.pos + delta;
+        return self;
+    }
+
+    def __str__() {
+        return "Sprite(" + self.name + "@" + self.pos + ")";
+    }
+}
+
+def make_sprite() {
+    var base = Point(2, 3);
+    return Sprite("hero", base);
+}
+
+var s = make_sprite();
+print(s);
+print(s.move(Point(5, 7)));
+print("again={s}");
+print("ok: bytecode nested classes");

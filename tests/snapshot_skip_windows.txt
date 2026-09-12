@@ -1,0 +1,6 @@
+# Extra tests skipped ONLY on Windows (MSYS2/Git-Bash), in addition to
+# snapshot_skip.txt. One basename (with .zen) per line; '#' starts a comment.
+#
+# net/http modules are compiled out on Windows CI (POSIX sockets only),
+# and path-printing tests may differ (backslashes). Add entries here as
+# Windows CI runs reveal platform-dependent output.

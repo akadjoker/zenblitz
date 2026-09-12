@@ -1,0 +1,287 @@
+// ============================================================
+// Advanced Closure Tests — nested scopes, captures, factories
+// ============================================================
+
+// --- 1. Closure Capture ---
+var captured = 0;
+var counter = def() {
+    captured = captured + 1;
+    return captured;
+};
+print("1. Closure capture: {counter()} {counter()} {counter()}");
+
+// --- 2. Closure Factory ---
+def make_multiplier(factor) {
+    return def(x) { return x * factor; };
+}
+var double = make_multiplier(2);
+var triple = make_multiplier(3);
+var quad = make_multiplier(4);
+print("2. Factory: double(5)={double(5)} triple(5)={triple(5)} quad(5)={quad(5)}");
+
+// --- 3. Closure State Preservation ---
+def accumulator() {
+    var total = 0;
+    return def(val) {
+        total = total + val;
+        return total;
+    };
+}
+var acc = accumulator();
+print("3. Accumulator: {acc(10)} {acc(20)} {acc(30)}");
+
+// --- 4. Closure Returning Pair ---
+def outer() {
+    var x = 0;
+    def increment() {
+        x = x + 1;
+        return x;
+    }
+    def fetch() {
+        return x;
+    }
+    var pair = {};
+    pair.set("inc", increment);
+    pair.set("fetch", fetch);
+    return pair;
+}
+var o = outer();
+o.get("inc")();
+o.get("inc")();
+print("4. Closure pair: val={o.get("fetch")()}");
+
+// --- 5. Closure with Params ---
+def greet(name) {
+    return "Hello, " + name + "!";
+}
+print("5. Greet: {greet("World")}");
+
+// --- 6. Higher-Order Function ---
+def apply_twice(f, x) {
+    return f(f(x));
+}
+def square(x) { return x * x; }
+print("6. Apply twice square(3) = {apply_twice(square, 3)}");
+
+// --- 7. Closure in Array ---
+var funcs = [];
+var i = 0;
+while (i < 5) {
+    var n = i;
+    funcs.push(def() { return n * n; });
+    i = i + 1;
+}
+var sq_results = "";
+i = 0;
+while (i < funcs.len()) {
+    if (i > 0) { sq_results = sq_results + ","; }
+    sq_results = sq_results + str(funcs[i]());
+    i = i + 1;
+}
+print("7. Func array: {sq_results}");
+
+// --- 8. Closure in Map ---
+var operations = {};
+operations.set("add", def(a, b) { return a + b; });
+operations.set("sub", def(a, b) { return a - b; });
+operations.set("mul", def(a, b) { return a * b; });
+var add_op = operations.get("add");
+print("8. Map ops: add(3,4)={add_op(3,4)} sub(10,3)={operations.get("sub")(10,3)}");
+
+// --- 9. Closure with Recursive Helper ---
+def factorial() {
+    var memo = {};
+    var compute = def(n, fn) {
+        if (n <= 1) { return 1; }
+        var ns = str(n);
+        if (memo.has(ns)) {
+            return memo.get(ns);
+        }
+        var result = n * fn(n, fn);
+        memo.set(ns, result);
+        return result;
+    };
+    return compute;
+}
+var fact_fn = factorial();
+print("9. Memoized fact: {fact_fn(10, fact_fn)}");
+
+// --- 10. Closure with Callback ---
+def with_context(callback) {
+    var ctx = {};
+    ctx.set("user", "Alice");
+    ctx.set("role", "admin");
+    return callback(ctx);
+}
+var result_ctx = with_context(def(ctx) {
+    return ctx.get("user") + ":" + ctx.get("role");
+});
+print("10. Callback context: {result_ctx}");
+
+// --- 11. Closure Composition ---
+def compose(f, g) {
+    return def(x) { return f(g(x)); };
+}
+var f1 = def(x) { return x + 1; };
+var f2 = def(x) { return x * 2; };
+var composed = compose(f1, f2);
+print("11. Compose(2): {composed(2)}");
+
+// --- 12. Closure Currying ---
+def curried_add(a) {
+    return def(b) {
+        return def(c) {
+            return a + b + c;
+        };
+    };
+}
+var add5 = curried_add(5);
+var add5_then_add3 = add5(3);
+print("12. Curried: {add5_then_add3(10)}");
+
+// --- 13. Closure with Nested Scope Shadowing ---
+def outer_scope() {
+    var x = 1;
+    def inner() {
+        var x = 2;
+        return x;
+    }
+    return inner();
+}
+print("13. Shadowing: {outer_scope()}");
+
+// --- 14. Closure Returning Object with Multiple Closures ---
+def make_adder_subtractor(init_val) {
+    var val = init_val;
+    def add(n) { val = val + n; return val; }
+    def sub(n) { val = val - n; return val; }
+    def fetch() { return val; }
+    var obj = {};
+    obj.set("add", add);
+    obj.set("sub", sub);
+    obj.set("fetch", fetch);
+    return obj;
+}
+var counter = make_adder_subtractor(100);
+counter.get("add")(50);
+counter.get("sub")(25);
+print("14. Adder/sub: {counter.get("fetch")()}");
+
+// --- 15. Closure in Class Method ---
+class Counter {
+    var count;
+    def init() {
+        self.count = 0;
+    }
+    def make_incrementer() {
+        return def() {
+            self.count = self.count + 1;
+            return self.count;
+        };
+    }
+    def get_count() {
+        return self.count;
+    }
+}
+var c = Counter();
+var inc = c.make_incrementer();
+inc();
+inc();
+inc();
+print("15. Method closure: {c.get_count()}");
+
+// --- 16. Closure Event Handler Pattern ---
+def event_emitter() {
+    var handlers = {};
+    def on_event(event, callback) {
+        if (!handlers.has(event)) {
+            handlers.set(event, []);
+        }
+        var list = handlers.get(event);
+        list.push(callback);
+    }
+    def emit(event) {
+        if (handlers.has(event)) {
+            var list = handlers.get(event);
+            var i = 0;
+            while (i < list.len()) {
+                list[i]();
+                i = i + 1;
+            }
+        }
+    }
+    var result = {};
+    result.set("on", on_event);
+    result.set("emit", emit);
+    return result;
+}
+var emitter = event_emitter();
+var received = [];
+emitter.get("on")("click", def() { received.push("clicked"); });
+emitter.get("on")("click", def() { received.push("again"); });
+emitter.get("emit")("click");
+var msg = received[0] + "|" + received[1];
+print("16. Events: {msg}");
+
+// --- 17. Closure with Upvalue Mutation ---
+def counter_factory(start) {
+    var n = start;
+    return def(delta) {
+        n = n + delta;
+        return n;
+    };
+}
+var c1 = counter_factory(0);
+var c2 = counter_factory(100);
+c1(10);
+c1(20);
+c2(5);
+print("17. Independent counters: {c1(0)} {c2(0)}");
+
+// --- 18. Closure with Array Mutation ---
+def accumulator_builder() {
+    var items = [];
+    return def(item) {
+        items.push(item);
+        return items.len();
+    };
+}
+var pusher = accumulator_builder();
+pusher("a");
+pusher("b");
+pusher("c");
+print("18. Pusher: {pusher("d")}");
+
+// --- 19. Deep Closure Nesting ---
+def level1() {
+    var a = 1;
+    def level2() {
+        var b = 2;
+        def level3() {
+            var c = 3;
+            return a + b + c;
+        }
+        return level3();
+    }
+    return level2();
+}
+print("19. Deep nest: {level1()}");
+
+// --- 20. Closure with Conditional Capture ---
+def conditional_capture(use_x) {
+    var x = 10;
+    var y = 20;
+    def compute() {
+        if (use_x) {
+            return x;
+        }
+        return y;
+    }
+    return compute;
+}
+var cx = conditional_capture(true);
+var cy = conditional_capture(false);
+print("20. Conditional: {cx()} {cy()}");
+
+print("");
+print("=== CLOSURE TESTS PASSED ===");

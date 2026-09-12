@@ -1,0 +1,6 @@
+class A { def m() { return 5; } }
+var x = A();
+var fails = 0;
+def batch(o) { return o.m(); }
+fails = fails + batch(x);
+print(fails);

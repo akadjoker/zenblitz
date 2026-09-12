@@ -1,0 +1,40 @@
+// stress: literal edge cases (lexer/parser)
+print("hex:", 0xFF, 0xDEADBEEF, 0x7FFFFFFFFFFFFFFF);
+print("int:", 9223372036854775807, -9223372036854775807);
+print("float:", 1e10, 1e-10, 3.141592653589793, 0.5, 1e308);
+print("esc:", "tab\tnl\\n-literal", "\x41\x42", "\u00E9\u00FC");
+print("raw:", @"C:\no\escape\n", @"say ""hi""");
+
+// interpolation with expressions and nesting
+var a = 3;
+var b = 4;
+print("interp:", "sum={a + b} prod={a * b} nest={a + (b * 2)}");
+print("interp2:", "arr={[a, b].len()} cond={a < b ? "yes" : "no"}");
+
+// empty collections and singletons
+var e1 = [];
+var e2 = {};
+var e3 = #{};
+print("empty:", e1.len(), e2.size(), e3.size());
+var s1 = [1];
+var s2 = {"k": nil};
+var s3 = #{1, 1, 1};
+print("single:", s1.len(), s2.size(), s3.size());
+
+// trailing structure torture: nested mixed literals
+var mixed = {"list": [1, [2, [3, #{4}]]], "map": {"inner": {"deep": [nil, true, 0.0]}}};
+print("mixed:", mixed["list"][1][1][0], mixed["map"]["inner"]["deep"][1]);
+
+// comments everywhere
+var /* mid */ c1 /* mid2 */ = /* mid3 */ 10; // end
+/* multi
+   line
+   comment */
+print("comments:", c1);
+
+// strings with braces that are NOT interpolation-shaped
+print("braces:", "empty-ish", "{a}{b}", "{ a }{ b }");
+
+// unicode content round-trip
+var u = "olá mundo — ção 漢字";
+print("unicode:", u.len() > 0, u.upper() != "");

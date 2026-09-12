@@ -1,0 +1,93 @@
+// GC Stress Test Suite
+// Tests various allocation patterns under GC pressure
+
+// 1. Many short-lived strings (interpolation)
+var i = 0;
+while (i < 100000) {
+    var s = "item_${i}";
+    i = i + 1;
+}
+print("ok: 100k strings");
+
+// 2. Nested closures
+def make_adder(x) {
+    def adder(y) { return x + y; }
+    return adder;
+}
+i = 0;
+while (i < 50000) {
+    var add = make_adder(i);
+    var r = add(1);
+    i = i + 1;
+}
+print("ok: 50k closures");
+
+// 3. Array churn
+i = 0;
+while (i < 50000) {
+    var a = [1, 2, 3, 4, 5];
+    i = i + 1;
+}
+print("ok: 50k arrays");
+
+// 4. Maps
+i = 0;
+while (i < 50000) {
+    var m = {"a": 1, "b": 2, "c": 3};
+    i = i + 1;
+}
+print("ok: 50k maps");
+
+// 5. Buffer + array mix
+i = 0;
+while (i < 10000) {
+    var b = Int32Array(100);
+    var a = [1, 2, 3];
+    b[0] = i;
+    i = i + 1;
+}
+print("ok: 10k buffer+array");
+
+// 6. Closure + upvalue survival
+def make_counter() {
+    var n = 0;
+    def inc() { n = n + 1; return n; }
+    return inc;
+}
+var c = make_counter();
+i = 0;
+while (i < 50000) {
+    c();
+    var garbage = [i, i + 1, i + 2];
+    i = i + 1;
+}
+var result = c();
+if (result != 50001) {
+    print("FAIL: closure counter expected 50001, got ${result}");
+} else {
+    print("ok: 50k closure+upvalue");
+}
+
+// 7. Large buffer survives GC
+var big = Int32Array(1000000);
+i = 0;
+while (i < 1000000) {
+    big[i] = i;
+    i = i + 1;
+}
+if (big[999999] != 999999) {
+    print("FAIL: big buffer");
+} else {
+    print("ok: 1M buffer writes");
+}
+
+// 8. Many small buffers
+i = 0;
+while (i < 50000) {
+    var small = Int32Array(10);
+    small[0] = i;
+    i = i + 1;
+}
+print("ok: 50k small buffers");
+
+print("ALL GC STRESS TESTS PASSED");

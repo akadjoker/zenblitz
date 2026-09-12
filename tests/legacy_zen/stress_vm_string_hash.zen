@@ -1,0 +1,48 @@
+// regression: equal strings must hash equally as map/set keys regardless of
+// how they were built (interned literal, incremental +=, single concat).
+// Before the lazy-hash fix, a >128-char key built with += kept hash=0 while
+// the same content built in one concat had a real hash — map lookups missed.
+
+// short keys (interned paths)
+var s1 = "a";
+s1 += "b";
+var m0 = {};
+m0.set(s1, 1);
+print("short:", m0.get("ab", -1), m0.has("a" + "b"));
+
+// long key built incrementally (in-place append path)
+var k = "";
+foreach (i in 0..200) { k += "x"; }
+// same content in a single concat (long-concat path)
+var half = "";
+foreach (i in 0..100) { half += "x"; }
+var k2 = half + half;
+print("equal:", k == k2, k.len(), k2.len());
+
+var m = {};
+m.set(k, 111);
+print("map-cross1:", m.get(k2, -999));
+var m2 = {};
+m2.set(k2, 222);
+print("map-cross2:", m2.get(k, -999));
+
+// sets: same invariant
+var st = #{};
+st.add(k);
+print("set-cross:", st.has(k2));
+
+// delete through the other spelling
+m.delete(k2);
+print("del-cross:", m.size());
+
+// method-produced strings as keys (create_string path, lazy hash)
+var piece = "alpha,beta".split(",")[0];
+var mm = {};
+mm.set(piece, 7);
+print("method-key:", mm.get("alpha", -1), mm.get("al" + "pha", -1));
+
+// upper/lower results as keys
+var up = "abc".upper();
+var mu = {};
+mu.set(up, 9);
+print("upper-key:", mu.get("ABC", -1));

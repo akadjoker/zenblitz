@@ -1,0 +1,47 @@
+import csv;
+
+// --- parse básico ---
+var text = "name,age,score\nalice,30,9.5\nbob,25,7.2\ncarol,28,8.8";
+var rows = csv.parse(text);
+print(rows.len());
+print(rows[0][0]);
+print(rows[0][1]);
+print(rows[0][2]);
+print(rows[1][0]);
+print(rows[2][1]);
+print(rows[3][2]);
+
+// --- parse com separador customizado ---
+var tsv = "x\ty\n1\t2\n3\t4";
+var trows = csv.parse(tsv, "\t");
+print(trows[0][0]);
+print(trows[1][1]);
+
+// --- quoted fields (RFC 4180) ---
+var quoted = "a,\"hello, world\",c\n1,\"say \"\"hi\"\"\",3";
+var qrows = csv.parse(quoted);
+print(qrows[0][1]);
+print(qrows[1][1]);
+
+// --- newlines inside quoted fields ---
+var multiline = "a,\"line1\nline2\",c";
+var ml = csv.parse(multiline);
+print(ml[0][0]);
+print(ml[0][2]);
+
+// --- parseMap ---
+var csv2 = "name,age\nalice,30\nbob,25";
+var maps = csv.parseMap(csv2);
+print(maps.len());
+print(maps[0]["name"]);
+print(maps[0]["age"]);
+print(maps[1]["name"]);
+
+// --- stringify ---
+var data = [["name","age","score"],["alice",30,9.5],["bob",25,7.2]];
+var out = csv.stringify(data);
+print(out);
+
+// --- stringify separator ---
+var out2 = csv.stringify([["a","b"],["1","2"]], ";");
+print(out2);

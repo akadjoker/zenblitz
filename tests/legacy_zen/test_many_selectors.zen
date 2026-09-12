@@ -1,0 +1,221 @@
+// AUTO-GENERATED: stress test for the dynamic selector table.
+// The VM's selector pool starts at capacity 32 and must grow as
+// new method names are interned. With 100 unique m### method names
+// (plus init), it will trigger at least
+// two reallocations of selectors_, proving the grow path is correct.
+// Each method is also CALLED to verify slots stay valid post-grow.
+
+class Many {
+    var n;
+    def init() { self.n = 0; }
+    def m000() { return 0; }
+    def m001() { return 1; }
+    def m002() { return 2; }
+    def m003() { return 3; }
+    def m004() { return 4; }
+    def m005() { return 5; }
+    def m006() { return 6; }
+    def m007() { return 7; }
+    def m008() { return 8; }
+    def m009() { return 9; }
+    def m010() { return 10; }
+    def m011() { return 11; }
+    def m012() { return 12; }
+    def m013() { return 13; }
+    def m014() { return 14; }
+    def m015() { return 15; }
+    def m016() { return 16; }
+    def m017() { return 17; }
+    def m018() { return 18; }
+    def m019() { return 19; }
+    def m020() { return 20; }
+    def m021() { return 21; }
+    def m022() { return 22; }
+    def m023() { return 23; }
+    def m024() { return 24; }
+    def m025() { return 25; }
+    def m026() { return 26; }
+    def m027() { return 27; }
+    def m028() { return 28; }
+    def m029() { return 29; }
+    def m030() { return 30; }
+    def m031() { return 31; }
+    def m032() { return 32; }
+    def m033() { return 33; }
+    def m034() { return 34; }
+    def m035() { return 35; }
+    def m036() { return 36; }
+    def m037() { return 37; }
+    def m038() { return 38; }
+    def m039() { return 39; }
+    def m040() { return 40; }
+    def m041() { return 41; }
+    def m042() { return 42; }
+    def m043() { return 43; }
+    def m044() { return 44; }
+    def m045() { return 45; }
+    def m046() { return 46; }
+    def m047() { return 47; }
+    def m048() { return 48; }
+    def m049() { return 49; }
+    def m050() { return 50; }
+    def m051() { return 51; }
+    def m052() { return 52; }
+    def m053() { return 53; }
+    def m054() { return 54; }
+    def m055() { return 55; }
+    def m056() { return 56; }
+    def m057() { return 57; }
+    def m058() { return 58; }
+    def m059() { return 59; }
+    def m060() { return 60; }
+    def m061() { return 61; }
+    def m062() { return 62; }
+    def m063() { return 63; }
+    def m064() { return 64; }
+    def m065() { return 65; }
+    def m066() { return 66; }
+    def m067() { return 67; }
+    def m068() { return 68; }
+    def m069() { return 69; }
+    def m070() { return 70; }
+    def m071() { return 71; }
+    def m072() { return 72; }
+    def m073() { return 73; }
+    def m074() { return 74; }
+    def m075() { return 75; }
+    def m076() { return 76; }
+    def m077() { return 77; }
+    def m078() { return 78; }
+    def m079() { return 79; }
+    def m080() { return 80; }
+    def m081() { return 81; }
+    def m082() { return 82; }
+    def m083() { return 83; }
+    def m084() { return 84; }
+    def m085() { return 85; }
+    def m086() { return 86; }
+    def m087() { return 87; }
+    def m088() { return 88; }
+    def m089() { return 89; }
+    def m090() { return 90; }
+    def m091() { return 91; }
+    def m092() { return 92; }
+    def m093() { return 93; }
+    def m094() { return 94; }
+    def m095() { return 95; }
+    def m096() { return 96; }
+    def m097() { return 97; }
+    def m098() { return 98; }
+    def m099() { return 99; }
+}
+
+var x = Many();
+def batch_0(o) {
+    if (o.m000() != 0) { print("BAD m000"); }
+    if (o.m001() != 1) { print("BAD m001"); }
+    if (o.m002() != 2) { print("BAD m002"); }
+    if (o.m003() != 3) { print("BAD m003"); }
+    if (o.m004() != 4) { print("BAD m004"); }
+    if (o.m005() != 5) { print("BAD m005"); }
+    if (o.m006() != 6) { print("BAD m006"); }
+    if (o.m007() != 7) { print("BAD m007"); }
+    if (o.m008() != 8) { print("BAD m008"); }
+    if (o.m009() != 9) { print("BAD m009"); }
+    if (o.m010() != 10) { print("BAD m010"); }
+    if (o.m011() != 11) { print("BAD m011"); }
+    if (o.m012() != 12) { print("BAD m012"); }
+    if (o.m013() != 13) { print("BAD m013"); }
+    if (o.m014() != 14) { print("BAD m014"); }
+    if (o.m015() != 15) { print("BAD m015"); }
+    if (o.m016() != 16) { print("BAD m016"); }
+    if (o.m017() != 17) { print("BAD m017"); }
+    if (o.m018() != 18) { print("BAD m018"); }
+    if (o.m019() != 19) { print("BAD m019"); }
+    if (o.m020() != 20) { print("BAD m020"); }
+    if (o.m021() != 21) { print("BAD m021"); }
+    if (o.m022() != 22) { print("BAD m022"); }
+    if (o.m023() != 23) { print("BAD m023"); }
+    if (o.m024() != 24) { print("BAD m024"); }
+    if (o.m025() != 25) { print("BAD m025"); }
+    if (o.m026() != 26) { print("BAD m026"); }
+    if (o.m027() != 27) { print("BAD m027"); }
+    if (o.m028() != 28) { print("BAD m028"); }
+    if (o.m029() != 29) { print("BAD m029"); }
+    if (o.m030() != 30) { print("BAD m030"); }
+    if (o.m031() != 31) { print("BAD m031"); }
+    if (o.m032() != 32) { print("BAD m032"); }
+    if (o.m033() != 33) { print("BAD m033"); }
+    if (o.m034() != 34) { print("BAD m034"); }
+    if (o.m035() != 35) { print("BAD m035"); }
+    if (o.m036() != 36) { print("BAD m036"); }
+    if (o.m037() != 37) { print("BAD m037"); }
+    if (o.m038() != 38) { print("BAD m038"); }
+    if (o.m039() != 39) { print("BAD m039"); }
+    if (o.m040() != 40) { print("BAD m040"); }
+    if (o.m041() != 41) { print("BAD m041"); }
+    if (o.m042() != 42) { print("BAD m042"); }
+    if (o.m043() != 43) { print("BAD m043"); }
+    if (o.m044() != 44) { print("BAD m044"); }
+    if (o.m045() != 45) { print("BAD m045"); }
+    if (o.m046() != 46) { print("BAD m046"); }
+    if (o.m047() != 47) { print("BAD m047"); }
+    if (o.m048() != 48) { print("BAD m048"); }
+    if (o.m049() != 49) { print("BAD m049"); }
+}
+def batch_1(o) {
+    if (o.m050() != 50) { print("BAD m050"); }
+    if (o.m051() != 51) { print("BAD m051"); }
+    if (o.m052() != 52) { print("BAD m052"); }
+    if (o.m053() != 53) { print("BAD m053"); }
+    if (o.m054() != 54) { print("BAD m054"); }
+    if (o.m055() != 55) { print("BAD m055"); }
+    if (o.m056() != 56) { print("BAD m056"); }
+    if (o.m057() != 57) { print("BAD m057"); }
+    if (o.m058() != 58) { print("BAD m058"); }
+    if (o.m059() != 59) { print("BAD m059"); }
+    if (o.m060() != 60) { print("BAD m060"); }
+    if (o.m061() != 61) { print("BAD m061"); }
+    if (o.m062() != 62) { print("BAD m062"); }
+    if (o.m063() != 63) { print("BAD m063"); }
+    if (o.m064() != 64) { print("BAD m064"); }
+    if (o.m065() != 65) { print("BAD m065"); }
+    if (o.m066() != 66) { print("BAD m066"); }
+    if (o.m067() != 67) { print("BAD m067"); }
+    if (o.m068() != 68) { print("BAD m068"); }
+    if (o.m069() != 69) { print("BAD m069"); }
+    if (o.m070() != 70) { print("BAD m070"); }
+    if (o.m071() != 71) { print("BAD m071"); }
+    if (o.m072() != 72) { print("BAD m072"); }
+    if (o.m073() != 73) { print("BAD m073"); }
+    if (o.m074() != 74) { print("BAD m074"); }
+    if (o.m075() != 75) { print("BAD m075"); }
+    if (o.m076() != 76) { print("BAD m076"); }
+    if (o.m077() != 77) { print("BAD m077"); }
+    if (o.m078() != 78) { print("BAD m078"); }
+    if (o.m079() != 79) { print("BAD m079"); }
+    if (o.m080() != 80) { print("BAD m080"); }
+    if (o.m081() != 81) { print("BAD m081"); }
+    if (o.m082() != 82) { print("BAD m082"); }
+    if (o.m083() != 83) { print("BAD m083"); }
+    if (o.m084() != 84) { print("BAD m084"); }
+    if (o.m085() != 85) { print("BAD m085"); }
+    if (o.m086() != 86) { print("BAD m086"); }
+    if (o.m087() != 87) { print("BAD m087"); }
+    if (o.m088() != 88) { print("BAD m088"); }
+    if (o.m089() != 89) { print("BAD m089"); }
+    if (o.m090() != 90) { print("BAD m090"); }
+    if (o.m091() != 91) { print("BAD m091"); }
+    if (o.m092() != 92) { print("BAD m092"); }
+    if (o.m093() != 93) { print("BAD m093"); }
+    if (o.m094() != 94) { print("BAD m094"); }
+    if (o.m095() != 95) { print("BAD m095"); }
+    if (o.m096() != 96) { print("BAD m096"); }
+    if (o.m097() != 97) { print("BAD m097"); }
+    if (o.m098() != 98) { print("BAD m098"); }
+    if (o.m099() != 99) { print("BAD m099"); }
+}
+
+batch_0(x);
+batch_1(x);
+print("selectors_ok");

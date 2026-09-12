@@ -1,0 +1,60 @@
+// Test: super.init() and super.method() with class inheritance
+
+class Animal {
+    var name;
+    var energy;
+
+    def init(name, energy) {
+        self.name = name;
+        self.energy = energy;
+    }
+
+    def speak() { return "..."; }
+    def status() { return self.name + " energy=" + str(self.energy); }
+}
+
+class Dog : Animal {
+    var breed;
+
+    def init(name, energy, breed) {
+        super.init(name, energy);
+        self.breed = breed;
+    }
+
+    def speak() { return "woof"; }
+    def info() { return super.status() + " breed=" + self.breed; }
+}
+
+class Puppy : Dog {
+    var toy;
+
+    def init(name, energy, breed, toy) {
+        super.init(name, energy, breed);
+        self.toy = toy;
+    }
+
+    def speak() { return "yip"; }
+    def play() { return self.toy; }
+}
+
+// Test basic super.init
+var d = Dog("Rex", 100, "Labrador");
+assert(d.name == "Rex", "dog name");
+assert(d.energy == 100, "dog energy");
+assert(d.breed == "Labrador", "dog breed");
+assert(d.speak() == "woof", "dog speak override");
+
+// Test super.method() call
+var info = d.info();
+assert(info == "Rex energy=100 breed=Labrador", "dog info via super.status()");
+
+// Test chained inheritance (Puppy -> Dog -> Animal)
+var p = Puppy("Buddy", 50, "Poodle", "ball");
+assert(p.name == "Buddy", "puppy name from Animal.init");
+assert(p.energy == 50, "puppy energy from Animal.init");
+assert(p.breed == "Poodle", "puppy breed from Dog.init");
+assert(p.toy == "ball", "puppy toy");
+assert(p.speak() == "yip", "puppy speak override");
+assert(p.play() == "ball", "puppy play");
+
+print("PASS: super");

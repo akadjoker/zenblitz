@@ -1,0 +1,23 @@
+4
+name
+age
+score
+alice
+25
+8.8
+x
+2
+hello, world
+say "hi"
+a
+c
+2
+alice
+30
+bob
+name,age,score
+alice,30,9.5
+bob,25,7.2
+
+a;b
+1;2

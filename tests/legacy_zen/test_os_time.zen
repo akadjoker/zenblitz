@@ -1,0 +1,20 @@
+// os module
+import os;
+print(os.platform());
+print(os.getcwd());
+print(os.getenv("HOME"));
+
+// time module
+import time;
+print(time.now());
+print(time.now_ms());
+var t1 = time.clock();
+var i = 0;
+while (i < 100000) { i = i + 1; }
+var t2 = time.clock();
+print(t2 - t1);
+print(time.date());
+
+// using
+using time;
+print(now());

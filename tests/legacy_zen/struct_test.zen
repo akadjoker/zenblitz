@@ -1,0 +1,15 @@
+// Test: struct field access (O(1) via OP_GETFIELD_IDX)
+var c = Color(255, 128, 64);
+print(c.r);
+print(c.g);
+print(c.b);
+
+// Mutate
+c.r = 0;
+c.g = 42;
+print(c.r);
+print(c.g);
+
+// Compound assignment
+c.b += 10;
+print(c.b);

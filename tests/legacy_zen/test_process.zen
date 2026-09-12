@@ -1,0 +1,45 @@
+import math;
+
+process particle(x, y, vx, vy) {
+    loop {
+        x = x + vx;
+        y = y + vy;
+        if (x < 0 or x > 1280) { vx = -vx; }
+        if (y < 0 or y > 720) { vy = -vy; }
+        frame;
+    }
+}
+
+// Spawn particles (calling a process = spawn)
+var i = 0;
+while (i < 2000) {
+   // particle(math.random(1280), math.random(720), math.random(4) - 2, math.random(4) - 2);
+    i = i + 1;
+}
+
+
+particle(100,100,1,1);
+
+
+process main()
+{
+    var i=0;
+    loop
+    {
+        draw_text("main",20,20,12,255,255,255,255);
+        if(mouse_down(0))
+        {
+              particle(mouse_x(),mouse_y(), math.random(4) - 2, math.random(4) - 2);
+              
+            /*var j = 0;
+            while (j < 1000) {
+                particle(mouse_x(),mouse_y(), math.random(4) - 2, math.random(4) - 2);
+                j = j + 1;
+            }
+            */
+        }
+        frame;
+    }
+}
+
+main();

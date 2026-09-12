@@ -1,0 +1,8 @@
+import utf8;
+var s = "Hello";
+print(utf8.len(s));
+print(utf8.valid(s));
+print(utf8.codepoints(s));
+print(utf8.encode(72));
+print(utf8.decode(s, 0));
+print(utf8.offset(s, 3));

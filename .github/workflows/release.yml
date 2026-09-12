@@ -1,0 +1,111 @@
+name: release
+
+# Builds the same headless binaries as ci.yml, packages each with a platform
+# suffix, and publishes them to a GitHub Release when a vX.Y.Z tag is pushed.
+# workflow_dispatch does the same dry: it ends in a DRAFT prerelease you can
+# inspect and delete, and creates no tag.
+#
+# These are the core-only `zen` binaries. Runners with native/graphics
+# modules (zen_game, zen_gl, batteries-included zen) are zenvm-modules'
+# to release.
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  linux:
+    name: linux-x86_64
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build build --target zen -j"$(nproc)"
+      - name: Snapshot tests
+        run: ZEN_TEST_VERBOSE=1 tests/run_zen_tests.sh bin/zen
+      - name: Package
+        run: |
+          mkdir -p dist
+          cp bin/zen dist/zen-linux-x86_64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zen-linux-x86_64
+          path: dist/zen-linux-x86_64
+
+  windows-mingw:
+    name: windows-mingw-x64
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: false
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
+
+      - name: Configure
+        run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build --target zen -j"$(nproc)"
+
+      - name: Snapshot tests
+        run: |
+          set +e
+          ZEN_TEST_VERBOSE=1 tests/run_zen_tests.sh bin/zen.exe | tee test_out.txt
+          rc=${PIPESTATUS[0]}
+          fails=$(grep '\[FAIL\]' test_out.txt | paste -sd'|' -)
+          [ -n "$fails" ] && echo "::error::snapshot failures: $fails"
+          exit $rc
+
+      - name: Package
+        run: |
+          mkdir -p dist
+          cp bin/zen.exe dist/zen-windows-mingw-x64.exe
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zen-windows-mingw-x64
+          path: dist/zen-windows-mingw-x64.exe
+
+  publish:
+    name: publish release
+    needs: [linux, windows-mingw]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: List staged assets
+        run: ls -la dist
+      - name: Publish release (tag)
+        if: startsWith(github.ref, 'refs/tags/v')
+        env: { GH_TOKEN: '${{ github.token }}' }
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "zen $GITHUB_REF_NAME" --generate-notes
+      - name: Draft prerelease (manual dry run)
+        if: github.event_name == 'workflow_dispatch'
+        env: { GH_TOKEN: '${{ github.token }}' }
+        run: |
+          gh release create "dry-run-${{ github.run_number }}" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --draft --prerelease \
+            --title "Dry run #${{ github.run_number }} (delete me)" \
+            --notes "workflow_dispatch dry run — no tag was created; delete after inspecting."

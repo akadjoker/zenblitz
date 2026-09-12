@@ -1,0 +1,40 @@
+// Test: advance() and type keyword
+
+process bullet(x, y) {
+    angle = 0;
+    speed = 5;
+    loop {
+        advance();
+        print("bullet id=", id, " x=", x, " y=", y, " type=", type);
+        if (x > 20) {
+            return;
+        }
+        frame;
+    }
+}
+
+process rocket(x, y) {
+    angle = 45;
+    loop {
+        advance(10);
+        print("rocket id=", id, " x=", x, " y=", y);
+        if (x > 30) {
+            return;
+        }
+        frame;
+    }
+}
+
+process main() {
+    bullet(0, 0);
+    rocket(0, 0);
+    frame;
+    frame;
+    frame;
+    frame;
+    frame;
+    frame;
+    print("done");
+}
+
+main();

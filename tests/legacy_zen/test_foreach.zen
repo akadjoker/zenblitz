@@ -1,0 +1,32 @@
+// foreach — arrays
+var arr = [1, 2, 3];
+foreach (x in arr) { print(x); }
+
+// foreach — buffers
+var buf = Int32Array(3);
+buf[0] = 4; buf[1] = 5; buf[2] = 6;
+foreach (x in buf) { print(x); }
+
+// foreach — strings
+foreach (ch in "abc") { print(ch); }
+
+// foreach — maps (iterates keys)
+var m = {};
+m.set("x", 10);
+m.set("y", 20);
+foreach (k in m) { print(k); }
+
+// foreach — sets (iterates elements)
+var s = #{7, 8, 9};
+foreach (v in s) { print(v); }
+
+// foreach — two-variable (index, element)
+foreach (i, x in [10, 20, 30]) { print(str(i) + ":" + str(x)); }
+
+// foreach — two-variable string
+foreach (i, ch in "hi") { print(str(i) + ":" + ch); }
+
+// string indexing
+var word = "zen";
+print(word[0]);
+print(word[2]);

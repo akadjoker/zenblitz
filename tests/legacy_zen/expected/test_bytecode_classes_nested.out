@@ -1,0 +1,4 @@
+Sprite(hero@Point(2,3))
+Sprite(hero@Point(7,10))
+again=Sprite(hero@Point(7,10))
+ok: bytecode nested classes

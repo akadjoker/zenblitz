@@ -1,0 +1,52 @@
+// Test: class operator type hints through locals, globals, assignment, return values, and compound expressions.
+
+class NumBox {
+    var value;
+
+    def init(value) {
+        self.value = value;
+    }
+
+    def __str__() {
+        return "Box(" + self.value + ")";
+    }
+
+    def __add__(other) {
+        return NumBox(self.value + other.value);
+    }
+
+    def __sub__(other) {
+        return NumBox(self.value - other.value);
+    }
+
+    def __eq__(other) {
+        return self.value == other.value;
+    }
+}
+
+def make_box(v) {
+    return NumBox(v);
+}
+
+def local_ops() {
+    var a = NumBox(5);
+    var b = NumBox(7);
+    var c = a + b;
+    print("local={c}");
+}
+
+var ga = NumBox(10);
+var gb = make_box(3);
+var gc = ga + gb;
+print("global={gc}");
+
+ga = NumBox(20);
+gb = NumBox(8);
+print("assign={ga - gb}");
+
+local_ops();
+
+var gd = make_box(12);
+print("returned={gd + NumBox(1)}");
+print("eq={gd == NumBox(12)}");
+print("ok: class operator hints");

@@ -1,0 +1,13 @@
+print(typeof(42));
+print(typeof("hello"));
+print(typeof(true));
+print(typeof(nil));
+print(str(123));
+print(int("456"));
+print(float("3.14"));
+print(char(65));
+print(ord("A"));
+print(len(args));
+print(args[0]);
+print(args[1]);
+print(args[2]);

@@ -1,0 +1,19 @@
+# Build directories are named per experiment (build, build-debug, build-asan,
+# build_pgo, ...): match by pattern instead of listing them one by one.
+/build/
+/build-*/
+/build_*/
+
+# Everything in bin/ is a build product (zen, zen_debug, fuzz_zen, ...).
+/bin/
+
+# Build artifacts
+*.o
+*.a
+*.so
+
+# Scratch files the test scripts write next to the repo
+/zen_tmp_*
+
+# Third-party CHIP-8 ROM pack (bring your own)
+examples/chip8/roms/

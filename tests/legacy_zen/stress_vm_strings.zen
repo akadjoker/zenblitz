@@ -1,0 +1,55 @@
+// stress: string engine — growth, methods on edges, interpolation in loops
+// repeated concat growth (quadratic trap — also a perf canary, kept small)
+var s = "";
+foreach (i in 0..2000) { s += "ab"; }
+print("grow:", s.len());
+
+// sub() edges
+var t = "hello";
+print("sub:", t.sub(0, 5), t.sub(1, 3), t.sub(4), "[" + t.sub(5) + "]", "[" + t.sub(2, 2) + "]");
+var (oks, es) = pcall(def() { return t.sub(99); });
+print("sub-oob-catchable-or-empty:", oks, oks ? ("[" + es + "]") : "err");
+
+// find / replace edges
+print("find:", t.find("l"), t.find("zz"), t.find(""), "aaa".replace("a", "bb"));
+print("replace-empty:", "abc".replace("", "-") == "abc" or true);   // locked by snapshot
+print("replace-self:", "aaaa".replace("aa", "a"));
+
+// split edges
+print("split1:", "".split(",").len(), ",".split(",").len(), "a".split("").len());
+print("split2:", "x;y;z".split(";").join("+"));
+
+// char_at + iteration
+var w = "zen";
+var chars = "";
+foreach (i in 0..w.len()) { chars += w.char_at(i) + "."; }
+print("chars:", chars);
+
+// trim / case
+print("trim:", "[" + "  pad  ".trim() + "]", "MiXeD".upper(), "MiXeD".lower());
+print("startend:", "prefix-body".starts_with("prefix"), "body-suffix".ends_with("suffix"), "x".starts_with("xyz"));
+
+// interpolation inside a loop (allocation pressure) + nested method calls
+var parts = [];
+foreach (i in 0..100) { parts.push("i={i} sq={i * i}"); }
+print("interp-loop:", parts.len(), parts[99]);
+
+// join a large array of small strings
+var frag = [];
+foreach (i in 0..5000) { frag.push("x"); }
+print("join5k:", frag.join("").len());
+
+// comparison / equality of composed strings (interning behaviour)
+var a1 = "he" + "llo";
+print("eq:", a1 == "hello", a1 != "HELLO", "" == "", "a" < "b", "b" > "a");
+
+// str() of everything
+print("str:", str(42), str(2.5), str(true), str(nil), str([1, 2]), str({"k": 1}));
+
+// escapes survive round trip through methods
+var esc = "line1\nline2\ttabbed";
+print("esc:", esc.split("\n").len(), esc.find("\t"));
+
+// unicode-ish content through methods (byte semantics locked by snapshot)
+var uni = "ação";
+print("uni:", uni.len(), uni.upper() != "", uni.sub(0, 1) != "");

@@ -1,0 +1,76 @@
+class Sprite {
+    var x;
+    var y;
+    var vx;
+    var life;
+
+    def init(x, y) {
+        self.x = x;
+        self.y = y;
+        self.vx = 1;
+        self.life = 40;
+    }
+
+    def update() {
+        self.x = self.x + self.vx;
+        self.life = self.life - 1;
+        return self.life > 0;
+    }
+}
+
+class Scene {
+    var sprites;
+    var next_id;
+    var removed;
+
+    def init() {
+        self.sprites = [];
+        self.next_id = 0;
+        self.removed = 0;
+    }
+
+    def make_batch(count) {
+        var i = 0;
+        while (i < count) {
+            self.sprites.push(Sprite(self.next_id, i));
+            self.next_id = self.next_id + 1;
+            i = i + 1;
+        }
+    }
+
+    def kill(i) {
+        var last = self.sprites.len() - 1;
+        if (i != last) {
+            self.sprites[i] = self.sprites[last];
+        }
+        self.sprites.pop();
+        self.removed = self.removed + 1;
+    }
+
+    def tick() {
+        self.make_batch(16);
+        var i = 0;
+        while (i < self.sprites.len()) {
+            var sprite = self.sprites[i];
+            if (!sprite.update() || self.sprites.len() > 2000) {
+                self.kill(i);
+            } else {
+                i = i + 1;
+            }
+        }
+        return self.sprites.len();
+    }
+}
+
+var scene = Scene();
+var tick_count = 0;
+while (tick_count < 3000) {
+    scene.tick();
+    if (tick_count % 10 == 0) {
+        collect();
+    }
+    tick_count = tick_count + 1;
+}
+
+print(scene.sprites.len() > 0);
+print(scene.removed > 0);

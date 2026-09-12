@@ -1,0 +1,36 @@
+
+var hp = 50;
+var speed = 2.0;
+var x = 100.0;
+var y = 100.0;
+var target_x = 0.0;
+var target_y = 0.0;
+var alive = true;
+
+def on_ready() {
+    print("[Enemy] spawned at (" + str(x) + ", " + str(y) + ")");
+}
+
+def on_update(dt) {
+    if (!alive) { return; } var dx = target_x - x; var dy = target_y - 
+    y; var dist = sqrt(dx * dx + dy * dy); if (dist > 1.0) {
+        x = x + (dx / dist) * speed * dt;
+        y = y + (dy / dist) * speed * dt;
+    }
+}
+
+def on_draw() {
+    if (!alive) { return; }
+    print("[Enemy] pos=(" + str(x) + ", " + str(y) + ") hp=" + str(hp));
+}
+
+def on_hit(damage) {
+    hp = hp - damage;
+    if (hp <= 0) {
+        alive = false;
+        print("[Enemy] destroyed!");
+        return false;
+    }
+    print("[Enemy] hit! HP=" + str(hp));
+    return true;
+}

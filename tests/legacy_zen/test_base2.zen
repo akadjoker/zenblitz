@@ -1,0 +1,26 @@
+var r = range(5);
+print(len(r));
+print(r[0]);
+print(r[4]);
+
+var r2 = range(2, 8);
+print(len(r2));
+print(r2[0]);
+print(r2[5]);
+
+var r3 = range(0, 10, 3);
+print(len(r3));
+print(r3[0]);
+print(r3[1]);
+print(r3[2]);
+print(r3[3]);
+
+assert(true, "should pass");
+assert(1 == 1);
+print("assertions ok");
+
+print(int(3.7));
+print(float(42));
+print(str(nil));
+print(ord("Z"));
+print(char(90));

@@ -1,0 +1,7 @@
+import easing;
+print(easing.linear(0.5));
+print(easing.in_quad(0.5));
+print(easing.out_bounce(0.5));
+print(easing.in_out_elastic(0.25));
+print(easing.in_back(1.0));
+print(easing.out_expo(0.0));
