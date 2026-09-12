@@ -73,7 +73,11 @@ namespace bb3d
         int h = (int)arg_int(args[1]);
         engine::Platform *p = platform_for(vm);
         bool ok = p->open(w, h, "zenblitz3d", false);
-        if (ok) p->setTargetFPS(60);
+        // No software frame cap: Blitz3D paced a frame only by Flip's
+        // vblank wait (vsync is on by default, "Flip 0" turns it off and
+        // runs unthrottled, as it did in Blitz3D). A 60 fps target on top
+        // of vsync was paying the frame twice - profiler showed the wait
+        // stacked on the swap.
         args[0] = val_int(ok ? 1 : 0);
         (void)nargs;
         return 1;
