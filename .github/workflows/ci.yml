@@ -12,6 +12,11 @@ on:
 # zen::Backend interface, so these jobs are what proves libzen itself stays
 # free of OS calls: a break in that rule shows up here as a build failure on
 # a platform other than Linux.
+#
+# ZEN_BUILD_ENGINE (zenblitz3d: engine/, runtime3d/, GPU+SDL) is OFF for
+# every job above so none of them need SDL or a GPU backend — only the
+# `engine` job below turns it on, compile-only, since there is no display to
+# actually run a window against.
 
 jobs:
   linux:
@@ -90,6 +95,29 @@ jobs:
             *) echo "::error::unclear message without the userlib: $out"; exit 1 ;;
           esac
           rm -rf bin/userlibs
+
+  # zenblitz3d (Marco 1: window, Cls/ClsColor/Flip, KeyDown/KeyHit, mouse).
+  # Compile-only — there is no display on the runner to open a real window
+  # against, so this proves the engine/runtime3d/GPU/SDL wiring builds, not
+  # that a program runs. ZEN_BUILD_ENGINE stays OFF for every other job, so
+  # this is also the one place a break in the engine build would show up.
+  engine:
+    name: Linux (engine, ZEN_BUILD_ENGINE=ON)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Install SDL2
+        run: sudo apt-get update && sudo apt-get install -y libsdl2-dev
+      - name: Configure
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DZEN_BUILD_ENGINE=ON
+      - name: Build
+        run: cmake --build build -j"$(nproc)"
+      - name: zenblitz still builds and passes with the engine enabled
+        run: tests/run_tests.sh bin/zenblitz
+      - name: zenblitz3d exists
+        run: test -x bin/zenblitz3d
 
   linux-clang:
     name: Linux (clang, Release)
