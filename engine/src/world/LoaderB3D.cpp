@@ -1,4 +1,5 @@
 #include "engine/LoaderB3D.h"
+#include "engine/FilePath.h"
 #include "engine/Animator.h"
 #include "engine/Texture.h"
 #include <SDL2/SDL_rwops.h>
@@ -312,14 +313,15 @@ namespace engine
     {
         (void)conv; (void)hint;
 
-        g_in = SDL_RWFromFile(f.c_str(), "rb");
+        const std::string path = resolveCaseInsensitive(f);
+        g_in = SDL_RWFromFile(path.c_str(), "rb");
         if (!g_in) return nullptr;
 
         g_dev = dev;
         clearState();
 
-        size_t slash = f.find_last_of("/\\");
-        setTexturePath(slash == std::string::npos ? std::string() : f.substr(0, slash));
+        size_t slash = path.find_last_of("/\\");
+        setTexturePath(slash == std::string::npos ? std::string() : path.substr(0, slash));
 
         int tag = readChunk();
         if (tag != 'BB3D')

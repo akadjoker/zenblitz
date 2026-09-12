@@ -1,4 +1,5 @@
 #include "engine/Texture.h"
+#include "engine/FilePath.h"
 #include <SDL2/SDL_rwops.h>
 
 namespace engine
@@ -30,10 +31,10 @@ namespace engine
     {
         if (!g_texturePath.empty())
         {
-            std::string candidate = g_texturePath + file;
+            std::string candidate = resolveCaseInsensitive(g_texturePath + file);
             if (fileExists(candidate)) return candidate;
         }
-        return file;
+        return resolveCaseInsensitive(file);
     }
 
     Texture *Texture::load(const std::string &file, int flags)

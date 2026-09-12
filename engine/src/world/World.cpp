@@ -1,4 +1,5 @@
 #include "engine/World.h"
+#include "engine/Profiler.h"
 #include "engine/MeshModel.h"
 #include <ct/sort.hpp>
 #include <cmath>
@@ -280,6 +281,7 @@ namespace engine
 
     void World::update(float elapsed)
     {
+        KX_PROFILE_SCOPE("World/Update");
         for (; !mUsedColls.empty(); mUsedColls.pop_back())
             mFreeColls.push_back(mUsedColls[mUsedColls.size() - 1]);
 
@@ -310,6 +312,7 @@ namespace engine
 
     void World::prepare(gpu::Device &dev, float tween)
     {
+        KX_PROFILE_SCOPE("World/Prepare");
         mOrdMods.clear();
         mUnordMods.clear();
         mVisible.clear();
@@ -496,6 +499,7 @@ namespace engine
 
     void World::draw(gpu::Device &dev)
     {
+        KX_PROFILE_SCOPE("World/Draw");
         int lastVpX = -1, lastVpY = -1, lastVpW = -1, lastVpH = -1;
         for (size_t k = 0; k < mDrawCalls.size(); ++k)
         {

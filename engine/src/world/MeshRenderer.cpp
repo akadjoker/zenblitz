@@ -1,4 +1,5 @@
 #include "engine/MeshRenderer.h"
+#include "engine/Profiler.h"
 #include <cstring>
 #include <cmath>
 #include <string>
@@ -305,6 +306,7 @@ namespace engine
         // the Canvas Batch draws between our prepare() and draw() and
         // binds its own pipeline/buffers, so nothing can be assumed bound
         mBound = BoundState();
+        mStats = Stats();
     }
 
     int MeshRenderer::stageBones(const Matrix4 *mats, int count)
@@ -482,6 +484,7 @@ namespace engine
 
     void MeshRenderer::flushUniforms(gpu::Device &dev)
     {
+        KX_PROFILE_SCOPE("Mesh/UploadUniforms");
         if (mStagedCount)
         {
             std::uint64_t bytes = (std::uint64_t)mStagedCount * mUniformStride;
@@ -564,9 +567,11 @@ namespace engine
         {
             dev.setPipeline(cp->pipeline);
             mBound.pipeline = cp->pipeline.value();
+            ++mStats.pipelineSwitches;
         }
         dev.bindUniformBuffer((std::uint32_t)cp->uniformsSlot, mUniformBuffer,
                               (std::uint64_t)index * mUniformStride, sizeof(Uniforms));
+        ++mStats.uniformBinds;
         if (skinned && cp->bonesSlot >= 0)
             dev.bindUniformBuffer((std::uint32_t)cp->bonesSlot, mBoneBuffer,
                                   (std::uint64_t)boneSlot * mBoneStride, kMaxGpuBones * sizeof(Matrix4));
@@ -575,12 +580,14 @@ namespace engine
             dev.bindTexture((std::uint32_t)cp->textureSlot, tex, mSampler);
             mBound.texture = tex.value();
             mBound.textureSlot = cp->textureSlot;
+            ++mStats.textureSwitches;
         }
         if (geom.vb.value() != mBound.vb || geom.vbOffset != mBound.vbOffset)
         {
             dev.bindVertexBuffer(0, geom.vb, geom.vbOffset);
             mBound.vb = geom.vb.value();
             mBound.vbOffset = geom.vbOffset;
+            ++mStats.vertexBufferSwitches;
         }
         if (geom.layout == GpuGeometry::LayoutMd2Morph)
         {
@@ -589,18 +596,23 @@ namespace engine
                 dev.bindVertexBuffer(1, geom.vb2, geom.vb2Offset);
                 mBound.vb2 = geom.vb2.value();
                 mBound.vb2Offset = geom.vb2Offset;
+                ++mStats.vertexBufferSwitches;
             }
             if (geom.uvb.value() != mBound.uvb)
             {
                 dev.bindVertexBuffer(2, geom.uvb, 0);
                 mBound.uvb = geom.uvb.value();
+                ++mStats.vertexBufferSwitches;
             }
         }
         if (geom.ib.value() != mBound.indexBuffer)
         {
             dev.bindIndexBuffer(geom.ib, gpu::IndexFormat::Uint16, 0);
             mBound.indexBuffer = geom.ib.value();
+            ++mStats.indexBufferSwitches;
         }
+        ++mStats.drawCalls;
+        mStats.triangles += geom.indexCount / 3;
         dev.drawIndexed(geom.indexCount, 1, 0, 0, 0);
     }
 }

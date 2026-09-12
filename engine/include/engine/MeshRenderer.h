@@ -63,6 +63,23 @@ namespace engine
         void prepareClear(const Vector &color);
         void drawClear(gpu::Device &dev, int index, bool clearColor, bool clearDepth);
 
+        // Per-frame counters, reset by beginFrame(): what actually reached
+        // the GPU after the bind dedup in bindAndDraw(). The switches are
+        // the interesting part - a scene whose pipeline/texture switches
+        // approach its draw calls is sorting badly, since every switch
+        // costs a full state re-issue in the GL backend.
+        struct Stats
+        {
+            std::uint32_t drawCalls = 0;
+            std::uint32_t triangles = 0;
+            std::uint32_t pipelineSwitches = 0;
+            std::uint32_t textureSwitches = 0;
+            std::uint32_t vertexBufferSwitches = 0;
+            std::uint32_t indexBufferSwitches = 0;
+            std::uint32_t uniformBinds = 0;
+        };
+        const Stats &stats() const { return mStats; }
+
     private:
         struct PipelineKey
         {
@@ -176,6 +193,7 @@ namespace engine
             std::int32_t textureSlot = -1;
         };
         BoundState mBound;
+        Stats mStats;
 
         // full-screen NDC quad at far depth, drawn under the camera's
         // viewport for CameraClsColor/CameraClsMode

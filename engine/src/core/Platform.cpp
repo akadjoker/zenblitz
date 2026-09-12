@@ -2,6 +2,7 @@
 ** Platform.cpp — see Platform.h.
 */
 #include "engine/Platform.h"
+#include "engine/Profiler.h"
 #include "engine/Log.h"
 
 #include <SDL2/SDL.h>
@@ -43,6 +44,9 @@ namespace engine
         mGraphics.setScreenSize((std::uint32_t)width, (std::uint32_t)height);
         mBatch.resize(width, height);
         mOpen = true;
+        // first frame starts now; every later one starts at the end of
+        // the previous Flip (see endFrame)
+        kx::Profiler::getSingleton().beginFrame();
         return true;
     }
 
@@ -124,6 +128,7 @@ namespace engine
 
     void Platform::flushCanvasPass()
     {
+        KX_PROFILE_SCOPE("Canvas/Flush");
         if (mGraphics.inFrame()) mGraphics.endFrame();
         mBatch.flip();
         if (mGraphics.reopenScreenPass())
@@ -166,8 +171,16 @@ namespace engine
             mGraphics.endSurfaceBlit();
         }
 
-        mDevice.flip();
+        {
+            KX_PROFILE_SCOPE("Screen/Flip");
+            mDevice.flip();
+        }
         pumpEvents();
+        // a Blitz frame runs Flip to Flip, so this is the boundary:
+        // close the sample set for the frame just presented and open
+        // the next one
+        kx::Profiler::getSingleton().endFrame();
+        kx::Profiler::getSingleton().beginFrame();
     }
 
     bool Platform::keyDown(int dik) const

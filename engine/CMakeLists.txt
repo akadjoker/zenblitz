@@ -33,6 +33,7 @@ add_library(zenblitz_engine STATIC
     src/world/MeshLoader.cpp
     src/world/LoaderB3D.cpp
     src/world/LoaderB3DS.cpp
+    src/world/FilePath.cpp
     src/world/Md2Norms.cpp
     src/world/MD2Rep.cpp
     src/world/MD2Model.cpp

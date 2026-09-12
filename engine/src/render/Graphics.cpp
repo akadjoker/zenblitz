@@ -1,6 +1,6 @@
 #include "engine/Graphics.h"
 
-#include "../core/Profiler.h"
+#include "engine/Profiler.h"
 
 #include "engine/Device.h"
 #include "engine/Log.h"

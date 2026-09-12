@@ -6,6 +6,7 @@
 // std::map) differ, per the engine's cross-platform/no-STL-container
 // rules.
 #include "engine/LoaderB3DS.h"
+#include "engine/FilePath.h"
 #include "engine/Animator.h"
 #include "engine/Texture.h"
 #include <SDL2/SDL_rwops.h>
@@ -551,7 +552,7 @@ namespace engine
         g_animOnly = (hint & MeshLoader::HintAnimOnly) != 0;
         g_dev = dev;
 
-        g_in = SDL_RWFromFile(filename.c_str(), "rb");
+        g_in = SDL_RWFromFile(resolveCaseInsensitive(filename).c_str(), "rb");
         if (!g_in) return nullptr;
 
         clearState();

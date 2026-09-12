@@ -8,6 +8,9 @@
 #include "ct/hashmap.hpp"
 #include "engine/Platform.h"
 #include "engine/World.h"
+#include "engine/Profiler.h"
+#include <SDL2/SDL.h>
+#include <cstdio>
 
 namespace { inline long long arg_int(zen::Value v) { return zen::is_int(v) ? v.as.integer
     : zen::is_float(v) ? (long long)v.as.number : 0; } }
@@ -119,10 +122,68 @@ namespace bb3d
         return 0;
     }
 
+    // ZENBLITZ_PROFILE=1 in the environment (an env var rather than a
+    // command-line flag so it also works when the editor launches the
+    // runtime, which passes only the .bb path) prints a profile line to
+    // the program's console once a second: frame time, the CPU scopes
+    // the engine times, and the 3D/2D render counters. It goes through
+    // the VM backend, not kx::Log - Log::info is dropped in release
+    // builds (LogMode::Passive only passes warnings and errors).
+    static void profile_dump(VM *vm)
+    {
+        static int enabled = -1;
+        if (enabled < 0)
+        {
+            const char *env = SDL_getenv("ZENBLITZ_PROFILE");
+            enabled = (env && env[0] && env[0] != '0') ? 1 : 0;
+        }
+        if (!enabled) return;
+
+        // BatchRenderer::Stats is cumulative since init by design (it
+        // carries frameCount for averaging), while MeshRenderer::Stats
+        // is per frame - so report the 2D side as a per-frame average
+        // over the frames since the last dump, computed here from the
+        // running totals, rather than changing the Batch's semantics.
+        static std::uint32_t lastTicks = 0, framesSinceDump = 0;
+        static std::size_t lastDraws2D = 0, lastTexSwitches2D = 0;
+        ++framesSinceDump;
+        const std::uint32_t now = SDL_GetTicks();
+        if (now - lastTicks < 1000) return;
+        lastTicks = now;
+
+        const kx::Profiler &prof = kx::Profiler::getSingleton();
+        const engine::MeshRenderer::Stats &r3 = world_for(vm)->renderStats();
+        const kx::BatchRenderer::Stats &r2 = platform_for(vm)->batch().getStats();
+        const std::size_t draws2D = (r2.drawCalls - lastDraws2D) / framesSinceDump;
+        const std::size_t texSwitches2D = (r2.textureSwitches - lastTexSwitches2D) / framesSinceDump;
+        lastDraws2D = r2.drawCalls;
+        lastTexSwitches2D = r2.textureSwitches;
+        framesSinceDump = 0;
+
+        // every entry is "name avg/max" in ms over the last 120 frames;
+        // "Frame" is the Flip-to-Flip total the scopes below sit inside
+        char line[1024];
+        int n = snprintf(line, sizeof(line), "[profile] avg/max ms:");
+        for (std::uint32_t k = 0; k < prof.sampleCount() && n < (int)sizeof(line) - 64; ++k)
+        {
+            const kx::ProfileSample &s = prof.samples()[k];
+            n += snprintf(line + n, sizeof(line) - n, " %s %.2f/%.2f", s.name.c_str(), s.average, s.maximum);
+        }
+        zen::backend_log(vm->backend(), zen::LOG_INFO, line);
+
+        snprintf(line, sizeof(line),
+                 "[profile] per frame: 3D draws %u tris %u | switches: pipeline %u texture %u vb %u ib %u | uniform binds %u | 2D draws %zu tex-switches %zu",
+                 r3.drawCalls, r3.triangles, r3.pipelineSwitches, r3.textureSwitches,
+                 r3.vertexBufferSwitches, r3.indexBufferSwitches, r3.uniformBinds,
+                 draws2D, texSwitches2D);
+        zen::backend_log(vm->backend(), zen::LOG_INFO, line);
+    }
+
     static int c_Flip(VM *vm, Value *args, int nargs)
     {
         (void)args; (void)nargs;
         platform_for(vm)->endFrame();
+        profile_dump(vm);
         vm->request_suspend(0);
         return 0;
     }

@@ -1411,6 +1411,9 @@ namespace kx
   {
     std::size_t vertexOffset = 0;
     std::uint32_t indexOffset = 0;
+    gpu::PipelineHandle boundPipeline;
+    gpu::TextureHandle boundTexture;
+    bool buffersBound = false, indexBound = false;
     for (std::size_t i = 0; i < mDrawCalls.size(); ++i)
     {
       const DrawCall &call = mDrawCalls[i];
@@ -1420,15 +1423,42 @@ namespace kx
         vertexOffset += call.vertexCount;
         continue;
       }
-      mGpu->setPipeline(pipeline);
-      mGpu->bindUniformBuffer(0, mUniformBuffer, 0, sizeof(Matrix4));
-      mGpu->bindTexture(0, call.texture.valid() ? call.texture : mWhiteTexture, mSampler);
-      mGpu->bindVertexBuffer(0, mVertexBuffer, 0);
+      // The GL backend re-issues every bind it's given (a pipeline is a
+      // full state re-spec, a vertex buffer re-specs every attrib into
+      // the pipeline's VAO), so only bind what actually changed since
+      // the previous call. The vertex/uniform/index buffers never change
+      // within a flush; they only need re-binding after a pipeline
+      // switch, because attrib pointers live in the new pipeline's VAO
+      // and the backend drops its index-buffer binding on pipeline change.
+      if (pipeline != boundPipeline)
+      {
+        mGpu->setPipeline(pipeline);
+        boundPipeline = pipeline;
+        buffersBound = false;
+        indexBound = false;
+        boundTexture = gpu::TextureHandle();
+      }
+      if (!buffersBound)
+      {
+        mGpu->bindUniformBuffer(0, mUniformBuffer, 0, sizeof(Matrix4));
+        mGpu->bindVertexBuffer(0, mVertexBuffer, 0);
+        buffersBound = true;
+      }
+      const gpu::TextureHandle texture = call.texture.valid() ? call.texture : mWhiteTexture;
+      if (texture != boundTexture)
+      {
+        mGpu->bindTexture(0, texture, mSampler);
+        boundTexture = texture;
+      }
 
       if (call.mode == ModeQuads)
       {
         const std::uint32_t indexCount = static_cast<std::uint32_t>(call.vertexCount / 4) * 6;
-        mGpu->bindIndexBuffer(mIndexBuffer, gpu::IndexFormat::Uint16, 0);
+        if (!indexBound)
+        {
+          mGpu->bindIndexBuffer(mIndexBuffer, gpu::IndexFormat::Uint16, 0);
+          indexBound = true;
+        }
         mGpu->drawIndexed(indexCount, 1, indexOffset, 0, 0);
         indexOffset += indexCount;
       }

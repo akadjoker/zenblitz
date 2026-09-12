@@ -45,6 +45,9 @@ namespace engine
 
         bool init(gpu::Device &dev, kx::ShaderDialect dialect) { return mRenderer.init(dev, dialect); }
         void shutdown() { mRenderer.shutdown(); }
+        // per-frame 3D render counters (draw calls, state switches) -
+        // the 3D counterpart of BatchRenderer::getStats()
+        const MeshRenderer::Stats &renderStats() const { return mRenderer.stats(); }
 
         void clearCollisions();
         void addCollision(int srcType, int dstType, int method, int response);

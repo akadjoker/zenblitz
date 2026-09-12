@@ -1,4 +1,5 @@
 #include "engine/MD2Rep.h"
+#include "engine/FilePath.h"
 #include "engine/Md2Norms.h"
 #include <SDL2/SDL_rwops.h>
 #include <ct/hashmap.hpp>
@@ -33,7 +34,7 @@ namespace engine
 
     MD2Rep::MD2Rep(const std::string &f)
     {
-        SDL_RWops *in = SDL_RWFromFile(f.c_str(), "rb");
+        SDL_RWops *in = SDL_RWFromFile(resolveCaseInsensitive(f).c_str(), "rb");
         if (!in) return;
 
         Md2Header header;
