@@ -10,6 +10,10 @@ namespace zen { class VM; }
 namespace bb3d
 {
     void install_graphics_commands(zen::VM *vm);
+    // Frees every runtime-owned resource for this VM (scene, textures,
+    // fonts, brushes, the World and the Platform/GL device). Call once,
+    // after the program finishes.
+    void shutdown_graphics(zen::VM *vm);
 }
 
 #endif

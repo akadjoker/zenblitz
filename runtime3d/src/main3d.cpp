@@ -54,5 +54,7 @@ int main(int argc, char **argv)
     while (vm.suspended())
         if (!vm.resume()) break;
 
-    return vm.had_error() ? 1 : 0;
+    int rc = vm.had_error() ? 1 : 0;
+    bb3d::shutdown_graphics(&vm);
+    return rc;
 }

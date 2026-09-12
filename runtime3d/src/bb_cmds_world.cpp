@@ -72,6 +72,18 @@ namespace bb3d
         return found ? *found : 0;
     }
 
+    // extern: called by shutdown_graphics() when the program ends.
+    // ~Entity already deletes its children, so deleting the orphan roots
+    // walks the whole scene - deleting every handle instead would
+    // double-free anything that is parented to something else.
+    void free_all_entities()
+    {
+        while (engine::Entity *root = engine::Entity::orphans()) delete root;
+        g_entities.clear();
+        g_handles.clear();
+        g_next_entity = 0;
+    }
+
     static void insert_entity(engine::Entity *e, engine::Entity *parent)
     {
         if (parent) e->setParent(parent);

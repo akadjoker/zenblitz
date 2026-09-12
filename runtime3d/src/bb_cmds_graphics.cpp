@@ -37,6 +37,31 @@ namespace bb3d
         return w;
     }
 
+    extern void free_all_entities();
+    extern void free_all_textures();
+    extern void free_all_fonts();
+
+    // Releases everything the runtime allocated for this VM. A Blitz
+    // program normally runs until the user closes the window, so nothing
+    // here is ever freed by the script itself - without this the process
+    // exits with the whole scene, both renderers and the GL device still
+    // live (which AddressSanitizer rightly reports as leaks).
+    // Order matters: entities and textures hold GPU handles owned by the
+    // World/Platform, so they go first.
+    void shutdown_graphics(VM *vm)
+    {
+        free_all_entities();
+        free_all_textures();
+        free_all_fonts();
+
+        engine::World **w = g_worlds.find(vm);
+        engine::Platform **p = g_platforms.find(vm);
+        if (w) (*w)->shutdown();
+        if (p) (*p)->close();
+        if (w) { delete *w; g_worlds.erase(vm); }
+        if (p) { delete *p; g_platforms.erase(vm); }
+    }
+
     static int c_Graphics(VM *vm, Value *args, int nargs)
     {
         int w = (int)arg_int(args[0]);

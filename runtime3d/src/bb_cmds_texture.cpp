@@ -8,6 +8,7 @@
 #include "vm.h"
 #include "object.h"
 #include "ct/hashmap.hpp"
+#include "ct/vector.hpp"
 #include "engine/Platform.h"
 #include "engine/Texture.h"
 #include "engine/Model.h"
@@ -43,6 +44,21 @@ namespace bb3d
         long long h = ++g_next_texture;
         g_textures.put(h, t);
         return h;
+    }
+
+    // extern: called by shutdown_graphics() when the program ends, so
+    // textures a script never FreeTexture'd still get released.
+    // every CreateBrush allocation, so the ones a script never passed to
+    // FreeBrush are still released at shutdown.
+    static ct::Vector<engine::Brush *> g_brushes;
+
+    void free_all_textures()
+    {
+        for (auto &e : g_textures) engine::Texture::release(e.value);
+        g_textures.clear();
+        g_next_texture = 0;
+        for (size_t k = 0; k < g_brushes.size(); ++k) delete g_brushes[k];
+        g_brushes.clear();
     }
 
     engine::Texture *texture_of(long long h)
@@ -137,6 +153,7 @@ namespace bb3d
     {
         (void)vm; (void)nargs;
         engine::Brush *b = new engine::Brush();
+        g_brushes.push_back(b);
         b->setColor(engine::Vector(arg_float(args[0]) / 255.0f, arg_float(args[1]) / 255.0f, arg_float(args[2]) / 255.0f));
         args[0] = val_int((long long)(std::intptr_t)b);
         return 1;
@@ -145,7 +162,10 @@ namespace bb3d
     static int c_FreeBrush(VM *vm, Value *args, int nargs)
     {
         (void)vm; (void)nargs;
-        delete (engine::Brush *)(std::intptr_t)arg_int(args[0]);
+        engine::Brush *b = (engine::Brush *)(std::intptr_t)arg_int(args[0]);
+        for (size_t k = 0; k < g_brushes.size(); ++k)
+            if (g_brushes[k] == b) { g_brushes.erase(g_brushes.begin() + k); break; }
+        delete b;
         return 0;
     }
 

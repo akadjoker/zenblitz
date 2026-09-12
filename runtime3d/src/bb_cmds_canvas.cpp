@@ -5,6 +5,7 @@
 #include "vm.h"
 #include "object.h"
 #include "ct/hashmap.hpp"
+#include "ct/vector.hpp"
 #include "engine/Platform.h"
 
 namespace bb3d { extern engine::Platform *platform_for(zen::VM *vm); }
@@ -79,6 +80,17 @@ namespace bb3d
     }
 
     static ct::HashMap<VM *, float> g_fontSize;
+    // every LoadFont allocation, so shutdown_graphics() can free the ones
+    // a script never passed to FreeFont.
+    static ct::Vector<Bb3dFont *> g_fonts;
+
+    // extern: called by shutdown_graphics() when the program ends.
+    void free_all_fonts()
+    {
+        for (size_t k = 0; k < g_fonts.size(); ++k) delete g_fonts[k];
+        g_fonts.clear();
+        g_fontSize.clear();
+    }
 
     static int c_Text(VM *vm, Value *args, int nargs)
     {
@@ -95,6 +107,7 @@ namespace bb3d
         float size = arg_float(args[1]);
         if (size <= 0.0f) size = 16.0f;
         Bb3dFont *f = new Bb3dFont{size};
+        g_fonts.push_back(f);
         args[0] = val_int((long long)(std::intptr_t)f);
         return 1;
     }
@@ -109,6 +122,8 @@ namespace bb3d
     {
         (void)vm; (void)nargs;
         Bb3dFont *f = (Bb3dFont *)(std::intptr_t)arg_int(args[0]);
+        for (size_t k = 0; k < g_fonts.size(); ++k)
+            if (g_fonts[k] == f) { g_fonts.erase(g_fonts.begin() + k); break; }
         delete f;
         return 0;
     }
