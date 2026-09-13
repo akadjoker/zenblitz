@@ -23,6 +23,7 @@
 #include "engine/LoaderX.h"
 #include "engine/LoaderGltf.h"
 #include "engine/LoaderFbx.h"
+#include "engine/PlaneModel.h"
 #include "engine/Image.h"
 #include "engine/Sound.h"
 #include "engine/FilePath.h"
@@ -219,12 +220,12 @@ namespace bb3d
     static int c_CreatePlane(VM *vm, Value *args, int nargs)
     {
         (void)vm; (void)nargs;
-        int segments = (int)arg_int(args[0]);
-        if (segments < 1) segments = 1;
-        if (segments > 254) segments = 254;
-        engine::MeshModel *mesh = makeGrid(segments, segments, nullptr, 0.0f, 2.0f, 2.0f);
-        insert_entity(mesh, entity_of(arg_int(args[1])));
-        args[0] = val_int(store_entity(mesh));
+        // A Blitz3D plane is "a flat, infinite 'ground'" (CreatePlane's
+        // own docs), not a quad - PlaneModel rebuilds it from the camera
+        // frustum every frame so it always reaches the horizon.
+        engine::PlaneModel *plane = new engine::PlaneModel((int)arg_int(args[0]));
+        insert_entity(plane, entity_of(arg_int(args[1])));
+        args[0] = val_int(store_entity(plane));
         return 1;
     }
 

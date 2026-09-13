@@ -1,6 +1,7 @@
 /*
 ** bb_cmds_entityquery.cpp — EntityX/EntityY/EntityZ, ResetEntity,
-** AlignToVector, the TForm* coordinate-space family and GetEntityType.
+** AlignToVector, EntityPitch/Yaw/Roll, EntityDistance, the TForm*
+** coordinate-space family and GetEntityType.
 ** Ported from bbblitz3d.cpp; this is a separate file (not
 ** bb_cmds_world.cpp, which is being worked on in parallel) so these
 ** land without touching anyone else's in-progress edits.
@@ -26,6 +27,8 @@ namespace
     {
         return zen::is_float(v) ? (float)v.as.number : zen::is_int(v) ? (float)v.as.integer : 0.0f;
     }
+    // bbblitz3d.cpp's rtod: the Euler-angle readers return degrees.
+    constexpr float kRadToDeg = 57.2957795130823208767981548141052f;
 }
 
 using namespace zen;
@@ -185,6 +188,48 @@ namespace bb3d
         return 1;
     }
 
+    /* bbEntityPitch/Yaw/Roll (bbblitz3d.cpp:1588-1601): the entity's
+       rotation as Euler angles in degrees, local by default or world
+       with global<>0. */
+    static int c_EntityPitch(VM *vm, Value *args, int)
+    {
+        (void)vm;
+        engine::Entity *e = entity_of(arg_int(args[0]));
+        const bool global = arg_int(args[1]) != 0;
+        args[0] = val_float(e ? blitz::quatPitch(global ? e->getWorldRotation()
+                                                        : e->getLocalRotation()) * kRadToDeg : 0.0f);
+        return 1;
+    }
+    static int c_EntityYaw(VM *vm, Value *args, int)
+    {
+        (void)vm;
+        engine::Entity *e = entity_of(arg_int(args[0]));
+        const bool global = arg_int(args[1]) != 0;
+        args[0] = val_float(e ? blitz::quatYaw(global ? e->getWorldRotation()
+                                                      : e->getLocalRotation()) * kRadToDeg : 0.0f);
+        return 1;
+    }
+    static int c_EntityRoll(VM *vm, Value *args, int)
+    {
+        (void)vm;
+        engine::Entity *e = entity_of(arg_int(args[0]));
+        const bool global = arg_int(args[1]) != 0;
+        args[0] = val_float(e ? blitz::quatRoll(global ? e->getWorldRotation()
+                                                       : e->getLocalRotation()) * kRadToDeg : 0.0f);
+        return 1;
+    }
+
+    /* bbEntityDistance (bbblitz3d.cpp:1800): world-space distance
+       between two entities' origins. */
+    static int c_EntityDistance(VM *vm, Value *args, int)
+    {
+        (void)vm;
+        engine::Entity *a = entity_of(arg_int(args[0]));
+        engine::Entity *b = entity_of(arg_int(args[1]));
+        args[0] = val_float(a && b ? a->getWorldPosition().distance(b->getWorldPosition()) : 0.0f);
+        return 1;
+    }
+
     extern const zen::CommandDecl bb3d_cmds_entityquery[] = {
         {"#EntityX%entity%global=0", c_EntityX},
         {"#EntityY%entity%global=0", c_EntityY},
@@ -198,6 +243,10 @@ namespace bb3d
         {"#TFormedY", c_TFormedY},
         {"#TFormedZ", c_TFormedZ},
         {"%GetEntityType%entity", c_GetEntityType},
+        {"#EntityPitch%entity%global=0", c_EntityPitch},
+        {"#EntityYaw%entity%global=0", c_EntityYaw},
+        {"#EntityRoll%entity%global=0", c_EntityRoll},
+        {"#EntityDistance%source_entity%destination_entity", c_EntityDistance},
     };
     extern const int bb3d_cmds_entityquery_count =
         (int)(sizeof(bb3d_cmds_entityquery) / sizeof(bb3d_cmds_entityquery[0]));

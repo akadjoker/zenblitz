@@ -30,6 +30,7 @@ add_library(zenblitz_engine STATIC
     src/world/MeshCollider.cpp
     src/world/Animator.cpp
     src/world/MeshModel.cpp
+    src/world/PlaneModel.cpp
     src/world/Terrain.cpp
     src/world/TerrainRep.cpp
     src/world/ParticleEmitter.cpp

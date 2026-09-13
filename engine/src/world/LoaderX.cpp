@@ -308,15 +308,24 @@ namespace engine
         // array TimedFloatKeys keys[nKeys], each { DWORD time; FloatKeys tfkeys; }
         void parseAnimKey(xobject *o, MeshModel *e)
         {
+            // nKeys and each key's float count come straight out of the
+            // file, so every read is bounded against the object's own
+            // data extent - a truncated or hostile .x otherwise walks off
+            // the end of pdata (a real SEGV on mariorun.x, whose keys run
+            // right up to the end of the buffer).
             BYTE *p = rawData(o);
+            const BYTE *end = p + o->size;
+            if ((size_t)(end - p) < 2 * sizeof(DWORD)) return;
             const DWORD keyType = *(DWORD *)p; p += sizeof(DWORD);
             const DWORD nKeys = *(DWORD *)p; p += sizeof(DWORD);
 
             Animation anim = e->getAnimation();
             for (DWORD k = 0; k < nKeys; ++k)
             {
+                if ((size_t)(end - p) < 2 * sizeof(DWORD)) break;
                 const int time = (int)*(DWORD *)p; p += sizeof(DWORD);
                 const DWORD n = *(DWORD *)p; p += sizeof(DWORD);
+                if ((size_t)(end - p) < (size_t)n * sizeof(float)) break;
                 if (time > g_animLen) g_animLen = time;
 
                 switch (keyType)
@@ -355,9 +364,16 @@ namespace engine
             for (ULONG i = 0; i < o->nb_children; ++i)
             {
                 xobject *child = o->children[i];
-                if (isTemplate(child, "Frame"))
+                // An Animation names its target frame with a "{Name}"
+                // reference, which the parser resolves into a stub child
+                // carrying only ptarget - the stub itself has no type or
+                // name of its own, so isTemplate()/child->name would both
+                // miss it. Follow ptarget first and fall back to the
+                // inline-Frame spelling.
+                const xobject *target = child->ptarget ? child->ptarget : child;
+                if (target->name[0] && isTemplate(target, "Frame"))
                 {
-                    MeshModel **found = g_framesByName.find(ct::String(child->name));
+                    MeshModel **found = g_framesByName.find(ct::String(target->name));
                     if (found) frame = *found;
                 }
                 else if (isTemplate(child, "AnimationKey") && frame)
