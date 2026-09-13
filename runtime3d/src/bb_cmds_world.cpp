@@ -692,6 +692,70 @@ namespace bb3d
         return 1;
     }
 
+    /* Hierarchy queries. An entity a script can reach this way was
+       created through a command that stored it, so handle_of() finds its
+       existing handle - minting a fresh one would hand back a second
+       handle for the same entity. A child loaded as part of a mesh
+       hierarchy (LoadAnimMesh's frames) has no handle of its own until
+       something asks for it, so store one on first use. */
+    static long long handle_for_existing(engine::Entity *e)
+    {
+        if (!e) return 0;
+        const long long existing = handle_of(e);
+        return existing ? existing : store_entity(e);
+    }
+
+    static int c_CountChildren(VM *vm, Value *args, int)
+    {
+        (void)vm;
+        engine::Entity *e = entity_of(arg_int(args[0]));
+        int n = 0;
+        if (e)
+            for (engine::Entity *p = e->children(); p; p = p->successor()) ++n;
+        args[0] = val_int(n);
+        return 1;
+    }
+
+    static int c_GetChild(VM *vm, Value *args, int)
+    {
+        (void)vm;
+        engine::Entity *e = entity_of(arg_int(args[0]));
+        int index = (int)arg_int(args[1]);
+        engine::Entity *p = e ? e->children() : nullptr;
+        while (--index && p) p = p->successor();
+        args[0] = val_int(handle_for_existing(p));
+        return 1;
+    }
+
+    static int c_GetParent(VM *vm, Value *args, int)
+    {
+        (void)vm;
+        engine::Entity *e = entity_of(arg_int(args[0]));
+        args[0] = val_int(handle_for_existing(e ? e->getParent() : nullptr));
+        return 1;
+    }
+
+    /* bbFindChild's own recursive helper: depth-first, and it matches the
+       entity it is called on before descending - so FindChild(e, name)
+       can return e itself, exactly as the original does. */
+    static engine::Entity *find_child(engine::Entity *e, const char *name)
+    {
+        if (!e) return nullptr;
+        if (e->getName() == name) return e;
+        for (engine::Entity *p = e->children(); p; p = p->successor())
+            if (engine::Entity *q = find_child(p, name)) return q;
+        return nullptr;
+    }
+
+    static int c_FindChild(VM *vm, Value *args, int)
+    {
+        (void)vm;
+        engine::Entity *e = entity_of(arg_int(args[0]));
+        const char *name = arg_cstr(args[1]);
+        args[0] = val_int(handle_for_existing(find_child(e, name ? name : "")));
+        return 1;
+    }
+
     static int c_EntityClass(VM *vm, Value *args, int)
     {
         engine::Entity *e = entity_of(arg_int(args[0]));
@@ -706,6 +770,30 @@ namespace bb3d
         (void)nargs;
         world_for(vm)->setAmbient(engine::Vector(arg_float(args[0]) / 255.0f, arg_float(args[1]) / 255.0f,
                                                  arg_float(args[2]) / 255.0f));
+        return 0;
+    }
+
+    /* bbHWMultiTex toggled gxScene's tex_stages between the card's real
+       stage count and 1, so a script could fall back to single-texturing
+       on hardware whose multitexturing was broken or slow. That is a
+       Direct3D fixed-function pipeline concern with nothing behind it
+       here: this renderer binds its texture units from the shader either
+       way, and always has more than one. Accepted and ignored, so a
+       script that calls it (Blitz3D samples routinely do, right after
+       Graphics3D) runs rather than dying on a missing command. */
+    static int c_HWMultiTex(VM *vm, Value *args, int nargs)
+    {
+        (void)args; (void)nargs;
+        // Warn once rather than every call: a script that toggles this in
+        // its main loop would otherwise flood the console.
+        static bool warned = false;
+        if (!warned)
+        {
+            warned = true;
+            zen::backend_log(vm->backend(), zen::LOG_WARN,
+                             "HWMultiTex: accepted and ignored - this renderer always multitextures "
+                             "(the original toggled a Direct3D fixed-function stage count)");
+        }
         return 0;
     }
 
@@ -1164,6 +1252,110 @@ namespace bb3d
         return 0;
     }
 
+    /* Triangles the last RenderWorld actually submitted. MeshRenderer
+       already counts them (Stats::triangles, reset each prepare()), which
+       is the same "ask the scene what it drew" the original did through
+       gxScene::getTrianglesDrawn(). */
+    static int c_TrisRendered(VM *vm, Value *args, int)
+    {
+        args[0] = val_int((long long)world_for(vm)->renderStats().triangles);
+        return 1;
+    }
+
+    /* bbStats3D read a float[10] the D3D scene filled with driver-level
+       timings; there is no equivalent here, so only the entries this
+       renderer genuinely knows are answered and the rest return 0.
+       Index 1 is the original's own triangle count. */
+    static int c_Stats3D(VM *vm, Value *args, int)
+    {
+        const engine::MeshRenderer::Stats &s = world_for(vm)->renderStats();
+        switch ((int)arg_int(args[0]))
+        {
+        case 1: args[0] = val_float((float)s.triangles); break;
+        case 2: args[0] = val_float((float)s.drawCalls); break;
+        default: args[0] = val_float(0.0f); break;
+        }
+        return 1;
+    }
+
+    /* bbEntityInView: is any part of the entity inside the camera's
+       frustum? A mesh is tested by its bounding box's eight corners
+       brought into camera space; anything else (a pivot, a light) by its
+       single position, exactly as the original split it. */
+    static int c_EntityInView(VM *vm, Value *args, int)
+    {
+        (void)vm;
+        engine::Entity *e = entity_of(arg_int(args[0]));
+        engine::Entity *ce = entity_of(arg_int(args[1]));
+        engine::Camera *camera = ce ? ce->getCamera() : nullptr;
+        if (!e || !camera) { args[0] = val_int(0); return 1; }
+
+        const engine::Transform inv = -camera->getWorldTform();
+        engine::Model *model = e->getModel();
+        engine::MeshModel *mesh = model ? model->getMeshModel() : nullptr;
+        if (mesh)
+        {
+            const engine::Box &b = mesh->getBox();
+            const engine::Transform t = inv * e->getWorldTform();
+            const engine::Vector corners[8] = {
+                t * b.corner(0), t * b.corner(1), t * b.corner(2), t * b.corner(3),
+                t * b.corner(4), t * b.corner(5), t * b.corner(6), t * b.corner(7)};
+            args[0] = val_int(camera->getFrustum().cull(corners, 8) ? 1 : 0);
+            return 1;
+        }
+
+        const engine::Vector p[1] = {inv * e->getWorldPosition()};
+        args[0] = val_int(camera->getFrustum().cull(p, 1) ? 1 : 0);
+        return 1;
+    }
+
+    /* bbCameraProject: world point -> viewport pixel, the inverse of
+       CameraPick. Result goes in g_projected for ProjectedX/Y/Z to read,
+       the same one-shared-Vector handoff the original used. Returns 0
+       (and zeroes the vector) for a point behind the camera or past the
+       far plane, so a script can test before drawing. */
+    static engine::Vector g_projected;
+
+    static int c_CameraProject(VM *vm, Value *args, int)
+    {
+        (void)vm;
+        engine::Entity *entity = entity_of(arg_int(args[0]));
+        engine::Camera *camera = entity ? entity->getCamera() : nullptr;
+        if (!camera) { args[0] = val_int(0); return 1; }
+
+        const engine::Vector v = -camera->getWorldTform() *
+            engine::Vector(arg_float(args[1]), arg_float(args[2]), arg_float(args[3]));
+
+        int vpX, vpY, vpW, vpH;
+        camera->getViewport(&vpX, &vpY, &vpW, &vpH);
+        const float nr = camera->getFrustumNear();
+        const float nrW = camera->getFrustumWidth();
+        const float nrH = camera->getFrustumHeight();
+
+        if (camera->getProjMode() == engine::Camera::ProjOrtho)
+        {
+            g_projected = engine::Vector((v.x / nrW + 0.5f) * vpW, (0.5f - v.y / nrH) * vpH, nr);
+            args[0] = val_int(1);
+            return 1;
+        }
+
+        if (v.z > 0 && v.z <= camera->getFrustumFar())
+        {
+            g_projected = engine::Vector((v.x * nr / v.z / nrW + 0.5f) * vpW,
+                                         (0.5f - v.y * nr / v.z / nrH) * vpH, nr);
+            args[0] = val_int(1);
+            return 1;
+        }
+
+        g_projected = engine::Vector();
+        args[0] = val_int(0);
+        return 1;
+    }
+
+    static int c_ProjectedX(VM *, Value *args, int) { args[0] = val_float(g_projected.x); return 1; }
+    static int c_ProjectedY(VM *, Value *args, int) { args[0] = val_float(g_projected.y); return 1; }
+    static int c_ProjectedZ(VM *, Value *args, int) { args[0] = val_float(g_projected.z); return 1; }
+
     static int c_CameraPick(VM *vm, Value *args, int)
     {
         engine::Entity *entity = entity_of(arg_int(args[0]));
@@ -1279,9 +1471,17 @@ namespace bb3d
         {"EntityAutoFade%entity#near#far", c_EntityAutoFade},
         {"NameEntity%entity$name", c_NameEntity},
         {"$EntityName%entity", c_EntityName},
+        {"%CountChildren%entity", c_CountChildren},
+        {"%GetChild%entity%index", c_GetChild},
+        {"%GetParent%entity", c_GetParent},
+        {"%FindChild%entity$name", c_FindChild},
         {"$EntityClass%entity", c_EntityClass},
 
         {"AmbientLight#red#green#blue", c_AmbientLight},
+        {"HWMultiTex%enable", c_HWMultiTex},
+        {"%TrisRendered", c_TrisRendered},
+        {"#Stats3D%index", c_Stats3D},
+        {"%EntityInView%entity%camera", c_EntityInView},
         {"CameraRange%camera#near#far", c_CameraRange},
         {"CameraZoom%camera#zoom", c_CameraZoom},
         {"CameraViewport%camera%x%y%width%height", c_CameraViewport},
@@ -1318,6 +1518,10 @@ namespace bb3d
         {"RenderWorld#tween=1", c_RenderWorld},
         {"CaptureWorld", c_CaptureWorld},
         {"%CameraPick%camera#viewport_x#viewport_y", c_CameraPick},
+        {"%CameraProject%camera#x#y#z", c_CameraProject},
+        {"#ProjectedX", c_ProjectedX},
+        {"#ProjectedY", c_ProjectedY},
+        {"#ProjectedZ", c_ProjectedZ},
         {"%LinePick#x#y#z#dx#dy#dz#radius=0", c_LinePick},
         {"%EntityPick%entity#range", c_EntityPick},
         {"EntityPickMode%entity%pick_geometry%obscurer=1", c_EntityPickMode},

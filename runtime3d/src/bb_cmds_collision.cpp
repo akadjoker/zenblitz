@@ -10,6 +10,7 @@
 #include "runtime.h"
 #include "vm.h"
 #include "object.h"
+#include <cstdint>
 #include "engine/Platform.h"
 #include "engine/World.h"
 #include "engine/Object.h"
@@ -61,6 +62,23 @@ namespace bb3d
         if (!e) return 0;
         if (recursive) setTypeRecursive(e, type);
         else if (engine::Object *o = e->getObject()) o->setCollisionType(type);
+        return 0;
+    }
+
+    /* bbEntityBox: the box CollisionMethodBox sweeps against, in the
+       entity's own space. Built from a corner plus extents, exactly as
+       the original did - a Box seeded at (x,y,z) and grown to include
+       (x+w, y+h, z+d), so negative extents still give a valid box. */
+    static int c_EntityBox(VM *vm, Value *args, int nargs)
+    {
+        (void)vm; (void)nargs;
+        engine::Object *o = object_of(arg_int(args[0]));
+        if (!o) return 0;
+        const float x = arg_float(args[1]), y = arg_float(args[2]), z = arg_float(args[3]);
+        const float w = arg_float(args[4]), h = arg_float(args[5]), d = arg_float(args[6]);
+        engine::Box box(engine::Vector(x, y, z));
+        box.update(engine::Vector(x + w, y + h, z + d));
+        o->setCollisionBox(box);
         return 0;
     }
 
@@ -119,6 +137,36 @@ namespace bb3d
         (void)vm; (void)nargs;
         const engine::ObjCollision *c = collisionAt(arg_int(args[0]), arg_int(args[1]));
         args[0] = val_int(c ? handle_of(c->with) : 0);
+        return 1;
+    }
+
+    /* CollisionTime: where along the sweep the hit landed (0..1).
+       CollisionSurface/CollisionTriangle: which surface and which
+       triangle of it were hit - MeshCollider fills both while testing.
+       A hit against geometry with no triangles of its own (a terrain,
+       a sphere-vs-sphere hit) leaves them unset, exactly as the original
+       did, so a script gets 0 rather than a stale value. */
+    static int c_CollisionTime(VM *vm, Value *args, int nargs)
+    {
+        (void)vm; (void)nargs;
+        const engine::ObjCollision *c = collisionAt(arg_int(args[0]), arg_int(args[1]));
+        args[0] = val_float(c ? c->collision.time : 0.0f);
+        return 1;
+    }
+    static int c_CollisionSurface(VM *vm, Value *args, int nargs)
+    {
+        (void)vm; (void)nargs;
+        const engine::ObjCollision *c = collisionAt(arg_int(args[0]), arg_int(args[1]));
+        args[0] = val_int(c ? (long long)(std::intptr_t)c->collision.surface : 0);
+        return 1;
+    }
+    static int c_CollisionTriangle(VM *vm, Value *args, int nargs)
+    {
+        (void)vm; (void)nargs;
+        const engine::ObjCollision *c = collisionAt(arg_int(args[0]), arg_int(args[1]));
+        // index stays (unsigned short)~0 when nothing set it
+        const unsigned short none = (unsigned short)~0;
+        args[0] = val_int(c && c->collision.index != none ? (long long)c->collision.index : 0);
         return 1;
     }
 
@@ -185,10 +233,14 @@ namespace bb3d
     extern const zen::CommandDecl bb3d_cmds_collision[] = {
         {"EntityType%entity%collision_type%recursive=0", c_EntityType},
         {"EntityRadius%entity#x_radius#y_radius=0", c_EntityRadius},
+        {"EntityBox%entity#x#y#z#width#height#depth", c_EntityBox},
         {"Collisions%source_type%destination_type%method%response", c_Collisions},
         {"ClearCollisions", c_ClearCollisions},
         {"%CountCollisions%entity", c_CountCollisions},
         {"%CollisionEntity%entity%collision_index", c_CollisionEntity},
+        {"#CollisionTime%entity%collision_index", c_CollisionTime},
+        {"%CollisionSurface%entity%collision_index", c_CollisionSurface},
+        {"%CollisionTriangle%entity%collision_index", c_CollisionTriangle},
         {"#CollisionX%entity%collision_index", c_CollisionX},
         {"#CollisionY%entity%collision_index", c_CollisionY},
         {"#CollisionZ%entity%collision_index", c_CollisionZ},

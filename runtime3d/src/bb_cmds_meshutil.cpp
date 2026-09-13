@@ -15,6 +15,8 @@
 
 namespace bb3d { extern engine::Entity *entity_of(long long h); }
 
+namespace { constexpr float kDegToRad = 0.0174532925199432957692369076848861f; }
+
 namespace
 {
     inline long long arg_int(zen::Value v)
@@ -63,6 +65,52 @@ namespace bb3d
         return 0;
     }
 
+    /* bbRotateMesh/bbPositionMesh: bake a rotation or a translation into
+       the mesh's own vertices, rather than moving the entity that draws
+       it (RotateEntity/PositionEntity do that). Both are one
+       MeshModel::transform, exactly as the original wrote them. */
+    static int c_RotateMesh(VM *vm, Value *args, int nargs)
+    {
+        (void)vm; (void)nargs;
+        engine::MeshModel *m = mesh_of(arg_int(args[0]));
+        if (m) m->transform(blitz::rotationMatrix(arg_float(args[1]) * kDegToRad,
+                                                  arg_float(args[2]) * kDegToRad,
+                                                  arg_float(args[3]) * kDegToRad));
+        return 0;
+    }
+
+    static int c_PositionMesh(VM *vm, Value *args, int nargs)
+    {
+        (void)vm; (void)nargs;
+        engine::MeshModel *m = mesh_of(arg_int(args[0]));
+        if (m) m->transform(engine::Vector(arg_float(args[1]), arg_float(args[2]), arg_float(args[3])));
+        return 0;
+    }
+
+    /* Dimensions of the mesh's own bounding box, in its local space -
+       before any ScaleEntity the entity drawing it may carry. */
+    static int c_MeshWidth(VM *vm, Value *args, int nargs)
+    {
+        (void)vm; (void)nargs;
+        engine::MeshModel *m = mesh_of(arg_int(args[0]));
+        args[0] = val_float(m ? m->getBox().width() : 0.0f);
+        return 1;
+    }
+    static int c_MeshHeight(VM *vm, Value *args, int nargs)
+    {
+        (void)vm; (void)nargs;
+        engine::MeshModel *m = mesh_of(arg_int(args[0]));
+        args[0] = val_float(m ? m->getBox().height() : 0.0f);
+        return 1;
+    }
+    static int c_MeshDepth(VM *vm, Value *args, int nargs)
+    {
+        (void)vm; (void)nargs;
+        engine::MeshModel *m = mesh_of(arg_int(args[0]));
+        args[0] = val_float(m ? m->getBox().depth() : 0.0f);
+        return 1;
+    }
+
     static int c_FitMesh(VM *vm, Value *args, int nargs)
     {
         (void)vm;
@@ -96,6 +144,11 @@ namespace bb3d
         {"FlipMesh%mesh", c_FlipMesh},
         {"PaintMesh%mesh%brush", c_PaintMesh},
         {"ScaleMesh%mesh#x_scale#y_scale#z_scale", c_ScaleMesh},
+        {"RotateMesh%mesh#pitch#yaw#roll", c_RotateMesh},
+        {"PositionMesh%mesh#x#y#z", c_PositionMesh},
+        {"#MeshWidth%mesh", c_MeshWidth},
+        {"#MeshHeight%mesh", c_MeshHeight},
+        {"#MeshDepth%mesh", c_MeshDepth},
         {"FitMesh%mesh#x#y#z#width#height#depth%uniform=0", c_FitMesh},
         {"LightMesh%mesh#red#green#blue#range=0#x=0#y=0#z=0", c_LightMesh},
     };

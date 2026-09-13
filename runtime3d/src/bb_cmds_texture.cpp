@@ -122,6 +122,30 @@ namespace bb3d
         return 1;
     }
 
+    /* Dimensions of the texture's first frame, and the filename it was
+       loaded from (empty for a CreateTexture'd one, which has no file) -
+       the original read these off the CachedTexture behind the Texture. */
+    static int c_TextureWidth(VM *vm, Value *args, int)
+    {
+        (void)vm;
+        engine::Texture *t = texture_of(arg_int(args[0]));
+        args[0] = val_int(t ? t->width() : 0);
+        return 1;
+    }
+    static int c_TextureHeight(VM *vm, Value *args, int)
+    {
+        (void)vm;
+        engine::Texture *t = texture_of(arg_int(args[0]));
+        args[0] = val_int(t ? t->height() : 0);
+        return 1;
+    }
+    static int c_TextureName(VM *vm, Value *args, int)
+    {
+        engine::Texture *t = texture_of(arg_int(args[0]));
+        args[0] = val_obj((Obj *)vm->make_string(t ? t->getName().c_str() : ""));
+        return 1;
+    }
+
     // TextureBuffer(texture,frame): only a create()d texture has a canvas
     // to draw into (Texture::canvas is null for a load()ed one, same as
     // the original's getCanvas() needing color depth to draw with) - so
@@ -254,6 +278,16 @@ namespace bb3d
         engine::Entity *e = entity_of(arg_int(args[0]));
         engine::Model *m = e ? e->getModel() : nullptr;
         engine::Texture *t = texture_of(arg_int(args[1]));
+        // Uploading needs a live GL device: before Graphics3D (or after
+        // EndGraphics) Platform::device() dereferences a null mGpu and
+        // segfaults inside Image::ensureUploaded. The original guarded
+        // every 3D command with debug3d()'s "3D Graphics mode not set"
+        // runtime error rather than crashing - same thing here.
+        if (!platform_for(vm)->isOpen())
+        {
+            vm->runtime_error("3D Graphics mode not set");
+            return -1;
+        }
         if (m && t)
         {
             int frame = (int)arg_int(args[2]);
@@ -416,6 +450,9 @@ namespace bb3d
         {"%LoadTexture$file%flags=1", c_LoadTexture},
         {"%CreateTexture%width%height%flags=1%frames=1", c_CreateTexture},
         {"%TextureBuffer%texture%frame=0", c_TextureBuffer},
+        {"%TextureWidth%texture", c_TextureWidth},
+        {"%TextureHeight%texture", c_TextureHeight},
+        {"$TextureName%texture", c_TextureName},
         {"%LoadAnimTexture$file%flags%width%height%first%count", c_LoadAnimTexture},
         {"%LoadMaterial$file%flags=0%frame_width=0%frame_height=0%first_frame=0%frame_count=0", c_LoadMaterial},
         {"FreeTexture%texture", c_FreeTexture},

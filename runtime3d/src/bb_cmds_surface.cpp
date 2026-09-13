@@ -48,6 +48,18 @@ namespace bb3d
         return 1;
     }
 
+    /* bbFindSurface: the surface already drawn with this brush, or 0.
+       Lets a script add to an existing surface instead of creating a
+       second one with identical material state. */
+    static int c_FindSurface(VM *vm, Value *args, int nargs)
+    {
+        (void)vm; (void)nargs;
+        engine::MeshModel *mesh = mesh_of(arg_int(args[0]));
+        engine::Brush *brush = (engine::Brush *)(std::intptr_t)arg_int(args[1]);
+        args[0] = val_int(handle_of(mesh && brush ? mesh->findSurface(*brush) : nullptr));
+        return 1;
+    }
+
     static int c_AddVertex(VM *vm, Value *args, int nargs)
     {
         (void)vm; (void)nargs;
@@ -272,6 +284,7 @@ namespace bb3d
         {"%AddTriangle%surface%v0%v1%v2", c_AddTriangle},
         {"%CountSurfaces%mesh", c_CountSurfaces},
         {"%GetSurface%mesh%surface_index", c_GetSurface},
+        {"%FindSurface%mesh%brush", c_FindSurface},
         {"%CountVertices%surface", c_CountVertices},
         {"%CountTriangles%surface", c_CountTriangles},
         {"ClearSurface%surface%clear_vertices=1%clear_triangles=1", c_ClearSurface},
