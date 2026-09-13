@@ -1,0 +1,116 @@
+xfile_parse.c / xfile_mszip.c — vendored from Wine's d3dxof module
+(dlls/d3dxof/parsing.c and dlls/d3dxof/mszip.c), commit tracking
+wine-mirror/wine master as of 2026-09-13.
+
+License: LGPL 2.1 (Copyright 2004-2008 Christian Costa), carried in each
+file's header comment - do not strip it.
+
+What was kept: the tokenizer/parser (text and binary .x, both plain and
+MSZIP-compressed) and the MSZIP decompressor. Both are self-contained
+logic with no Windows API calls beyond a handful of primitive typedefs
+and two heap calls.
+
+What was NOT ported: dlls/d3dxof/d3dxof.c and main.c, the COM
+(IDirectXFile*/IUnknown/HRESULT) wrapper Wine built around the same
+parser. This engine's LoaderX (engine/src/world/LoaderX.cpp) calls the
+parser directly and walks the resulting xobject tree itself - there is
+no COM layer here for it to implement.
+
+Changes from upstream, all mechanical:
+ - Windows typedefs (BOOL, BYTE, WORD, DWORD, LPBYTE, LPVOID, LPCSTR,
+   LPSTR, ULONG, LONG, GUID) and TRUE/FALSE replaced by xfile_compat.h,
+   a small header with no Windows dependency.
+ - HRESULT return values replaced by a plain int error enum
+   (xfile_compat.h's XFILE_OK/XFILE_ERR_*), mapping 1:1 onto the four
+   DXFILEERR_* codes parsing.c actually returned.
+ - TRACE/WARN/ERR/FIXME (Wine's debug-channel logging) compiled out -
+   this engine has no equivalent trace level, and the checks they
+   guarded are all still enforced (the codepath still fails, just
+   silently instead of also logging).
+ - HeapAlloc(GetProcessHeap(), ...)/HeapFree -> malloc/free.
+ - stricmp -> a local case-insensitive compare (strcasecmp is POSIX-only;
+   this keeps the vendored file portable the way the rest of engine/ is).
+ - IDirectXFileImpl (the COM template registry) reduced to XFileTemplates,
+   a plain struct holding just the xtemplates[]/nb_xtemplates arrays
+   parsing.c actually reads through pdxf - every other field of the real
+   COM object was for interfaces this vendoring does not implement.
+ - check_buffer's first-grow memcpy(pdata, buf->pdata, buf->cur_pos_data)
+   copies 0 bytes from a NULL buf->pdata on the very first call - benign
+   in practice, but still undefined behaviour by the C standard, and
+   UBSan (which this project runs its Debug builds under) flags it.
+   Guarded with `if (buf->pdata)` before the copy; not present upstream.
+
+The default D3DRM template set (Header/Mesh/MeshFace/MeshMaterialList/
+Material/MeshTextureCoords/MeshNormals/MeshVertexColors/Frame/
+FrameTransformMatrix/Vector/Coords2d - registered by Blitz3D's own
+loader_x.cpp via D3DRM_XTEMPLATES before loading a file) is defined
+separately in xfile_templates.h, as plain text of the public "x file
+templates" - the same kind of format data this project already keeps for
+Blitz3D's own command signatures, not third-party source, so it carries
+no license header.
+
+IMPORTANT caller contract: xfile_parse.c's parse_template_members_list
+resolves a member whose type names another template (e.g. "array Vector
+vertices[nVertices]") by searching xtemplates[1..nb_xtemplates) - index 0
+is permanently reserved for the case-sensitive legacy type "indexColor"
+(this was set up once, at IDirectXFile creation, in the original COM
+object - see d3dxof.c's IDirectXFileImpl_Create). Call
+xfile_reserve_index_color() on a freshly-zeroed XFileTemplates before
+registering any real templates. Skipping this makes every "array
+SomeTemplate member[n]" member fail to resolve its type, silently
+breaking xfile_parse_templates() for any template set that references
+another template (which the default D3DRM set does throughout - Mesh
+references Vector and MeshFace, for instance).
+
+Second contract point, also load-bearing for LoaderX: an xobject's
+members[] array is transient scratch space for parse_object_members_list
+at the CURRENT nesting level only. When a member's type is itself a
+template (Mesh's "array Vector vertices[nVertices]"), parsing that
+member recurses back into parse_object_members_list on the SAME xobject,
+which overwrites members[]/nb_members with the nested template's own
+layout. So members[] read back once the whole object has finished
+parsing reflects whatever was parsed last (typically the final nested
+member), not the top-level layout - reading pool[0].members[1] after
+parsing a Mesh gets garbage, not "vertices".
+
+This is not a vendoring bug: it is how the original COM object worked
+too (IDirectXFileData::GetData(szMember) only made sense called right
+after IDirectXFileData::GetNextObject returned that specific level, in
+that specific streaming order), and it is exactly why loader_x.cpp never
+calls GetData with a member name for a Mesh - it calls GetData(NULL),
+which returns the object's raw bytes (root->pdata + pos_data) as one
+blob, and walks them by hand following Mesh's own template layout
+(int num_verts=*data++; ...). LoaderX must do the same: read the root
+object's raw byte range and decode it according to the known template
+layout, not by indexing back into members[] after the fact.
+
+Verified with a standalone functional test parsing a real 3-vertex/
+1-face Mesh block text .x this way, under ASan+UBSan.
+
+Third contract point: a template that names another template as a
+member's type (Mesh's "array Vector vertices[...]", MeshFaceWraps'
+"array Boolean2d ...") can only reference a template ALREADY registered
+- parse_template_members_list searches xtemplates[1..nb_xtemplates), and
+nb_xtemplates is only incremented once the referencing template's own
+parse_template() call returns. So the standard D3DRM template block
+text passed to xfile_parse_templates() must declare templates in
+dependency order (Vector/Coords2d/ColorRGB(A)/Boolean before
+MeshFaceWraps/Mesh/MeshVertexColors/etc.), not any order a spec lists
+them in - getting this wrong makes registration of a LATER template in
+the same block fail, not just the member that has a bad forward
+reference.
+
+Fourth, a real-world note rather than a contract point: text .x objects
+pack fields with no padding (parse_object_members_list writes a WORD
+right after a DWORD, a pointer right after a WORD, etc.), so casting
+pdata + some offset to DWORD*/float*/pointer-type and dereferencing it -
+which is exactly what loader_x.cpp's parseMesh and every other original
+Blitz3D .x/.b3d/.3ds reader does - hits genuinely misaligned addresses.
+UBSan's alignment check (not the default build) flags this; it is
+harmless on x86/x86-64 (unaligned access works, just slower) and was
+already present in the original Wine parser and every Blitz3D-era
+loader this project has ported so far, not something introduced by
+vendoring. Confirmed reading a real production asset,
+assets/tiny.x (a 1.5MB text .x, skinned mesh: 4432 vertices, 6841
+faces, 48 frames, 35 SkinWeights blocks, one Material, one top-level
+AnimationSet) end to end with the standard template set above.

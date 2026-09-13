@@ -131,7 +131,13 @@ namespace engine
                     // STRING filename; - a string member is stored as a
                     // pointer into buf->pstrings, written by parse_object
                     BYTE *tp = rawData(child);
-                    const char *filename = *(const char **)tp;
+                    // memcpy, not a pointer cast: pdata is a packed byte
+                    // stream whose offsets are only 4-byte stepped, so
+                    // the stored pointer is not guaranteed to be aligned
+                    // for a direct load (parse_object writes it the same
+                    // way).
+                    const char *filename = nullptr;
+                    std::memcpy(&filename, tp, sizeof(filename));
                     Texture *tex = Texture::load(filename, 0);
                     if (tex)
                     {
