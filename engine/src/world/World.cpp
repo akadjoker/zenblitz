@@ -2,6 +2,7 @@
 #include <SDL2/SDL.h>
 #include "engine/Profiler.h"
 #include "engine/MeshModel.h"
+#include "engine/Terrain.h"
 #include <ct/sort.hpp>
 #include <cmath>
 
@@ -130,9 +131,71 @@ namespace engine
         return collObj;
     }
 
+    /* Lift src clear of any terrain it is already buried in.
+
+       The swept-sphere test cannot do this itself: triangleCollide()
+       backface-culls and update() rejects a contact behind the plane, so
+       geometry an entity is already inside is invisible to it. That is
+       fine while the world is static - an entity can only get inside by
+       tunnelling through in one step - but ModifyTerrain raises ground
+       *under* whatever is standing on it, and from then on the entity is
+       inside the terrain with no way out: every later sweep sees nothing
+       and it falls through the level.
+
+       Terrain is the one collidable whose surface height is a cheap
+       direct lookup, so the fix stays local to it: sample the height
+       under the entity and, if it sits below that surface plus its
+       radius, put it back on top. Only ever moves the entity up, only
+       when it is already through the surface, and leaves the sweep to do
+       the real work in every normal frame. */
+    void World::depenetrateTerrain(Object *src)
+    {
+        const ct::Vector<CollInfo> &collinfos = mCollInfo[src->getCollisionType()];
+        const float radius = src->getCollisionRadii().y;
+
+        for (size_t ci = 0; ci < collinfos.size(); ++ci)
+        {
+            const ct::Vector<Object *> &dstObjs = mObjsByType[collinfos[ci].dstType];
+            for (size_t di = 0; di < dstObjs.size(); ++di)
+            {
+                if (dstObjs[di] == src) continue;
+                Model *model = dstObjs[di]->getModel();
+                Terrain *terrain = model ? model->getTerrain() : nullptr;
+                if (!terrain) continue;
+
+                const Transform &tf = dstObjs[di]->getPrevWorldTform();
+                /* Test where this frame's sweep STARTS, never where it is
+                   headed. Using the destination and writing it back to
+                   both ends would collapse the sweep to a point - sv == dv
+                   - and collide() would return having thrown the frame's
+                   whole movement away, pinning the entity in place. */
+                const Vector from = src->getPrevWorldTform().v;
+                const Vector local = -tf * from;
+
+                const float size = (float)terrain->getSize();
+                if (local.x < 0 || local.x > size || local.z < 0 || local.z > size) continue;
+
+                /* Surface height in world space, via the same transform
+                   the collision mesh is built through, so a scaled or
+                   offset terrain lands in the right place. */
+                const float surfaceY = (tf * Vector(local.x, terrain->heightAtPoint(local.x, local.z),
+                                                    local.z)).y;
+                const float restY = surfaceY + radius;
+                if (from.y >= restY) continue;
+
+                /* Only the start of the sweep moves up; the destination is
+                   left alone so the sweep still carries this frame's own
+                   movement and the normal collision resolves it. */
+                src->setPrevWorldPosition(Vector(from.x, restY, from.z));
+            }
+        }
+    }
+
     void World::collide(Object *src)
     {
         static const int MAX_HITS = 10;
+
+        depenetrateTerrain(src);
 
         Vector dv = src->getWorldTform().v;
         Vector sv = src->getPrevWorldTform().v;
@@ -364,6 +427,7 @@ namespace engine
                 cam->getViewport(&dc.vpX, &dc.vpY, &dc.vpW, &dc.vpH);
                 dc.boneSlot = -1;
                 dc.clear = clear;
+                dc.flippedTris = mFlippedTris;
                 mDrawCalls.push_back(dc);
             }
 
@@ -473,10 +537,18 @@ namespace engine
         {
             const Transform &t = mirror->getRenderTform();
             mCamTform = t * Transform(blitz::Matrix(Vector(1, 0, 0), Vector(0, -1, 0), Vector(0, 0, 1))) * -t * cam->getRenderTform();
+            // The reflection is a negative-determinant transform, so every
+            // triangle reaches the rasteriser wound the other way round and
+            // back-face culling would discard exactly the faces that should
+            // show. Cull the front face for this pass instead - the same
+            // gx_scene->setFlippedTris(true) the original pairs with this
+            // very matrix in world.cpp's own render().
+            mFlippedTris = true;
         }
         else
         {
             mCamTform = cam->getRenderTform();
+            mFlippedTris = false;
         }
 
         const Transform &invCam = -mCamTform;
@@ -571,6 +643,7 @@ namespace engine
             dc.vpW = mPendingCamera.vpW; dc.vpH = mPendingCamera.vpH;
             dc.boneSlot = mod->boneSlot();
             dc.clear = 0;
+            dc.flippedTris = mFlippedTris;
             mDrawCalls.push_back(dc);
         }
         q.clear();
@@ -619,6 +692,10 @@ namespace engine
                 dev.setViewport(vp);
                 lastVpX = dc.vpX; lastVpY = dc.vpY; lastVpW = dc.vpW; lastVpH = dc.vpH;
             }
+            // Set per call, not per pass: the mirror and normal passes both
+            // queue into this one list, so the winding a call needs is the
+            // one recorded when it was queued.
+            mRenderer.setFlippedTris(dc.flippedTris);
             if (dc.clear)
                 mRenderer.drawClear(dev, (int)k, (dc.clear & 1) != 0, (dc.clear & 2) != 0);
             else
