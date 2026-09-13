@@ -826,6 +826,27 @@ namespace bb3d
         }
     }
 
+    /* bbLoadMesh's collapseMesh: LoadMesh hands back a single flat mesh a
+       script can ScaleMesh/FlipMesh/FitMesh and test with
+       MeshesIntersect, not the Frame/node hierarchy the file happens to
+       be built from - LoadAnimMesh is the command that keeps that.
+       Each child's surfaces are baked into world space and folded into
+       the destination, then the child is discarded. LoaderX already does
+       this inside itself; .3ds and .b3d did not, so a multi-part model
+       loaded as a root with no surfaces of its own (pong3d.bb's paddles
+       reported 0 vertices, and MeshesIntersect never fired). */
+    static void collapse_mesh(engine::MeshModel *dest, engine::Entity *e)
+    {
+        while (e->children()) collapse_mesh(dest, e->children());
+        if (engine::Model *m = e->getModel())
+            if (engine::MeshModel *t = m->getMeshModel())
+            {
+                t->transform(e->getWorldTform());
+                dest->add(*t);
+            }
+        delete e;
+    }
+
     static int c_LoadMesh(VM *vm, Value *args, int nargs)
     {
         (void)nargs;
@@ -849,8 +870,16 @@ namespace bb3d
             // having to call LoaderMatrix itself.
             static const engine::Transform kConv3ds(
                 blitz::Matrix(blitz::Vector(1, 0, 0), blitz::Vector(0, 0, 1), blitz::Vector(0, 1, 0)));
+            // HintCollapse like every other format: bbLoadMesh always
+            // asked for it and then folded the result into one flat mesh
+            // (see the .x branch below). Without it a multi-part .3ds
+            // came back as a hierarchy whose root had no surfaces at all,
+            // so CountSurfaces/CountVertices reported 0 and
+            // MeshesIntersect had nothing to test - pong3d.bb never
+            // registered a single bounce.
             engine::LoaderB3DS loader;
-            e = loader.load(file, kConv3ds, 0, &platform_for(vm)->device());
+            e = loader.load(file, kConv3ds, engine::MeshLoader::HintCollapse,
+                            &platform_for(vm)->device());
         }
         else if (ext == "x")
         {
@@ -885,7 +914,8 @@ namespace bb3d
             // LoadMesh in the original (only .b3d/.3ds/.x were ever real
             // mesh formats it dispatched by extension).
             engine::LoaderB3D loader;
-            e = loader.load(file, engine::Transform(), 0, &platform_for(vm)->device());
+            e = loader.load(file, engine::Transform(), engine::MeshLoader::HintCollapse,
+                            &platform_for(vm)->device());
         }
 
         if (!e)
@@ -895,6 +925,17 @@ namespace bb3d
             zen::backend_log(vm->backend(), zen::LOG_WARN, msg);
             args[0] = val_int(0);
             return 1;
+        }
+        // MD2 is its own animated model type, not a mesh hierarchy, so
+        // it is handed back as-is; everything else is folded flat.
+        if (!e->getModel() || !e->getModel()->getMD2Model())
+        {
+            engine::MeshModel *flat = new engine::MeshModel();
+            while (e->children()) collapse_mesh(flat, e->children());
+            if (engine::Model *m = e->getModel())
+                if (engine::MeshModel *t = m->getMeshModel()) flat->add(*t);
+            delete e;
+            e = flat;
         }
         insert_entity(e, parent);
         args[0] = val_int(store_entity(e));
