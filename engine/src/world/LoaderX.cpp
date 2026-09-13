@@ -48,6 +48,9 @@ namespace engine
         // still-live earlier mesh is still drawing with (the bug this
         // comment is here to stop someone reintroducing).
         ct::Vector<Texture *> g_textures;
+        // filename -> already-loaded Texture, so a file named by several
+        // materials is decoded and uploaded once (see readMaterial)
+        ct::HashMap<ct::String, Texture *> g_textureByName;
         // Backing storage for parse_buffer::pxo_globals: one entry per
         // top-level object parsed so far in this file, so a nested
         // "{ObjectName}" reference (xfile_parse.c's parse_object_parts,
@@ -138,14 +141,35 @@ namespace engine
                     // way).
                     const char *filename = nullptr;
                     std::memcpy(&filename, tp, sizeof(filename));
-                    Texture *tex = Texture::load(filename, 0);
+                    // Materials routinely name the same file (castle1.x
+                    // uses castlest.jpg for most of its 20 surfaces), and
+                    // since nothing here ever releases a Texture, loading
+                    // it once per material meant decoding and uploading
+                    // the same image several times over and keeping every
+                    // copy alive. Reuse the one already loaded.
+                    Texture *tex = nullptr;
+                    if (filename)
+                    {
+                        ct::String key(filename);
+                        if (Texture **hit = g_textureByName.find(key)) tex = *hit;
+                        else
+                        {
+                            tex = Texture::load(filename, 0);
+                            if (tex) g_textureByName.put(key, tex);
+                        }
+                    }
                     if (tex)
                     {
                         if (g_dev) brush.setTexture(0, BrushTexture::fromTexture(*g_dev, tex, 0));
                         brush.setColor(Vector(1, 1, 1));
                         // kept alive in g_textures (see its declaration) -
-                        // not released here, unlike a plain load-and-drop
-                        g_textures.push_back(tex);
+                        // not released here, unlike a plain load-and-drop.
+                        // Only the first load of a given file adds an
+                        // entry; repeats reuse the cached Texture above.
+                        bool known = false;
+                        for (size_t q = 0; q < g_textures.size(); ++q)
+                            if (g_textures[q] == tex) { known = true; break; }
+                        if (!known) g_textures.push_back(tex);
                     }
                 }
             }
@@ -201,9 +225,21 @@ namespace engine
                     for (DWORD k = 0; k < nFaceIdx && k < numFaces; ++k)
                         faces[k].matIndex = (int)faceIdx[k];
 
+                    // Materials are usually declared once at the top of
+                    // the file and named here by a "{name}" reference,
+                    // which the parser turns into a stub child carrying
+                    // only ptarget - the stub has no type of its own, so
+                    // a plain isTemplate() check misses every one of them
+                    // and the mesh collapses onto a single default
+                    // material with no texture (castle1.x: 4 materials,
+                    // 1 surface). Follow ptarget, same as parseAnim.
                     for (ULONG j = 0; j < child->nb_children; ++j)
-                        if (isTemplate(child->children[j], "Material"))
-                            mats.push_back(readMaterial(child->children[j]));
+                    {
+                        xobject *mc = child->children[j];
+                        if (mc->ptarget) mc = mc->ptarget;
+                        if (isTemplate(mc, "Material"))
+                            mats.push_back(readMaterial(mc));
+                    }
                 }
                 else if (isTemplate(child, "MeshTextureCoords"))
                 {
@@ -392,6 +428,9 @@ namespace engine
         MeshModel *parseTopLevel(parse_buffer &buf, bool collapse, bool animOnly)
         {
             MeshModel *root = new MeshModel();
+            // raw buffers of every top-level object, freed together at
+            // the end - see the push_back below for why
+            ct::Vector<BYTE *> pending;
 
             while (xfile_check_token(&buf) != XFILE_TOKEN_NONE)
             {
@@ -442,11 +481,17 @@ namespace engine
                     if (!collapse) parseAnimSet(top);
                 }
 
-                // every field this top-level object's subtree held has
-                // now been copied out (into Surface::Vertex data or an
-                // Animation's keys) - its raw byte buffer is done
-                free(top->pdata);
+                // Deferred, not freed here: a later top-level object can
+                // name an earlier one with a "{name}" reference, which
+                // resolves to a pointer straight into that object's own
+                // buffer (a Mesh's MeshMaterialList naming Materials
+                // declared at the top of the file - castle1.x does
+                // exactly this). Freeing as we go left those references
+                // dangling. Everything is released together once the
+                // whole file is parsed.
+                pending.push_back(top->pdata);
             }
+            for (size_t k = 0; k < pending.size(); ++k) free(pending[k]);
             return root;
         }
 

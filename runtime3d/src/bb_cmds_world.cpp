@@ -1090,14 +1090,13 @@ namespace bb3d
     static int c_UpdateWorld(VM *vm, Value *args, int nargs)
     {
         (void)nargs;
-        // UpdateWorld.htm: anim_speed# is "a master control for animation
-        // speed... a value of 1 will animate entities at their usual
-        // animation speed" - a multiplier on the engine's own measured
-        // frame time, not a raw elapsed-seconds value the script has to
-        // supply. Blitz3D measured real time itself; a script calling
-        // bare UpdateWorld (the documented/universal idiom) never passed
-        // a delta-time and never had to.
-        world_for(vm)->update(platform_for(vm)->getDeltaTime() * arg_float(args[0]));
+        // bbUpdateWorld passes its argument straight to World::update -
+        // Blitz3D animation is counted in frames, not seconds, and the
+        // parameter defaults to 1 meaning "advance one animation frame
+        // per call". Scaling it by real elapsed seconds (~0.003) instead
+        // makes a 20-frame animation take a minute and a half and look
+        // frozen, which is what castle.bb's running player hit.
+        world_for(vm)->update(arg_float(args[0]));
         return 0;
     }
 
