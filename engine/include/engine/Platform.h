@@ -31,6 +31,10 @@ namespace engine
         void setTargetFPS(int fps) { mDevice.setTargetFPS(fps); }
         void setVSync(bool on) { mDevice.setVSync(on); }
         bool isVSync() const { return mDevice.isVSync(); }
+        // Real seconds since the previous Flip - UpdateWorld's anim_speed#
+        // is a multiplier on this, not a raw elapsed-time value the
+        // script supplies itself (see UpdateWorld's own doc comment).
+        float getDeltaTime() const { return mDevice.getDeltaTime(); }
 
         void setClearColor(float r, float g, float b);
         void beginFrame();
@@ -46,8 +50,8 @@ namespace engine
         void endWorldRender();
 
         gpu::Device &device() { return mGraphics.device(); }
-        kx::ShaderDialect shaderDialect() const { return mGraphics.shaderDialect(); }
-        kx::BatchRenderer &batch() { return mBatch; }
+        ShaderDialect shaderDialect() const { return mGraphics.shaderDialect(); }
+        BatchRenderer &batch() { return mBatch; }
 
         /* ARGB, 0 outside the window. (x,y) is top-left like every other
            screen coordinate the engine uses; internally flipped to sample
@@ -60,18 +64,36 @@ namespace engine
         bool keyDown(int dik) const;
         bool keyHit(int dik);
         void flushKeyHits();
+        /* gxDevice's key queue: every press is pushed as the ASCII value
+           GetKey returns, and read back one at a time until empty (0).
+           Blitz3D's own queue held 32 entries. */
+        int popKey();
+        /* the same queue for the mouse, holding button numbers */
+        int popMouseButton();
 
         int mouseX() const { return mMouseX; }
         int mouseY() const { return mMouseY; }
         bool mouseDown(int button) const;
+        /* gxDevice counted presses between reads and cleared the count
+           on read, which is what MouseHit returns. */
+        int mouseHit(int button);
+        void flushMouseHits();
+        /* SDL reports wheel notches; DirectInput reported 120 per notch
+           and Blitz3D divided by 120, so the notch count is what MouseZ
+           means. Cumulative since the window opened, as gxDevice's axis. */
+        int mouseZ() const { return mMouseZ; }
+        /* false when there is no window to warp inside, so callers do
+           not record a move that never happened */
+        bool moveMouse(int x, int y);
+        void showPointer(bool visible);
 
         double milliSecs() const;
         void pumpEvents();
 
     private:
-        kx::Device mDevice;
-        kx::Graphics mGraphics;
-        kx::BatchRenderer mBatch;
+        Device mDevice;
+        Graphics mGraphics;
+        BatchRenderer mBatch;
         bool mOpen = false;
         float mClearR = 0, mClearG = 0, mClearB = 0;
 
@@ -79,6 +101,16 @@ namespace engine
         bool mKeyHitState[kMaxDIK] = {};
         int mMouseX = 0, mMouseY = 0;
         bool mMouseState[4] = {};
+        int mMouseHitState[4] = {};
+        int mMouseZ = 0;
+
+        static const int kQueueSize = 32;
+        int mKeyQueue[kQueueSize] = {};
+        int mKeyPut = 0, mKeyGet = 0;
+        int mButtonQueue[kQueueSize] = {};
+        int mButtonPut = 0, mButtonGet = 0;
+        void pushKey(int ascii);
+        void pushButton(int button);
 
         void handleEvent(const void *sdlEvent);
     };

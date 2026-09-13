@@ -1,14 +1,28 @@
 #include "engine/Texture.h"
 #include "engine/FilePath.h"
 #include <SDL2/SDL_rwops.h>
+#include <algorithm>
+#include <utility>
 
 namespace engine
 {
     namespace
     {
-        std::string g_texturePath;
+        ct::String g_texturePath;
 
-        bool fileExists(const std::string &path)
+        // Full mip chain length for a width x height base level - same
+        // floor(log2(max(w,h)))+1 the GL backend uses to cap mipCount
+        // (gpu::maximumMipCount), so a full chain here never gets rejected
+        // by createTexture as "too many levels".
+        std::uint32_t fullMipCount(std::uint32_t w, std::uint32_t h)
+        {
+            std::uint32_t largest = std::max(w, h);
+            std::uint32_t count = 0;
+            while (largest) { ++count; largest >>= 1; }
+            return count ? count : 1;
+        }
+
+        bool fileExists(const ct::String &path)
         {
             SDL_RWops *f = SDL_RWFromFile(path.c_str(), "rb");
             if (!f) return false;
@@ -17,7 +31,7 @@ namespace engine
         }
     }
 
-    void setTexturePath(const std::string &dir)
+    void setTexturePath(const ct::String &dir)
     {
         g_texturePath = dir;
         if (!g_texturePath.empty())
@@ -27,37 +41,54 @@ namespace engine
         }
     }
 
-    std::string resolveTexturePath(const std::string &file)
+    ct::String resolveTexturePath(const ct::String &file)
     {
         if (!g_texturePath.empty())
         {
-            std::string candidate = resolveCaseInsensitive(g_texturePath + file);
+            ct::String candidate = resolveCaseInsensitive(g_texturePath + file);
             if (fileExists(candidate)) return candidate;
         }
         return resolveCaseInsensitive(file);
     }
 
-    Texture *Texture::load(const std::string &file, int flags)
+    Texture *Texture::load(const ct::String &file, int flags)
     {
         Texture *t = new Texture();
         t->mName = file;
         t->mFlags = flags;
-        zengl::Pixmap p;
+        Pixmap p;
         if (!p.load(resolveTexturePath(file).c_str()))
         {
             delete t;
             return nullptr;
         }
         t->mTransparent = p.has_alpha();
-        t->mFrames.push_back(std::move(p));
+        t->mImage.addFrame(std::move(p));
         return t;
     }
 
-    Texture *Texture::loadAnim(const std::string &file, int flags, int w, int h, int first, int count)
+    Texture *Texture::loadFromMemory(const ct::String &name, const unsigned char *data, unsigned size,
+                                     int flags)
+    {
+        Texture *t = new Texture();
+        t->mName = name;
+        t->mFlags = flags;
+        Pixmap p;
+        if (!data || !p.load_from_memory(data, size))
+        {
+            delete t;
+            return nullptr;
+        }
+        t->mTransparent = p.has_alpha();
+        t->mImage.addFrame(std::move(p));
+        return t;
+    }
+
+    Texture *Texture::loadAnim(const ct::String &file, int flags, int w, int h, int first, int count)
     {
         if (count < 1 || first < 0 || w <= 0 || h <= 0) return nullptr;
 
-        zengl::Pixmap sheet;
+        Pixmap sheet;
         if (!sheet.load(resolveTexturePath(file).c_str())) return nullptr;
 
         int fpr = sheet.width / w;
@@ -72,53 +103,66 @@ namespace engine
         {
             int idx = first + k;
             int srcX = (idx % fpr) * w, srcY = (idx / fpr) * h;
-            zengl::IntRect rect{srcX, srcY, w, h};
-            zengl::Pixmap frame(sheet, rect);
-            t->mFrames.push_back(std::move(frame));
+            IntRect rect{srcX, srcY, w, h};
+            Pixmap frame(sheet, rect);
+            t->mImage.addFrame(std::move(frame));
         }
         return t;
     }
 
-    Texture::~Texture()
+    Texture *Texture::create(int w, int h, int flags, int count)
     {
-        if (mGpuOwner)
-            for (size_t k = 0; k < mGpuFrames.size(); ++k)
-                if (mGpuFrames[k].valid()) mGpuOwner->destroy(mGpuFrames[k]);
+        if (w <= 0 || h <= 0 || count < 1) return nullptr;
+
+        Texture *t = new Texture();
+        t->mName = "";
+        t->mFlags = flags;
+        // TexAlpha with no TexMask: a blank alpha-capable canvas starts
+        // fully transparent, same as the original's CreateTexture - a
+        // script Cls's it to whatever it wants before ever showing it.
+        // Otherwise (the common case) it starts opaque black, exactly
+        // like a fresh BackBuffer before the first Cls.
+        const bool alpha = (flags & TexAlpha) != 0;
+        t->mTransparent = alpha;
+        for (int k = 0; k < count; ++k)
+        {
+            Pixmap p(w, h, 4);
+            p.fill(0, 0, 0, alpha ? 0 : 255);
+            t->mImage.addFrame(std::move(p));
+        }
+        return t;
+    }
+
+    Texture::~Texture() {}
+
+    ImageFrame *Texture::canvas(int frame)
+    {
+        return frame >= 0 && frame < mImage.frameCount() ? &mImage.frame(frame) : nullptr;
     }
 
     bool Texture::ensureUploaded(gpu::Device &dev, int frame)
     {
-        if (mFrames.empty()) return false;
-        if (frame < 0) frame = 0;
-        if (frame >= (int)mFrames.size()) frame = (int)mFrames.size() - 1;
-
-        mGpuFrames.resize(mFrames.size());
-        if (mGpuFrames[frame].valid()) return true;
-
-        zengl::Pixmap &src = mFrames[frame];
-        zengl::Pixmap *rgba = src.components == 4 ? nullptr : src.convert_to_rgba();
-        zengl::Pixmap *use = rgba ? rgba : &src;
-
-        gpu::TextureDesc desc;
-        desc.width = (std::uint32_t)use->width;
-        desc.height = (std::uint32_t)use->height;
-        desc.format = gpu::Format::RGBA8;
-        desc.initialData = {use->pixels, (size_t)use->get_size()};
-        desc.debugName = "bb.texture";
-        // CopySource lets tools/tests read texture contents back via
-        // Device::readTexture; harmless for a normal sampled texture.
-        desc.usage = gpu::TextureUsageSampled | gpu::TextureUsageCopySource;
-
-        mGpuFrames[frame] = dev.createTexture(desc);
-        mGpuOwner = &dev;
-
-        delete rgba;
-        return mGpuFrames[frame].valid();
+        // TexMipmap (LoadTexture's flags bit 8, opt-in like the original):
+        // request a full mip chain so the GL backend's createTexture uses
+        // GL_LINEAR_MIPMAP_LINEAR and generates it from initialData right
+        // away (GLDeviceCommon.inl) - mipCount left at its default 1
+        // otherwise gets a single-level GL_LINEAR sample, which is what
+        // was aliasing/pixelating minified textures like a tiled terrain.
+        //
+        // Image::ensureUploaded already skips the reupload when the frame
+        // isn't dirty and already has a GPU texture - this is what makes
+        // painting into canvas(frame) via SetBuffer TextureBuffer(tex) and
+        // then re-showing the texture in 3D pick the new pixels up.
+        return mImage.ensureUploaded(dev, frame, (mFlags & TexMipmap) ? fullMipCount : nullptr);
     }
 
     gpu::TextureHandle Texture::handle(int frame) const
     {
-        if (frame < 0 || frame >= (int)mGpuFrames.size()) return gpu::TextureHandle();
-        return mGpuFrames[frame];
+        // Same out-of-range handling as ensureUploaded: Image::frame()
+        // clamps to a valid frame rather than returning null, so a script
+        // passing a bad frame index gets frame 0 (or the last one) instead
+        // of silently untextured geometry - this matches the old
+        // clamp-then-index behaviour LoaderX-era callers already rely on.
+        return mImage.frameCount() ? mImage.frame(frame).texture : gpu::TextureHandle();
     }
 }

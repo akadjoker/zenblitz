@@ -1,0 +1,41 @@
+cgltf.h — vendored from jkuhlmann/cgltf, version 1.14, unmodified.
+
+License: MIT (Copyright 2018 Johannes Kuhlmann), carried in the file's
+own trailing comment block - do not strip it.
+
+What this is: a single-header glTF 2.0 parser (JSON glTF and binary
+GLB, both text- and base64/bin-embedded buffers), C99, no dependency
+beyond the C standard library. `cgltf_parse`/`cgltf_parse_file` build a
+`cgltf_data` tree the caller walks directly (meshes/primitives/
+accessors/materials/nodes/skins/animations); `cgltf_load_buffers`
+resolves and reads external .bin/image URIs through the same options
+struct's file-read callback.
+
+Not vendored as source we own: unlike xfile (see ../xfile/VERSION),
+this file is used exactly as upstream ships it - no Windows-typedef
+translation was needed (cgltf is already portable C99), so there is
+nothing engine-specific to document about its internals here. Only one
+source file in this engine defines `CGLTF_IMPLEMENTATION` before
+including it (engine/src/world/LoaderGltf.cpp); every other includer
+gets declarations only.
+
+Caller contract LoaderGltf.cpp relies on:
+ - `cgltf_parse` alone does not read external buffer/image files -
+   `cgltf_load_buffers` must run afterwards, and this engine points its
+   `cgltf_options::file` callbacks at SDL_RWops instead of the default
+   fopen-based ones (see the "cross-platform I/O" project rule - no
+   direct fopen/std::ifstream anywhere in this engine).
+ - Accessor data (positions/normals/uvs/joints/weights/indices) is read
+   through `cgltf_accessor_unpack_floats`/`cgltf_accessor_unpack_indices`
+   rather than by hand-walking `buffer_view->buffer->data` + stride,
+   which also has to work for a sparse accessor and hits normalized
+   integer component types (UNSIGNED_BYTE/SHORT UVs and joint weights)
+   correctly without LoaderGltf re-deriving cgltf's own denormalization
+   table.
+ - `cgltf_validate` is NOT called - upstream's own docs call it "a
+   description of what would be considered valid, according to the
+   glTF spec", not a requirement for a parse to be usable; LoaderGltf
+   instead checks the specific fields it reads (a primitive with no
+   POSITION accessor, an out-of-range accessor index) and skips or
+   fails on those, the same defensive style LoaderB3D/LoaderX already
+   use for a malformed file.

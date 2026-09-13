@@ -21,6 +21,7 @@
 #include "engine/LoaderB3D.h"
 #include "engine/LoaderB3DS.h"
 #include "engine/LoaderX.h"
+#include "engine/LoaderGltf.h"
 #include "engine/Image.h"
 #include "engine/Sound.h"
 #include "engine/FilePath.h"
@@ -844,6 +845,14 @@ namespace bb3d
             e = loader.load(file, engine::Transform(), engine::MeshLoader::HintCollapse,
                             &platform_for(vm)->device());
         }
+        else if (ext == "gltf" || ext == "glb")
+        {
+            // Not an original Blitz3D format - see [[project-gltf-fbx-extension]].
+            // Same HintCollapse convention as .x above.
+            engine::LoaderGltf loader;
+            e = loader.load(file, engine::Transform(), engine::MeshLoader::HintCollapse,
+                            &platform_for(vm)->device());
+        }
         else
         {
             // .b3d and anything else fall back to the B3D loader, same as
@@ -904,6 +913,12 @@ namespace bb3d
             // Frame hierarchy (and animation keys) LoaderX parses so
             // Animate/SetAnimTime can walk it, same split as the .b3d path.
             engine::LoaderX loader;
+            entity = loader.load(file, engine::Transform(), 0, &platform_for(vm)->device());
+        }
+        else if (ext == "gltf" || ext == "glb")
+        {
+            // Same hierarchy-keeping split as .x above.
+            engine::LoaderGltf loader;
             entity = loader.load(file, engine::Transform(), 0, &platform_for(vm)->device());
         }
         else
@@ -1042,7 +1057,14 @@ namespace bb3d
     static int c_UpdateWorld(VM *vm, Value *args, int nargs)
     {
         (void)nargs;
-        world_for(vm)->update(arg_float(args[0]));
+        // UpdateWorld.htm: anim_speed# is "a master control for animation
+        // speed... a value of 1 will animate entities at their usual
+        // animation speed" - a multiplier on the engine's own measured
+        // frame time, not a raw elapsed-seconds value the script has to
+        // supply. Blitz3D measured real time itself; a script calling
+        // bare UpdateWorld (the documented/universal idiom) never passed
+        // a delta-time and never had to.
+        world_for(vm)->update(platform_for(vm)->getDeltaTime() * arg_float(args[0]));
         return 0;
     }
 
