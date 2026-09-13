@@ -32,7 +32,7 @@ namespace engine
         }
     }
 
-    MD2Rep::MD2Rep(const std::string &f)
+    MD2Rep::MD2Rep(const ct::String &f)
     {
         SDL_RWops *in = SDL_RWFromFile(resolveCaseInsensitive(f).c_str(), "rb");
         if (!in) return;

@@ -4,7 +4,7 @@
 #include <cstdarg>
 #include <cstdio>
 
-namespace kx
+namespace engine
 {
 
   namespace
@@ -102,4 +102,4 @@ namespace kx
     va_end(args);
   }
 
-} // namespace kx
+} // namespace engine

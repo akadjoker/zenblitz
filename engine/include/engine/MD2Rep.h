@@ -4,7 +4,7 @@
 #include "engine/GpuGeometry.h"
 #include "engine/Geom.h"
 #include <ct/vector.hpp>
-#include <string>
+#include <ct/string.hpp>
 
 namespace engine
 {
@@ -16,7 +16,7 @@ namespace engine
     class MD2Rep
     {
     public:
-        MD2Rep(const std::string &f);
+        MD2Rep(const ct::String &f);
         ~MD2Rep();
 
         bool valid() const { return mFrames > 0; }

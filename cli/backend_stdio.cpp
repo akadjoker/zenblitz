@@ -24,6 +24,10 @@ namespace zen
     static void sb_print(const char *s, int n, void *)
     {
         fwrite(s, 1, (size_t)n, stdout);
+        // stdout becomes block-buffered when the editor captures it through
+        // a pipe. Flush every Blitz Print/Write call so the Output panel can
+        // display messages while the program is still running.
+        fflush(stdout);
     }
     static void sb_log(int, const char *msg, void *)
     {
@@ -130,24 +134,58 @@ namespace zen
         return _getcwd(buf, sizeof(buf)) ? buf : "";
     }
 #else
+    /* Blitz3D shipped for Windows, where "\" is the path separator, and
+       real .bb source writes it that way - castle.bb's own ChangeDir "..\"
+       is typical. Here "\" is an ordinary filename character, so chdir()
+       looks for a directory literally called "..\", fails, and the script
+       carries on in the wrong directory with every later load silently
+       missing its asset. Rewrite the separator for the syscalls that take
+       a directory path; a real "\" in a POSIX directory name would be
+       unreachable this way, but matching what the .bb source means is
+       worth more than that. (Files go through engine's own
+       resolveCaseInsensitive(), which already normalises separators.) */
+    struct NativePath
+    {
+        char buf[4096];
+        explicit NativePath(const char *path)
+        {
+            size_t n = path ? strlen(path) : 0;
+            if (n >= sizeof(buf)) n = sizeof(buf) - 1;
+            for (size_t k = 0; k < n; ++k) buf[k] = path[k] == '\\' ? '/' : path[k];
+            buf[n] = '\0';
+        }
+        const char *c_str() const { return buf; }
+    };
     static int sb_path_type(const char *path, int64_t *size, void *)
     {
         struct stat st;
-        if (stat(path, &st) != 0) return PATH_NONE;
+        if (stat(NativePath(path).c_str(), &st) != 0) return PATH_NONE;
         if (size) *size = (int64_t)st.st_size;
         return S_ISDIR(st.st_mode) ? PATH_DIR : PATH_FILE;
     }
     static int sb_delete_file(const char *path, void *) { return remove(path) == 0; }
-    static ZenDir sb_open_dir(const char *path, void *) { return (ZenDir)opendir(path); }
+    static ZenDir sb_open_dir(const char *path, void *)
+    {
+        return (ZenDir)opendir(NativePath(path).c_str());
+    }
     static const char *sb_next_file(ZenDir d, void *)
     {
         struct dirent *e = readdir((DIR *)d);
         return e ? e->d_name : nullptr;
     }
     static void sb_close_dir(ZenDir d, void *) { closedir((DIR *)d); }
-    static int sb_create_dir(const char *path, void *) { return mkdir(path, 0777) == 0; }
-    static int sb_delete_dir(const char *path, void *) { return rmdir(path) == 0; }
-    static int sb_change_dir(const char *path, void *) { return chdir(path) == 0; }
+    static int sb_create_dir(const char *path, void *)
+    {
+        return mkdir(NativePath(path).c_str(), 0777) == 0;
+    }
+    static int sb_delete_dir(const char *path, void *)
+    {
+        return rmdir(NativePath(path).c_str()) == 0;
+    }
+    static int sb_change_dir(const char *path, void *)
+    {
+        return chdir(NativePath(path).c_str()) == 0;
+    }
     static const char *sb_current_dir(void *)
     {
         static char buf[4096];

@@ -359,36 +359,70 @@ namespace engine
             // level - the ROAM version this replaces tested down to
             // individual bintree leaves; a block is this scheme's
             // equivalent leaf granularity.
-            bool hit = false;
             const float invScale = 1.0f / (float)(mBlockSize - 1);
-            for (int v = 0; v < mBlockSize - 1 && !hit; ++v)
+            auto sampleAt = [&](float su, float sv) -> Vector
             {
-                for (int u = 0; u < mBlockSize - 1 && !hit; ++u)
+                const int px = (int)(su * mCellSize + 0.5f);
+                const int pz = (int)(sv * mCellSize + 0.5f);
+                return Vector(su * mCellSize, heightNorm(px, pz), sv * mCellSize);
+            };
+
+            // Two passes over the block's grid: every face first, edge and
+            // corner cylinders only if no face caught the sweep.
+            //
+            // This grid is far denser than what the ROAM implementation
+            // this replaced fed the same collision code. ROAM subdivided by
+            // geometric error, so flat ground stayed a couple of huge
+            // triangles and a sweep landed well inside a face. Here the
+            // leaf is always the full heightmap resolution, so a sphere of
+            // any useful radius spans several 1x1 cells and touches many
+            // shared edges. That matters because Collision::update() keeps
+            // a hit only when its t is strictly better than the one already
+            // recorded: the first triangle to report a given t owns the
+            // contact, and every later triangle reporting the same t is
+            // dropped as a tie. With faces and edges interleaved, an edge
+            // cylinder from a neighbouring cell routinely registers first
+            // and the real face - same t, but the normal that actually
+            // points out of the ground - loses the tie. The reported normal
+            // then points sideways and the sweep resolves against a wall
+            // that is not there, driving the entity through the terrain.
+            //
+            // Ordering the passes makes the face win the tie, and costs
+            // nothing when the sweep genuinely hits an edge or a crease
+            // between cells: pass two still runs, against the same
+            // Collision, and still finds it.
+            bool hit = false;
+            for (int pass = 0; pass < 2 && !hit; ++pass)
+            {
+                const bool facesOnly = (pass == 0);
+                for (int v = 0; v < mBlockSize - 1; ++v)
                 {
-                    const float u0 = minU + (maxU - minU) * u * invScale;
-                    const float u1 = minU + (maxU - minU) * (u + 1) * invScale;
-                    const float v0 = minV + (maxV - minV) * v * invScale;
-                    const float v1 = minV + (maxV - minV) * (v + 1) * invScale;
-                    auto sampleAt = [&](float su, float sv) -> Vector
+                    for (int u = 0; u < mBlockSize - 1; ++u)
                     {
-                        const int px = (int)(su * mCellSize + 0.5f);
-                        const int pz = (int)(sv * mCellSize + 0.5f);
-                        return Vector(su * mCellSize, heightNorm(px, pz), sv * mCellSize);
-                    };
-                    const Vector p00 = sampleAt(u0, v0), p10 = sampleAt(u1, v0);
-                    const Vector p01 = sampleAt(u0, v1), p11 = sampleAt(u1, v1);
-                    // Collision::triangleCollide backface-culls (rejects
-                    // when the ray hits the triangle from behind its own
-                    // plane normal, Collision.cpp:82) - winding has to
-                    // give an upward-facing normal for a Y-up terrain, the
-                    // same (v0, v2, v1) order the ROAM code this replaces
-                    // used (verified: Plane(p00,p11,p01) on a flat grid
-                    // works out to a downward normal with the other order).
-                    if (current->triangleCollide(line, radius, transform * p00, transform * p01, transform * p11))
-                        hit = true;
-                    else if (current->triangleCollide(line, radius, transform * p00, transform * p11,
-                                                       transform * p10))
-                        hit = true;
+                        const float u0 = minU + (maxU - minU) * u * invScale;
+                        const float u1 = minU + (maxU - minU) * (u + 1) * invScale;
+                        const float v0 = minV + (maxV - minV) * v * invScale;
+                        const float v1 = minV + (maxV - minV) * (v + 1) * invScale;
+                        const Vector p00 = sampleAt(u0, v0), p10 = sampleAt(u1, v0);
+                        const Vector p01 = sampleAt(u0, v1), p11 = sampleAt(u1, v1);
+                        // Collision::triangleCollide backface-culls (rejects
+                        // when the ray hits the triangle from behind its own
+                        // plane normal) - winding has to give an upward-facing
+                        // normal for a Y-up terrain, the same (v0, v2, v1)
+                        // order the ROAM code this replaces used.
+                        //
+                        // Both triangles of the cell are tested
+                        // unconditionally (not `else if`): the quad splits
+                        // along p00-p11 and a sweep landing near that diagonal
+                        // can touch both, so testing the second only when the
+                        // first misses would discard the nearer of the two.
+                        if (current->triangleCollide(line, radius, transform * p00, transform * p01,
+                                                      transform * p11, facesOnly))
+                            hit = true;
+                        if (current->triangleCollide(line, radius, transform * p00, transform * p11,
+                                                      transform * p10, facesOnly))
+                            hit = true;
+                    }
                 }
             }
             return hit;

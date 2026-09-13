@@ -6,7 +6,7 @@
 
 namespace engine
 {
-    MD2Model::MD2Model(const std::string &f) : mRep(new MD2Rep(f)) {}
+    MD2Model::MD2Model(const ct::String &f) : mRep(new MD2Rep(f)) {}
 
     MD2Model::MD2Model(const MD2Model &t) : Model(t), mRep(t.mRep)
     {

@@ -1,6 +1,6 @@
 #pragma once
 
-namespace kx
+namespace engine
 {
 
   enum class ShaderDialect
@@ -9,4 +9,4 @@ namespace kx
     GLSLES300
   };
 
-} // namespace kx
+} // namespace engine

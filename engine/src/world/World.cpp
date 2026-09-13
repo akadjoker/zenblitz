@@ -1,4 +1,5 @@
 #include "engine/World.h"
+#include <SDL2/SDL.h>
 #include "engine/Profiler.h"
 #include "engine/MeshModel.h"
 #include <ct/sort.hpp>
@@ -281,7 +282,7 @@ namespace engine
 
     void World::update(float elapsed)
     {
-        KX_PROFILE_SCOPE("World/Update");
+        ENGINE_PROFILE_SCOPE("World/Update");
         for (; !mUsedColls.empty(); mUsedColls.pop_back())
             mFreeColls.push_back(mUsedColls[mUsedColls.size() - 1]);
 
@@ -312,7 +313,7 @@ namespace engine
 
     void World::prepare(gpu::Device &dev, float tween)
     {
-        KX_PROFILE_SCOPE("World/Prepare");
+        ENGINE_PROFILE_SCOPE("World/Prepare");
         mOrdMods.clear();
         mUnordMods.clear();
         mVisible.clear();
@@ -342,6 +343,8 @@ namespace engine
 
         ct::sort(mOrdMods.begin(), mOrdMods.end(),
                  [](Model *a, Model *b) { return a->getOrder() < b->getOrder(); });
+
+        buildCullTree();
 
         mRenderer.setLights(mLights);
         mRenderer.beginFrame();
@@ -373,6 +376,95 @@ namespace engine
         mRenderer.flushUniforms(dev);
 
         for (size_t k = 0; k < mListeners.size(); ++k) mListeners[k]->renderListener();
+    }
+
+    /* Rebuilds the broad-phase tree from this frame's visible models.
+       A MeshModel's cull box is in local space, so it goes in transformed
+       by the model's render transform. Anything without a cull box (a
+       sprite, a terrain, a model whose box is empty) is not in the tree
+       and is visited every frame instead - being absent from the tree
+       must never hide something. */
+    void World::buildCullTree()
+    {
+        mAlwaysVisit.clear();
+
+        /* Match this frame's model list against the leaves already in the
+           tree. The list is rebuilt every frame by enumVisible(), but it
+           is the same models in the same order in all but the frames
+           where something is created, freed, hidden or shown - so walking
+           both in step keeps the common case to one compare per model,
+           and only a real mismatch pays for a rebuild of the tail. */
+        size_t slot = 0;
+        for (size_t k = 0; k < mUnordMods.size(); ++k)
+        {
+            Model *mod = mUnordMods[k];
+            MeshModel *mesh = mod->getMeshModel();
+            if (!mesh) { mAlwaysVisit.push_back(mod); continue; }
+            const Box &local = mesh->getCullBox();
+            if (local.empty()) { mAlwaysVisit.push_back(mod); continue; }
+
+            const Box world = mod->getRenderTform() * local;
+
+            if (slot < mCullEntries.size() && mCullEntries[slot].model == mod)
+            {
+                CullEntry &e = mCullEntries[slot];
+                /* only a moved or resized model touches the tree */
+                if (e.box.a != world.a || e.box.b != world.b)
+                {
+                    mCullTree.update(e.id, world);
+                    e.box = world;
+                }
+                ++slot;
+                continue;
+            }
+
+            /* the lists diverged: drop the stale tail and re-add from here */
+            for (size_t d = slot; d < mCullEntries.size(); ++d)
+                mCullTree.remove(mCullEntries[d].id);
+            mCullEntries.resize(slot);
+
+            CullEntry e;
+            e.model = mod;
+            e.box = world;
+            e.id = mCullTree.insert(world, mod);
+            mCullEntries.push_back(e);
+            ++slot;
+        }
+
+        /* models that vanished from the end of the list */
+        for (size_t d = slot; d < mCullEntries.size(); ++d)
+            mCullTree.remove(mCullEntries[d].id);
+        mCullEntries.resize(slot);
+    }
+
+    /* Asks the tree which models the camera frustum reaches.
+       Both sides use the same sign convention, so the planes go in as
+       they are: Frustum::cull rejects a box only when every corner sits
+       at a negative distance from one plane (negative is outside), and
+       intersectsConvex drops a node as soon as its nearest corner is
+       negative for one plane. Verified against the non-BVH path, which
+       draws the identical frame. */
+    void World::gatherVisible(const Frustum &worldFrustum, ct::Vector<Model *> &out)
+    {
+        out.clear();
+
+        Plane planes[6];
+        for (int k = 0; k < 6; ++k) planes[k] = worldFrustum.getPlane(k);
+
+        Vector points[8];
+        for (int k = 0; k < 8; ++k) points[k] = worldFrustum.getVertex(k);
+
+        struct Collect
+        {
+            ct::Vector<Model *> *out;
+            bool operator()(void *data)
+            {
+                out->push_back((Model *)data);
+                return false; /* keep going: we want every hit */
+            }
+        } collect{&out};
+
+        mCullTree.convexQuery(planes, 6, points, 8, collect);
     }
 
     void World::render(Camera *cam, Mirror *mirror, gpu::Device &dev)
@@ -423,9 +515,24 @@ namespace engine
             flushTransparent(dev);
         }
 
-        for (size_t k = 0; k < mUnordMods.size(); ++k)
+        /* the unordered models are the bulk of a scene, and the only
+           ones whose order does not matter - so this is where asking the
+           tree pays off. The ordered ones keep their exact sequence. */
+        gatherVisible(rc.getWorldFrustum(), mCullHits);
+        if (SDL_getenv("ZENBLITZ_NOBVH"))
         {
-            Model *mod = mUnordMods[k];
+            mCullHits.clear();
+            for (size_t k = 0; k < mCullEntries.size(); ++k) mCullHits.push_back(mCullEntries[k].model);
+        }
+        for (size_t k = 0; k < mCullHits.size(); ++k)
+        {
+            Model *mod = mCullHits[k];
+            if (!mod->doAutoFade(mCamTform.v)) continue;
+            render(mod, rc, dev);
+        }
+        for (size_t k = 0; k < mAlwaysVisit.size(); ++k)
+        {
+            Model *mod = mAlwaysVisit[k];
             if (!mod->doAutoFade(mCamTform.v)) continue;
             render(mod, rc, dev);
         }
@@ -499,7 +606,7 @@ namespace engine
 
     void World::draw(gpu::Device &dev)
     {
-        KX_PROFILE_SCOPE("World/Draw");
+        ENGINE_PROFILE_SCOPE("World/Draw");
         int lastVpX = -1, lastVpY = -1, lastVpW = -1, lastVpH = -1;
         for (size_t k = 0; k < mDrawCalls.size(); ++k)
         {

@@ -7,7 +7,7 @@
 // LSB = leftmost pixel.
 // ---------------------------------------------------------------------------
 
-namespace kx
+namespace engine
 {
 
 static const unsigned char kFont8x8[96][8] = {
@@ -109,4 +109,4 @@ static const unsigned char kFont8x8[96][8] = {
     {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}, // U+007F ()
 };
 
-} // namespace kx
+} // namespace engine

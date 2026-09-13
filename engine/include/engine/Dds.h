@@ -9,7 +9,7 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace zengl
+namespace engine
 {
 namespace dds
 {
@@ -50,6 +50,6 @@ void free(Image &image);
 const char *formatName(Format format);
 
 } // namespace dds
-} // namespace zengl
+} // namespace engine
 
 #endif // ZENGL_DDS_H

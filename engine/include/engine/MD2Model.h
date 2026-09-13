@@ -3,14 +3,14 @@
 
 #include "engine/Model.h"
 #include "engine/MD2Rep.h"
-#include <string>
+#include <ct/string.hpp>
 
 namespace engine
 {
     class MD2Model : public Model
     {
     public:
-        MD2Model(const std::string &filename);
+        MD2Model(const ct::String &filename);
         MD2Model(const MD2Model &t);
         ~MD2Model();
 

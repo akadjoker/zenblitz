@@ -95,9 +95,9 @@ namespace bb3d
     extern const zen::CommandDecl bb3d_cmds_meshutil[] = {
         {"FlipMesh%mesh", c_FlipMesh},
         {"PaintMesh%mesh%brush", c_PaintMesh},
-        {"ScaleMesh%mesh#xscale#yscale#zscale", c_ScaleMesh},
+        {"ScaleMesh%mesh#x_scale#y_scale#z_scale", c_ScaleMesh},
         {"FitMesh%mesh#x#y#z#width#height#depth%uniform=0", c_FitMesh},
-        {"LightMesh%mesh#red#green#blue#range=0#lightx=0#lighty=0#lightz=0", c_LightMesh},
+        {"LightMesh%mesh#red#green#blue#range=0#x=0#y=0#z=0", c_LightMesh},
     };
     extern const int bb3d_cmds_meshutil_count = (int)(sizeof(bb3d_cmds_meshutil) / sizeof(bb3d_cmds_meshutil[0]));
 }

@@ -1,4 +1,4 @@
 ct::containers headers vendored from https://github.com/akadjoker/containers
 commit 9f9b362 (2026-09-12)
 Only the headers libzen uses are copied: vector, string, sort, span,
-hashmap, slotmap, xml, detail/utils.
+hashmap, slotmap, xml, pool, detail/utils.

@@ -3,10 +3,18 @@ add_library(zenblitz_runtime3d STATIC
     src/bb_cmds_graphics.cpp
     src/bb_cmds_canvas.cpp
     src/bb_cmds_image.cpp
+    src/bb_cmds_buffer.cpp
+    src/bb_cmds_input.cpp
+    src/bb_cmds_gfxmode.cpp
+    src/bb_cmds_entityquery.cpp
     src/bb_cmds_world.cpp
     src/bb_cmds_texture.cpp
     src/bb_cmds_collision.cpp
     src/bb_cmds_meshutil.cpp
+    src/bb_cmds_surface.cpp
+    src/bb_cmds_sprite.cpp
+    src/bb_cmds_particle.cpp
+    src/bb_cmds_sound.cpp
 )
 target_include_directories(zenblitz_runtime3d PUBLIC include)
 target_link_libraries(zenblitz_runtime3d PUBLIC zen_static zenblitz_engine)
@@ -19,3 +27,8 @@ target_include_directories(zenblitz3d PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../cli
 target_link_libraries(zenblitz3d PRIVATE zenblitz_runtime3d)
 target_compile_options(zenblitz3d PRIVATE $<$<CONFIG:Release>:-O3>)
 set_target_properties(zenblitz3d PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/bin)
+# SDL2.dll beside bin/zenblitz3d.exe on Windows; no-op on Linux/Mac and
+# against a system SDL2. main3d.cpp has a plain main() (no #include
+# <SDL.h>), so unlike the editor this target must NOT link SDL2::SDL2main -
+# see zen_copy_sdl2_runtime's comment in the root CMakeLists.txt.
+zen_copy_sdl2_runtime(zenblitz3d)

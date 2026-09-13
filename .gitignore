@@ -22,6 +22,7 @@
 
 # Scratch files the test scripts write next to the repo
 /zen_tmp_*
-
+.claude
+/attic
 # Third-party CHIP-8 ROM pack (bring your own)
 examples/chip8/roms/

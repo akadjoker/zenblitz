@@ -40,6 +40,13 @@ namespace engine
         int flags = 0;
         bool transparent = false;
 
+        bool sameAs(const BrushTexture &t) const
+        {
+            return handle == t.handle && uScale == t.uScale && vScale == t.vScale &&
+                   uPos == t.uPos && vPos == t.vPos && rotation == t.rotation &&
+                   blend == t.blend && flags == t.flags && transparent == t.transparent;
+        }
+
         // BrushTexture/EntityTexture: uploads `frame` if needed and copies
         // the Texture's transform/blend/flags - the same fields the
         // original's TexState carried through to gxScene.
@@ -101,6 +108,16 @@ namespace engine
         int getFX() const { return mFx; }
         const BrushTexture &getTexture(int index) const { return mTextures[index]; }
         int getTextureCount() const { return mMaxTex; }
+
+        bool sameAs(const Brush &b) const
+        {
+            if (!(mColor == b.mColor) || mAlpha != b.mAlpha || mShininess != b.mShininess ||
+                mBlend != b.mBlend || mFx != b.mFx || mMaxTex != b.mMaxTex)
+                return false;
+            for (int k = 0; k < kMaxBrushTextures; ++k)
+                if (!mTextures[k].sameAs(b.mTextures[k])) return false;
+            return true;
+        }
 
         int getBlend() const
         {

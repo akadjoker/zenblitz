@@ -25,28 +25,31 @@ namespace engine
         if (!mDevice.create(title ? title : "zenblitz3d", width, height,
                             0, /*resizable*/ true, fullscreen, visible))
         {
-            kx::Log::error("Platform: could not create the window");
+            Log::error("Platform: could not create the window");
             return false;
         }
         if (!mGraphics.create(mDevice))
         {
-            kx::Log::error("Platform: could not create the GPU device");
+            Log::error("Platform: could not create the GPU device");
             mDevice.destroy();
             return false;
         }
         if (!mBatch.init(mGraphics.device(), mGraphics.shaderDialect()))
         {
-            kx::Log::error("Platform: could not initialise the 2D/3D batch renderer");
+            Log::error("Platform: could not initialise the 2D/3D batch renderer");
             mGraphics.destroy();
             mDevice.destroy();
             return false;
         }
+        /* GetKey returns typed characters, which only arrive as
+           SDL_TEXTINPUT while text input is enabled */
+        SDL_StartTextInput();
         mGraphics.setScreenSize((std::uint32_t)width, (std::uint32_t)height);
         mBatch.resize(width, height);
         mOpen = true;
         // first frame starts now; every later one starts at the end of
         // the previous Flip (see endFrame)
-        kx::Profiler::getSingleton().beginFrame();
+        Profiler::getSingleton().beginFrame();
         return true;
     }
 
@@ -87,6 +90,42 @@ namespace engine
         {
             int dik = scancode_to_dik(e.key.keysym.scancode);
             if (dik) { mKeyState[dik] = true; mKeyHitState[dik] = true; }
+            /* gxInput::toAscii mapped the navigation keys to control
+               codes of its own and everything else through the keyboard
+               layout; printable characters arrive as SDL_TEXTINPUT
+               instead, which already has the layout and shift applied. */
+            int ascii = 0;
+            switch (e.key.keysym.sym)
+            {
+            case SDLK_HOME: ascii = 1; break;
+            case SDLK_END: ascii = 2; break;
+            case SDLK_INSERT: ascii = 3; break;
+            case SDLK_DELETE: ascii = 4; break;
+            case SDLK_PAGEUP: ascii = 5; break;
+            case SDLK_PAGEDOWN: ascii = 6; break;
+            case SDLK_UP: ascii = 28; break;
+            case SDLK_DOWN: ascii = 29; break;
+            case SDLK_RIGHT: ascii = 30; break;
+            case SDLK_LEFT: ascii = 31; break;
+            case SDLK_BACKSPACE: ascii = 8; break;
+            case SDLK_TAB: ascii = 9; break;
+            case SDLK_RETURN: case SDLK_KP_ENTER: ascii = 13; break;
+            case SDLK_ESCAPE: ascii = 27; break;
+            default: break;
+            }
+            if (ascii) pushKey(ascii);
+            break;
+        }
+        case SDL_TEXTINPUT:
+        {
+            /* one queue entry per byte keeps this to the 7-bit ASCII
+               Blitz3D's GetKey returned; anything above is skipped
+               rather than delivered as a broken half-character */
+            for (const char *c = e.text.text; *c; ++c)
+            {
+                const unsigned char ch = (unsigned char)*c;
+                if (ch >= 32 && ch < 128) pushKey(ch);
+            }
             break;
         }
         case SDL_KEYUP:
@@ -106,7 +145,21 @@ namespace engine
             int b = e.button.button == SDL_BUTTON_LEFT ? 1
                   : e.button.button == SDL_BUTTON_RIGHT ? 2
                   : e.button.button == SDL_BUTTON_MIDDLE ? 3 : 0;
-            if (b) mMouseState[b] = (e.type == SDL_MOUSEBUTTONDOWN);
+            if (b)
+            {
+                const bool down = e.type == SDL_MOUSEBUTTONDOWN;
+                /* count the press only on the transition, as
+                   gxDevice::setDownState did before raising downEvent */
+                if (down && !mMouseState[b]) { ++mMouseHitState[b]; pushButton(b); }
+                mMouseState[b] = down;
+            }
+            break;
+        }
+        case SDL_MOUSEWHEEL:
+        {
+            int dz = e.wheel.y;
+            if (e.wheel.direction == SDL_MOUSEWHEEL_FLIPPED) dz = -dz;
+            mMouseZ += dz;
             break;
         }
         default:
@@ -128,7 +181,7 @@ namespace engine
 
     void Platform::flushCanvasPass()
     {
-        KX_PROFILE_SCOPE("Canvas/Flush");
+        ENGINE_PROFILE_SCOPE("Canvas/Flush");
         if (mGraphics.inFrame()) mGraphics.endFrame();
         mBatch.flip();
         if (mGraphics.reopenScreenPass())
@@ -172,15 +225,15 @@ namespace engine
         }
 
         {
-            KX_PROFILE_SCOPE("Screen/Flip");
+            ENGINE_PROFILE_SCOPE("Screen/Flip");
             mDevice.flip();
         }
         pumpEvents();
         // a Blitz frame runs Flip to Flip, so this is the boundary:
         // close the sample set for the frame just presented and open
         // the next one
-        kx::Profiler::getSingleton().endFrame();
-        kx::Profiler::getSingleton().beginFrame();
+        Profiler::getSingleton().endFrame();
+        Profiler::getSingleton().beginFrame();
     }
 
     bool Platform::keyDown(int dik) const
@@ -199,11 +252,65 @@ namespace engine
     void Platform::flushKeyHits()
     {
         for (bool &h : mKeyHitState) h = false;
+        /* gxDevice::flush cleared the hit counts and the queue together */
+        mKeyPut = mKeyGet = 0;
+    }
+
+    void Platform::pushKey(int ascii)
+    {
+        if (mKeyPut - mKeyGet >= kQueueSize) return;
+        mKeyQueue[mKeyPut++ & (kQueueSize - 1)] = ascii;
+    }
+
+    int Platform::popKey()
+    {
+        return mKeyGet < mKeyPut ? mKeyQueue[mKeyGet++ & (kQueueSize - 1)] : 0;
+    }
+
+    void Platform::pushButton(int button)
+    {
+        if (mButtonPut - mButtonGet >= kQueueSize) return;
+        mButtonQueue[mButtonPut++ & (kQueueSize - 1)] = button;
+    }
+
+    int Platform::popMouseButton()
+    {
+        return mButtonGet < mButtonPut ? mButtonQueue[mButtonGet++ & (kQueueSize - 1)] : 0;
     }
 
     bool Platform::mouseDown(int button) const
     {
         return button > 0 && button < 4 && mMouseState[button];
+    }
+
+    int Platform::mouseHit(int button)
+    {
+        if (button <= 0 || button >= 4) return 0;
+        const int hits = mMouseHitState[button];
+        mMouseHitState[button] = 0;
+        return hits;
+    }
+
+    void Platform::flushMouseHits()
+    {
+        for (int &h : mMouseHitState) h = 0;
+        mButtonPut = mButtonGet = 0;
+    }
+
+    bool Platform::moveMouse(int x, int y)
+    {
+        if (!mOpen) return false;
+        SDL_WarpMouseInWindow(mDevice.getNativeWindow(), x, y);
+        /* SDL_WarpMouseInWindow posts a motion event, but MouseX must
+           already read the new position when this call returns */
+        mMouseX = x;
+        mMouseY = y;
+        return true;
+    }
+
+    void Platform::showPointer(bool visible)
+    {
+        SDL_ShowCursor(visible ? SDL_ENABLE : SDL_DISABLE);
     }
 
     double Platform::milliSecs() const
@@ -213,7 +320,12 @@ namespace engine
 
     unsigned Platform::readScreenPixel(int x, int y)
     {
-        if (x < 0 || y < 0 || x >= mGraphics.width() || y >= mGraphics.height()) return 0;
+        if (x < 0 || y < 0 || x >= (int)mGraphics.width() || y >= (int)mGraphics.height()) return 0;
+        // Nothing has been presented yet (a script that reads the screen
+        // or GrabImage's from it before its first Flip), so there is no
+        // captured frame to sample - reading through the null handle just
+        // fills the GPU error queue with one entry per pixel.
+        if (!mGraphics.screenTexture().valid()) return 0;
         gpu::TextureRegion region;
         region.x = (std::uint32_t)x;
         // screenTexture is written with GL's bottom-left origin (see the

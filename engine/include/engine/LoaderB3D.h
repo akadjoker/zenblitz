@@ -9,13 +9,12 @@ namespace engine
     class LoaderB3D : public MeshLoader
     {
     public:
-        // dev may be null: textures referenced by the file are then
-        // skipped (chunk still parsed, meshes come back untextured).
-        MeshModel *load(const std::string &f, const Transform &conv, int hint) override
+  
+        MeshModel *load(const ct::String &f, const Transform &conv, int hint) override
         {
             return load(f, conv, hint, nullptr);
         }
-        MeshModel *load(const std::string &f, const Transform &conv, int hint, gpu::Device *dev);
+        MeshModel *load(const ct::String &f, const Transform &conv, int hint, gpu::Device *dev);
     };
 }
 

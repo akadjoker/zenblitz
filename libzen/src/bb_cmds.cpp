@@ -328,6 +328,9 @@ namespace bb
         return -1;
     }
 
+    /* bbExecFile returns nothing - the original launched the command and
+       reported failure through a runtime error, so a script never had a
+       value to test. */
     static int c_ExecFile(VM *vm, Value *args, int nargs)
     {
         (void)nargs;
@@ -335,11 +338,10 @@ namespace bb
         if (!b.exec)
         {
             backend_log(b, LOG_WARN, "ExecFile: not supported");
-            args[0] = val_int(-1);
-            return 1;
+            return 0;
         }
-        args[0] = val_int(b.exec(bb_arg_cstr(args[0]), b.userdata));
-        return 1;
+        b.exec(bb_arg_cstr(args[0]), b.userdata);
+        return 0;
     }
 
     static int64_t millisecs(VM *vm)
@@ -523,7 +525,7 @@ namespace bb
         {"Stop", c_Stop},
         {"AppTitle$title$close_prompt=\"\"", c_AppTitle},
         {"RuntimeError$message", c_RuntimeError},
-        {"%ExecFile$command", c_ExecFile},
+        {"ExecFile$command", c_ExecFile},
         {"Delay%millisecs", c_Delay},
         {"%MilliSecs", c_MilliSecs},
         {"$CommandLine", c_CommandLine},

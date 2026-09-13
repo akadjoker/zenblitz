@@ -12,6 +12,8 @@ namespace engine
 {
     class MeshModel;
     class MD2Model;
+    class Terrain;
+    class DynamicMesh;
 
     class Model : public Object
     {
@@ -37,19 +39,21 @@ namespace engine
         {
             GpuGeometry geom;
             Surface *surface = nullptr;
+            DynamicMesh *dynamicMesh = nullptr;
             Brush brush;
         };
 
         Model() {}
         Model(const Model &m)
-            : Object(m), mSpace(m.mSpace), mBrush(m.mBrush), mAutoFade(m.mAutoFade),
-              mAutoFadeNr(m.mAutoFadeNr), mAutoFadeFr(m.mAutoFadeFr), mCapturedAlpha(m.mCapturedAlpha) {}
+            : Object(m), mSpace(m.mSpace), mBrush(m.mBrush), mCapturedAlpha(m.mCapturedAlpha),
+              mAutoFade(m.mAutoFade), mAutoFadeNr(m.mAutoFadeNr), mAutoFadeFr(m.mAutoFadeFr) {}
 
         Model *getModel() override { return this; }
         Entity *clone() override { return new Model(*this); }
 
         virtual MeshModel *getMeshModel() { return nullptr; }
         virtual MD2Model *getMD2Model() { return nullptr; }
+        virtual Terrain *getTerrain() { return nullptr; }
 
         virtual void setRenderBrush(const Brush &b) { mRenderBrush = b; }
         virtual bool render(const RenderContext &rc) { (void)rc; return false; }
@@ -139,6 +143,14 @@ namespace engine
         {
             QueueEntry e;
             e.geom = geom;
+            e.brush = brush;
+            int type = brush.getBlend() == BlendReplace ? QueueOpaque : QueueTransparent;
+            mQueues[type].push_back(e);
+        }
+        void enqueue(DynamicMesh *dynamicMesh, const Brush &brush)
+        {
+            QueueEntry e;
+            e.dynamicMesh = dynamicMesh;
             e.brush = brush;
             int type = brush.getBlend() == BlendReplace ? QueueOpaque : QueueTransparent;
             mQueues[type].push_back(e);

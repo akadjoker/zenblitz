@@ -14,6 +14,7 @@
 #include <ct/hashmap.hpp>
 #include <cstring>
 #include <cmath>
+#include <utility>
 
 namespace engine
 {
@@ -41,10 +42,10 @@ namespace engine
         // materials_map/name_map/id_map in the original: keyed by name or
         // node id, so a hash map replaces the map<> directly (O(1) instead
         // of O(log n), same lookup semantics).
-        ct::HashMap<std::string, Brush> g_materials;
-        ct::HashMap<std::string, MeshModel *> g_nameMap;
+        ct::HashMap<ct::String, Brush> g_materials;
+        ct::HashMap<ct::String, MeshModel *> g_nameMap;
         ct::HashMap<int, MeshModel *> g_idMap;
-        ct::HashMap<std::string, int> g_materialIds;
+        ct::HashMap<ct::String, int> g_materialIds;
         int g_nextMaterialId;
 
         void clearState()
@@ -58,7 +59,7 @@ namespace engine
             g_parentEnd.clear();
         }
 
-        int brushIdFor(const std::string &name)
+        int brushIdFor(const ct::String &name)
         {
             int *found = g_materialIds.find(name);
             if (found) return *found;
@@ -93,9 +94,9 @@ namespace engine
             g_parentEnd.pop_back();
         }
 
-        std::string parseString()
+        ct::String parseString()
         {
-            std::string t;
+            ct::String t;
             for (;;)
             {
                 char c;
@@ -165,7 +166,7 @@ namespace engine
 
         void parseFaceMat()
         {
-            std::string name = parseString();
+            ct::String name = parseString();
             Brush *mat = g_materials.find(name);
             int brushId = brushIdFor(name);
             unsigned short cnt;
@@ -278,7 +279,7 @@ namespace engine
 
         MeshModel *parseObject(MeshModel *root)
         {
-            std::string name = parseString();
+            ct::String name = parseString();
             MeshModel *mesh = nullptr;
 
             enterChunk();
@@ -300,7 +301,7 @@ namespace engine
         void parseMaterial()
         {
             Brush mat;
-            std::string name, texName;
+            ct::String name, texName;
             enterChunk();
             while (int id = nextChunk())
             {
@@ -320,14 +321,17 @@ namespace engine
                     break;
                 }
             }
-            if (!texName.empty() && g_dev)
+            if (!texName.empty())
             {
-                Texture *tex = Texture::load(texName, 0);
-                if (tex)
+                mat.setColor(Vector(1, 1, 1));
+                if (g_dev)
                 {
-                    mat.setTexture(0, BrushTexture::fromTexture(*g_dev, tex, 0));
-                    mat.setColor(Vector(1, 1, 1));
-                    Texture::release(tex);
+                    Texture *tex = Texture::load(texName, 0);
+                    if (tex)
+                    {
+                        mat.setTexture(0, BrushTexture::fromTexture(*g_dev, tex, 0));
+                        Texture::release(tex);
+                    }
                 }
             }
             if (!name.empty()) g_materials.put(name, mat);
@@ -409,7 +413,7 @@ namespace engine
         void parseMeshInfo(MeshModel *root)
         {
             enterChunk();
-            std::string name, inst;
+            ct::String name, inst;
             Vector pivot;
             Animation anim;
             unsigned short id = 65535, parent = 65535, flags1, flags2;
@@ -486,7 +490,7 @@ namespace engine
         void parseKeyFramer(MeshModel *root)
         {
             enterChunk();
-            std::string file3ds;
+            ct::String file3ds;
             unsigned short rev, currTime = 0;
             (void)file3ds; (void)currTime;
             while (int id = nextChunk())
@@ -538,7 +542,7 @@ namespace engine
         }
     }
 
-    MeshModel *LoaderB3DS::load(const std::string &filename, const Transform &t, int hint, gpu::Device *dev)
+    MeshModel *LoaderB3DS::load(const ct::String &filename, const Transform &t, int hint, gpu::Device *dev)
     {
         g_convTform = t;
         g_conv = g_flipTris = false;

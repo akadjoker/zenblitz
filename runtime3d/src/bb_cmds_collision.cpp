@@ -70,10 +70,13 @@ namespace bb3d
         engine::Object *o = object_of(arg_int(args[0]));
         if (!o) return 0;
         float rx = arg_float(args[1]);
-        // y_radius defaults to x_radius when omitted, same as the
-        // original; radii.z mirrors x since collision is an ellipsoid of
-        // revolution around Y (see World::collide's use of radii.x/y).
-        float ry = nargs > 2 ? arg_float(args[2]) : rx;
+        // bbEntityRadius: "y_radius ? y_radius : x_radius" - the default
+        // is 0 and a zero y_radius means "use x_radius", whether it was
+        // omitted or passed explicitly. radii.z mirrors x since collision
+        // is an ellipsoid of revolution around Y (see World::collide's
+        // use of radii.x/y).
+        const float passed = arg_float(args[2]);
+        const float ry = passed != 0.0f ? passed : rx;
         o->setCollisionRadii(engine::Vector(rx, ry, rx));
         return 0;
     }
@@ -180,18 +183,18 @@ namespace bb3d
     }
 
     extern const zen::CommandDecl bb3d_cmds_collision[] = {
-        {"EntityType%entity%type%recursive=0", c_EntityType},
-        {"EntityRadius%entity#xradius#yradius=-1", c_EntityRadius},
-        {"Collisions%srctype%dsttype%method%response", c_Collisions},
+        {"EntityType%entity%collision_type%recursive=0", c_EntityType},
+        {"EntityRadius%entity#x_radius#y_radius=0", c_EntityRadius},
+        {"Collisions%source_type%destination_type%method%response", c_Collisions},
         {"ClearCollisions", c_ClearCollisions},
         {"%CountCollisions%entity", c_CountCollisions},
-        {"%CollisionEntity%entity%index", c_CollisionEntity},
-        {"#CollisionX%entity%index", c_CollisionX},
-        {"#CollisionY%entity%index", c_CollisionY},
-        {"#CollisionZ%entity%index", c_CollisionZ},
-        {"#CollisionNX%entity%index", c_CollisionNX},
-        {"#CollisionNY%entity%index", c_CollisionNY},
-        {"#CollisionNZ%entity%index", c_CollisionNZ},
+        {"%CollisionEntity%entity%collision_index", c_CollisionEntity},
+        {"#CollisionX%entity%collision_index", c_CollisionX},
+        {"#CollisionY%entity%collision_index", c_CollisionY},
+        {"#CollisionZ%entity%collision_index", c_CollisionZ},
+        {"#CollisionNX%entity%collision_index", c_CollisionNX},
+        {"#CollisionNY%entity%collision_index", c_CollisionNY},
+        {"#CollisionNZ%entity%collision_index", c_CollisionNZ},
         {"%EntityCollided%entity%type", c_EntityCollided},
     };
     extern const int bb3d_cmds_collision_count = (int)(sizeof(bb3d_cmds_collision) / sizeof(bb3d_cmds_collision[0]));

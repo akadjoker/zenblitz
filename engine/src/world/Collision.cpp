@@ -76,7 +76,8 @@ namespace engine
         return curr->update(line, t, (~tm * (i - p)).normalized());
     }
 
-    bool Collision::triangleCollide(const Line &line, float radius, const Vector &v0, const Vector &v1, const Vector &v2)
+    bool Collision::triangleCollide(const Line &line, float radius, const Vector &v0, const Vector &v1, const Vector &v2,
+                                     bool facesOnly)
     {
         blitz::Plane p(v0, v1, v2);
         if (p.n.dot(line.d) >= 0) return false;
@@ -91,7 +92,7 @@ namespace engine
         if (p0.distance(i) >= 0 && p1.distance(i) >= 0 && p2.distance(i) >= 0)
             return update(line, t, p.n);
 
-        if (radius <= 0) return false;
+        if (radius <= 0 || facesOnly) return false;
 
         bool a = edgeTest(v0, v1, p.n, p0.n, line, radius, this);
         bool b = edgeTest(v1, v2, p.n, p1.n, line, radius, this);

@@ -2,7 +2,7 @@
 #define ENGINE_MESHLOADER_H
 
 #include "engine/MeshModel.h"
-#include <string>
+#include <ct/string.hpp>
 
 namespace engine
 {
@@ -15,7 +15,7 @@ namespace engine
         };
 
         virtual ~MeshLoader() = default;
-        virtual MeshModel *load(const std::string &f, const Transform &conv, int hint) = 0;
+        virtual MeshModel *load(const ct::String &f, const Transform &conv, int hint) = 0;
 
         static void beginMesh();
         static void addVertex(const Surface::Vertex &v);

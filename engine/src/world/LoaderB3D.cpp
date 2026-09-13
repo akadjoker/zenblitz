@@ -66,9 +66,9 @@ namespace engine
             return ((unsigned)(a * 255) << 24) | ((unsigned)(r * 255) << 16) | ((unsigned)(g * 255) << 8) | (unsigned)(b * 255);
         }
 
-        std::string readString()
+        ct::String readString()
         {
-            std::string t;
+            ct::String t;
             for (;;)
             {
                 char c;
@@ -82,7 +82,7 @@ namespace engine
         {
             while (chunkSize())
             {
-                std::string name = readString();
+                ct::String name = readString();
                 int flags = readInt();
                 int blend = readInt();
                 float pos[2], scl[2];
@@ -236,7 +236,7 @@ namespace engine
         {
             Object *obj = nullptr;
 
-            std::string name = readString();
+            ct::String name = readString();
             float pos[3], scl[3], rot[4];
             readFloatArray(pos, 3);
             readFloatArray(scl, 3);
@@ -309,11 +309,11 @@ namespace engine
         }
     }
 
-    MeshModel *LoaderB3D::load(const std::string &f, const Transform &conv, int hint, gpu::Device *dev)
+    MeshModel *LoaderB3D::load(const ct::String &f, const Transform &conv, int hint, gpu::Device *dev)
     {
         (void)conv; (void)hint;
 
-        const std::string path = resolveCaseInsensitive(f);
+        const ct::String path = resolveCaseInsensitive(f);
         g_in = SDL_RWFromFile(path.c_str(), "rb");
         if (!g_in) return nullptr;
 
@@ -321,7 +321,7 @@ namespace engine
         clearState();
 
         size_t slash = path.find_last_of("/\\");
-        setTexturePath(slash == std::string::npos ? std::string() : path.substr(0, slash));
+        setTexturePath(slash == ct::String::npos ? ct::String() : path.substr(0, slash));
 
         int tag = readChunk();
         if (tag != 'BB3D')
@@ -350,7 +350,7 @@ namespace engine
         }
         SDL_RWclose(g_in);
 
-        setTexturePath(std::string());
+        setTexturePath(ct::String());
         clearState();
 
         return obj ? obj->getModel()->getMeshModel() : nullptr;

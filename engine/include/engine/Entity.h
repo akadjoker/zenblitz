@@ -4,7 +4,7 @@
 #include "engine/Geom.h"
 #include "gpu/GPU.h"
 #include <ct/vector.hpp>
-#include <string>
+#include <ct/string.hpp>
 
 namespace engine
 {
@@ -18,6 +18,7 @@ namespace engine
     class Model;
     class Mirror;
     class Listener;
+    class Sprite;
 
     class Entity
     {
@@ -44,8 +45,9 @@ namespace engine
         virtual Model *getModel() { return nullptr; }
         virtual Mirror *getMirror() { return nullptr; }
         virtual Listener *getListener() { return nullptr; }
+        virtual Sprite *getSprite() { return nullptr; }
 
-        void setName(const std::string &t) { mName = t; }
+        void setName(const ct::String &t) { mName = t; }
         void setParent(Entity *parent);
 
         void setVisible(bool vis) { mVisible = vis; }
@@ -60,7 +62,7 @@ namespace engine
         Entity *children() const { return mChildren; }
         Entity *successor() const { return mSucc; }
 
-        std::string getName() const { return mName; }
+        ct::String getName() const { return mName; }
         Entity *getParent() const { return mParent; }
 
         void setLocalPosition(const Vector &v);
@@ -98,7 +100,7 @@ namespace engine
         static Entity *sOrphans, *sLastOrphan;
 
         bool mVisible = true, mEnabled = true;
-        std::string mName;
+        ct::String mName;
         mutable int mInvalid = 0;
 
         Quat mLocalRot;

@@ -5,29 +5,18 @@
 
 #include <cstdint>
 
-namespace zengl
+namespace engine
 {
 
 using u8 = std::uint8_t;
 using u32 = std::uint32_t;
-
-// Retangulo inteiro. O Rectangle<T> do Radion tem bem mais API, mas o
-// Pixmap so usa estes 4 campos (nenhum metodo) - todo o clipping e' feito
-// a mao com ifs dentro do .cpp.
+ 
 struct IntRect
 {
     int x, y, width, height;
 };
 
-// Cor 32-bit empacotada como 0xAARRGGBB (ARGB), igual ao Radion.
-//
-// ATENCAO: o Pixmap::set_pixel(x, y, u32) / get_pixel() do Radion
-// desempacotam na ordem oposta (ABGR: r = byte 0, a = byte 3). O
-// round-trip get_pixel -> set_pixel e' coerente, mas misturar com
-// Color::value() troca R e B. No porte mantemos o comportamento original
-// (para nao partir codigo que dependa dele) mas o binding Zen expoe
-// apenas as variantes por componente (r, g, b, a) para nao propagar a
-// ambiguidade ao script.
+ 
 class Color
 {
 public:
@@ -122,17 +111,9 @@ public:
     Pixmap* apply_sharpen() const;
     Pixmap* apply_edge_detection() const;
     Pixmap* apply_emboss() const;
-
-    // Texture generation — le `this` como fonte de cor/luminancia e deriva
-    // outro mapa a partir dela.
-    //
-    // Luminancia tratada como altura (0 = baixo, 255 = alto): um heightmap
-    // de canal unico e uma foto/diffuse normal passam pela mesma conversao.
+ 
     Pixmap* generate_heightmap() const;
-    // Gradiente de altura por Sobel, empacotado como normal tangent-space
-    // (codificacao n*0.5+0.5 habitual). `strength` escala o gradiente antes
-    // de normalizar - mais alto le-se como relevo mais pronunciado, 1.0-4.0
-    // e' a gama util.
+ 
     Pixmap* generate_normal_map(float strength = 2.0f) const;
 
     bool is_valid() const { return pixels != nullptr; }
@@ -145,6 +126,6 @@ public:
     int height;
 };
 
-} // namespace zengl
+} // namespace engine
 
 #endif // ZENGL_PIXMAP_H

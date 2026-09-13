@@ -23,7 +23,7 @@
 
 #include <cstring>
 
-namespace zengl
+namespace engine
 {
 namespace dds
 {
@@ -457,4 +457,4 @@ void free(Image &image)
 }
 
 } // namespace dds
-} // namespace zengl
+} // namespace engine

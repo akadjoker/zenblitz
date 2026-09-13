@@ -6,9 +6,11 @@
 #include "vm.h"
 #include "object.h"
 #include "ct/hashmap.hpp"
+#include "ct/vector.hpp"
 #include "engine/Platform.h"
 #include "engine/World.h"
 #include "engine/Profiler.h"
+#include "engine/Sound.h"
 #include <SDL2/SDL.h>
 #include <cstdio>
 
@@ -31,6 +33,12 @@ namespace bb3d
         return p;
     }
 
+    bool graphics_window_closed(VM *vm)
+    {
+        engine::Platform **found = g_platforms.find(vm);
+        return found && *found && !(*found)->isOpen();
+    }
+
     engine::World *world_for(VM *vm)
     {
         engine::World **found = g_worlds.find(vm);
@@ -43,6 +51,7 @@ namespace bb3d
     extern void free_all_entities(gpu::Device *dev);
     extern void free_all_textures();
     extern void free_all_fonts();
+    extern void free_all_images();
 
     // Releases everything the runtime allocated for this VM. A Blitz
     // program normally runs until the user closes the window, so nothing
@@ -56,10 +65,13 @@ namespace bb3d
         engine::World **w = g_worlds.find(vm);
         engine::Platform **p = g_platforms.find(vm);
 
+        engine::AudioSystem::get().shutdown();
+
         // the device has to outlive the GPU buffers the scene owns
         free_all_entities(p && (*p)->isOpen() ? &(*p)->device() : nullptr);
         free_all_textures();
         free_all_fonts();
+        free_all_images();
 
         if (w) (*w)->shutdown();
         if (p) (*p)->close();
@@ -71,22 +83,52 @@ namespace bb3d
     {
         int w = (int)arg_int(args[0]);
         int h = (int)arg_int(args[1]);
+        const int mode = (int)arg_int(args[3]);
+        // bbGraphics's mode argument: 0 picks fullscreen for a release
+        // build and a window for a debug one, 1 is fullscreen, 2 and 3
+        // are windowed (3 scaled), 6 and 7 the same two windowed modes
+        // with auto-suspend. Anything else was "Illegal Graphics mode".
+        // Mode 0 maps to a window here: this runtime has no debug/release
+        // distinction of its own, and a script that says nothing is
+        // better served by a window it can close than by taking over the
+        // display. The depth argument is accepted and ignored - the GL
+        // surface is always 32-bit.
+        bool fullscreen = false;
+        switch (mode)
+        {
+        case 0: case 2: case 3: case 6: case 7: fullscreen = false; break;
+        case 1: fullscreen = true; break;
+        default:
+            vm->runtime_error("Illegal Graphics mode");
+            return -1;
+        }
         engine::Platform *p = platform_for(vm);
-        bool ok = p->open(w, h, "zenblitz3d", false);
         // No software frame cap: Blitz3D paced a frame only by Flip's
         // vblank wait (vsync is on by default, "Flip 0" turns it off and
         // runs unthrottled, as it did in Blitz3D). A 60 fps target on top
         // of vsync was paying the frame twice - profiler showed the wait
         // stacked on the swap.
-        args[0] = val_int(ok ? 1 : 0);
+        //
+        // bbGraphics returns nothing: a mode it cannot set is a runtime
+        // error ("Unable to set graphics mode"), not a value to test.
+        // ZENBLITZ_HIDDEN=1 opens the window without showing it, so a
+        // test can run the real GL path and read pixels back without a
+        // window appearing on screen. Never set by a normal run.
+        const char *hidden = SDL_getenv("ZENBLITZ_HIDDEN");
+        const bool visible = !(hidden && hidden[0] && hidden[0] != '0');
+        if (!p->open(w, h, "zenblitz3d", fullscreen, visible))
+        {
+            vm->runtime_error("Unable to set graphics mode");
+            return -1;
+        }
         (void)nargs;
-        return 1;
+        return 0;
     }
     static int c_Graphics3D(VM *vm, Value *args, int nargs)
     {
-        int rv = c_Graphics(vm, args, nargs);
-        if (is_int(args[0]) && args[0].as.integer)
-            world_for(vm)->init(platform_for(vm)->device(), platform_for(vm)->shaderDialect());
+        const int rv = c_Graphics(vm, args, nargs);
+        if (rv < 0) return rv;
+        world_for(vm)->init(platform_for(vm)->device(), platform_for(vm)->shaderDialect());
         return rv;
     }
 
@@ -107,6 +149,91 @@ namespace bb3d
         args[0] = val_int(platform_for(vm)->height());
         return 1;
     }
+    static int c_GraphicsDepth(VM *, Value *args, int)
+    {
+        args[0] = val_int(32);
+        return 1;
+    }
+
+    struct GfxMode { int width, height, depth; };
+    static ct::Vector<GfxMode> g_gfxModes;
+    /* bbSetGfxDriver's current driver, owned by bb_cmds_gfxmode.cpp;
+       gfx_modes in the original was one list shared by CountGfxModes and
+       CountGfxModes3D, so both files must fill and read the same one. */
+    extern int gfx_driver();
+
+    void collectGfxModes()
+    {
+        g_gfxModes.clear();
+        // SDL_GetNumDisplayModes needs the video subsystem up, which a
+        // script may not have triggered yet - CountGfxModes3D/Windowed3D
+        // are meant to be callable before the first Graphics3D, exactly
+        // like start.bb (every sample's shared menu) calls them.
+        if (!SDL_WasInit(SDL_INIT_VIDEO) && SDL_InitSubSystem(SDL_INIT_VIDEO) != 0) return;
+        const int display = gfx_driver();
+        const int count = SDL_GetNumDisplayModes(display);
+        for (int i = 0; i < count; ++i)
+        {
+            SDL_DisplayMode mode;
+            if (SDL_GetDisplayMode(display, i, &mode) == 0)
+            {
+                const GfxMode entry = {mode.w, mode.h, (int)SDL_BITSPERPIXEL(mode.format)};
+                g_gfxModes.push_back(entry);
+            }
+        }
+    }
+
+    /* accessors for bb_cmds_gfxmode.cpp's CountGfxModes/GfxModeExists */
+    int gfx_mode_count() { return (int)g_gfxModes.size(); }
+    bool gfx_mode_at(int index, int &w, int &h, int &d)
+    {
+        if (index < 0 || index >= (int)g_gfxModes.size()) return false;
+        w = g_gfxModes[index].width;
+        h = g_gfxModes[index].height;
+        d = g_gfxModes[index].depth;
+        return true;
+    }
+    static int c_CountGfxModes3D(VM *, Value *args, int)
+    {
+        collectGfxModes();
+        args[0] = val_int((long long)g_gfxModes.size());
+        return 1;
+    }
+    static int c_GfxModeWidth(VM *, Value *args, int)
+    {
+        const int index = (int)arg_int(args[0]) - 1;
+        args[0] = val_int(index >= 0 && index < (int)g_gfxModes.size() ? g_gfxModes[index].width : 0);
+        return 1;
+    }
+    static int c_GfxModeHeight(VM *, Value *args, int)
+    {
+        const int index = (int)arg_int(args[0]) - 1;
+        args[0] = val_int(index >= 0 && index < (int)g_gfxModes.size() ? g_gfxModes[index].height : 0);
+        return 1;
+    }
+    static int c_GfxModeDepth(VM *, Value *args, int)
+    {
+        const int index = (int)arg_int(args[0]) - 1;
+        args[0] = val_int(index >= 0 && index < (int)g_gfxModes.size() ? g_gfxModes[index].depth : 0);
+        return 1;
+    }
+    static int c_GfxMode3DExists(VM *, Value *args, int)
+    {
+        collectGfxModes();
+        const int width = (int)arg_int(args[0]), height = (int)arg_int(args[1]), depth = (int)arg_int(args[2]);
+        int found = 0;
+        for (const GfxMode &mode : g_gfxModes)
+            if (mode.width == width && mode.height == height && mode.depth == depth) { found = 1; break; }
+        args[0] = val_int(found);
+        return 1;
+    }
+    static int c_GfxMode3D(VM *, Value *args, int)
+    {
+        const int index = (int)arg_int(args[0]) - 1;
+        args[0] = val_int(index >= 0 && index < (int)g_gfxModes.size() ? 1 : 0);
+        return 1;
+    }
+    static int c_Windowed3D(VM *, Value *args, int) { args[0] = val_int(1); return 1; }
 
     static int c_Cls(VM *vm, Value *args, int nargs)
     {
@@ -126,12 +253,25 @@ namespace bb3d
         return 0;
     }
 
+    // WireFrame: accepted so scripts that toggle it (commonly for
+    // debugging, per the original's own docs) still compile and run, but
+    // a no-op - real wireframe rasterization needs a polygon fill-mode on
+    // gpu::RasterState/PipelineDesc that extern/GPU's backends don't
+    // expose yet (GPUCapabilities::wireframe is set but nothing in
+    // GLDeviceCommon.inl ever calls glPolygonMode with it), and that's a
+    // submodule this project doesn't edit.
+    static int c_WireFrame(VM *vm, Value *args, int nargs)
+    {
+        (void)vm; (void)args; (void)nargs;
+        return 0;
+    }
+
     // ZENBLITZ_PROFILE=1 in the environment (an env var rather than a
     // command-line flag so it also works when the editor launches the
     // runtime, which passes only the .bb path) prints a profile line to
     // the program's console once a second: frame time, the CPU scopes
     // the engine times, and the 3D/2D render counters. It goes through
-    // the VM backend, not kx::Log - Log::info is dropped in release
+    // the VM backend, not engine::Log - Log::info is dropped in release
     // builds (LogMode::Passive only passes warnings and errors).
     static void profile_dump(VM *vm)
     {
@@ -155,9 +295,9 @@ namespace bb3d
         if (now - lastTicks < 1000) return;
         lastTicks = now;
 
-        const kx::Profiler &prof = kx::Profiler::getSingleton();
+        const engine::Profiler &prof = engine::Profiler::getSingleton();
         const engine::MeshRenderer::Stats &r3 = world_for(vm)->renderStats();
-        const kx::BatchRenderer::Stats &r2 = platform_for(vm)->batch().getStats();
+        const engine::BatchRenderer::Stats &r2 = platform_for(vm)->batch().getStats();
         const std::size_t draws2D = (r2.drawCalls - lastDraws2D) / framesSinceDump;
         const std::size_t texSwitches2D = (r2.textureSwitches - lastTexSwitches2D) / framesSinceDump;
         lastDraws2D = r2.drawCalls;
@@ -170,7 +310,7 @@ namespace bb3d
         int n = snprintf(line, sizeof(line), "[profile] avg/max ms:");
         for (std::uint32_t k = 0; k < prof.sampleCount() && n < (int)sizeof(line) - 64; ++k)
         {
-            const kx::ProfileSample &s = prof.samples()[k];
+            const engine::ProfileSample &s = prof.samples()[k];
             n += snprintf(line + n, sizeof(line) - n, " %s %.2f/%.2f", s.name.c_str(), s.average, s.maximum);
         }
         zen::backend_log(vm->backend(), zen::LOG_INFO, line);
@@ -194,6 +334,7 @@ namespace bb3d
         const bool vwait = arg_int(args[0]) != 0;
         if (p->isVSync() != vwait) p->setVSync(vwait);
         p->endFrame();
+        engine::AudioSystem::get().update();
         profile_dump(vm);
         vm->request_suspend(0);
         return 0;
@@ -242,9 +383,17 @@ namespace bb3d
     }
     static int c_VWait(VM *vm, Value *args, int nargs)
     {
-        (void)args; (void)nargs;
-        platform_for(vm)->pumpEvents();
-        vblank_sleep();
+        (void)nargs;
+        // bbVWait took a frame count (default 1); waiting zero frames
+        // still pumps events, as the original's idle() did.
+        long long frames = arg_int(args[0]);
+        engine::Platform *p = platform_for(vm);
+        p->pumpEvents();
+        while (frames-- > 0 && p->isOpen())
+        {
+            vblank_sleep();
+            p->pumpEvents();
+        }
         return 0;
     }
     static int c_WaitKey(VM *vm, Value *args, int nargs)
@@ -263,40 +412,52 @@ namespace bb3d
         args[0] = val_int(dik);
         return 1;
     }
+    // bbWaitMouse returned which button was pressed; MouseWait was the
+    // same function under a second name.
     static int c_MouseWait(VM *vm, Value *args, int nargs)
     {
-        (void)args; (void)nargs;
+        (void)nargs;
         engine::Platform *p = platform_for(vm);
         bool wasDown[4] = {false, false, false, false};
         for (int b = 1; b <= 3; ++b) wasDown[b] = p->mouseDown(b);
+        int pressed = 0;
         for (;;)
         {
             p->pumpEvents();
             if (!p->isOpen()) break;
-            bool clicked = false;
             for (int b = 1; b <= 3; ++b)
             {
                 bool down = p->mouseDown(b);
-                if (down && !wasDown[b]) clicked = true;
+                if (down && !wasDown[b]) pressed = b;
                 wasDown[b] = down;
             }
-            if (clicked) break;
+            if (pressed) break;
             SDL_Delay(1); // poll at ~1 kHz, not a busy spin
         }
-        return 0;
+        args[0] = val_int(pressed);
+        return 1;
     }
 
     /* extern: without it, a const array at namespace scope has internal
        linkage and runtime3d.cpp's extern declaration fails to link. */
     extern const zen::CommandDecl bb3d_cmds_graphics[] = {
-        {"%Graphics%width%height%depth=0%mode=0", c_Graphics},
-        {"%Graphics3D%width%height%depth=0%mode=0", c_Graphics3D},
+        {"Graphics%width%height%depth=0%mode=0", c_Graphics},
+        {"Graphics3D%width%height%depth=0%mode=0", c_Graphics3D},
         {"EndGraphics", c_EndGraphics},
         {"%GraphicsWidth", c_GraphicsWidth},
         {"%GraphicsHeight", c_GraphicsHeight},
+        {"%GraphicsDepth", c_GraphicsDepth},
+        {"%CountGfxModes3D", c_CountGfxModes3D},
+        {"%GfxModeWidth%mode", c_GfxModeWidth},
+        {"%GfxModeHeight%mode", c_GfxModeHeight},
+        {"%GfxModeDepth%mode", c_GfxModeDepth},
+        {"%GfxMode3DExists%width%height%depth", c_GfxMode3DExists},
+        {"%GfxMode3D%mode", c_GfxMode3D},
+        {"%Windowed3D", c_Windowed3D},
 
         {"Cls", c_Cls},
         {"ClsColor%red%green%blue", c_ClsColor},
+        {"WireFrame%enable", c_WireFrame},
         {"Flip%vwait=1", c_Flip},
 
         {"%KeyDown%key", c_KeyDown},
@@ -306,9 +467,10 @@ namespace bb3d
         {"%MouseY", c_MouseY},
         {"%MouseDown%button", c_MouseDown},
 
-        {"VWait", c_VWait},
+        {"VWait%frames=1", c_VWait},
         {"%WaitKey", c_WaitKey},
-        {"MouseWait", c_MouseWait},
+        {"%MouseWait", c_MouseWait},
+        {"%WaitMouse", c_MouseWait},
     };
     extern const int bb3d_cmds_graphics_count = (int)(sizeof(bb3d_cmds_graphics) / sizeof(bb3d_cmds_graphics[0]));
 }

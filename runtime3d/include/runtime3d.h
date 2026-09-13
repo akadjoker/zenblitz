@@ -10,6 +10,10 @@ namespace zen { class VM; }
 namespace bb3d
 {
     void install_graphics_commands(zen::VM *vm);
+    // True once the graphics window has been closed (its X, or the close
+    // key). Blitz3D ends the program at that point; the host run loop polls
+    // this between resumes instead of the VM knowing about windows.
+    bool graphics_window_closed(zen::VM *vm);
     // Frees every runtime-owned resource for this VM (scene, textures,
     // fonts, brushes, the World and the Platform/GL device). Call once,
     // after the program finishes.

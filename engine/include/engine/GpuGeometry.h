@@ -16,6 +16,7 @@ namespace engine
         {
             LayoutSurface = 0,  // one stream of Surface::Vertex
             LayoutMd2Morph = 1, // stream 0/1 = Md2Vert frames A/B, stream 2 = uv
+            LayoutDynamic = 2,
         };
 
         gpu::BufferHandle vb;

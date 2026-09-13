@@ -1,3 +1,12 @@
 [submodule "extern/GPU"]
 	path = extern/GPU
 	url = https://github.com/akadjoker/GPU.git
+[submodule "extern/containers"]
+	path = extern/containers
+	url = https://github.com/akadjoker/containers.git
+[submodule "extern/iGUI"]
+	path = extern/iGUI
+	url = https://github.com/akadjoker/iGUI.git
+[submodule "extern/SDL"]
+	path = extern/SDL
+	url = https://github.com/libsdl-org/SDL.git

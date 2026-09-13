@@ -22,7 +22,13 @@ namespace engine
         bool update(const Line &line, float t, const Vector &n);
 
         bool sphereCollide(const Line &line, float radius, const Vector &dest, float destRadius);
-        bool triangleCollide(const Line &line, float radius, const Vector &v0, const Vector &v1, const Vector &v2);
+        // facesOnly skips the edge/corner cylinder tests and reports a hit
+        // only when the swept sphere lands within the triangle's own face.
+        // Callers feeding a dense shared-vertex mesh (the terrain grid) use
+        // it to try every face before falling back to edges - see
+        // TerrainRep::collideBlock for why that ordering matters.
+        bool triangleCollide(const Line &line, float radius, const Vector &v0, const Vector &v1, const Vector &v2,
+                             bool facesOnly = false);
         bool boxCollide(const Line &line, float radius, const Box &box);
     };
 }

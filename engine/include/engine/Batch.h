@@ -12,11 +12,9 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace kx
+namespace engine
 {
   using blitz::Vector;
-  using engine::Vec2f;
-  using engine::Matrix4;
 
   struct FloatRect
   {
@@ -26,7 +24,16 @@ namespace kx
     float height = 0.0f;
   };
 
-  FloatRect fontGlyphUVRect(unsigned char code);
+  constexpr int kFontFirstChar = 32;
+  constexpr int kFontGlyphCount = 224;
+
+  struct FontGlyph
+  {
+    float u0 = 0.0f, v0 = 0.0f, u1 = 0.0f, v1 = 0.0f;
+    float xoff = 0.0f, yoff = 0.0f;
+    float width = 0.0f, height = 0.0f;
+    float advance = 0.0f;
+  };
 
   class BatchRenderer
   {
@@ -204,6 +211,7 @@ namespace kx
     void setupBuffers();
     void setupTexture();
     void setupFontTexture();
+    const FontGlyph *glyphFor(unsigned char code) const;
     gpu::PipelineHandle pipelineFor(const DrawCall &call);
     void submitVertex(float x, float y, float z);
     void submitVertex(float x, float y, float z, float u, float v);
@@ -253,6 +261,9 @@ namespace kx
     gpu::BufferHandle mUniformBuffer;
     gpu::TextureHandle mWhiteTexture;
     gpu::TextureHandle mFontTexture;
+    FontGlyph mGlyphs[kFontGlyphCount];
+    float mFontAscent = 0.0f;
+    float mFontLineHeight = 0.0f;
     gpu::SamplerHandle mSampler;
     bool mHasPendingUpload = false;
     ct::Vector<CachedPipeline> mPipelines;
@@ -260,4 +271,4 @@ namespace kx
     double mFrameStartTime = 0.0;
   };
 
-} // namespace kx
+} // namespace engine

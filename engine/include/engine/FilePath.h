@@ -1,7 +1,7 @@
 #ifndef ENGINE_FILEPATH_H
 #define ENGINE_FILEPATH_H
 
-#include <string>
+#include <ct/string.hpp>
 
 namespace engine
 {
@@ -14,7 +14,7 @@ namespace engine
     // for Windows still load on Linux/Android/macOS. Returns the original
     // path if no case-insensitive match exists either, so the caller's
     // own "file not found" handling still fires.
-    std::string resolveCaseInsensitive(const std::string &path);
+    ct::String resolveCaseInsensitive(const ct::String &path);
 }
 
 #endif

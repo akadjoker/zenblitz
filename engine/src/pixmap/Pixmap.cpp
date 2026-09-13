@@ -39,7 +39,7 @@
 #include "stb_image.h"
 #include "stb_image_write.h"
 
-namespace zengl
+namespace engine
 {
 
 // ── helpers ──────────────────────────────────────────────────────────────
@@ -1300,4 +1300,4 @@ Pixmap* Pixmap::crop_extended(const IntRect& rect, bool fill_transparent) const
     return r;
 }
 
-} // namespace zengl
+} // namespace engine

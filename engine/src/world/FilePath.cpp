@@ -1,6 +1,12 @@
 // Case-insensitive path resolution for asset loading, so .bb source
-// written for Windows (NTFS/FAT: case-insensitive) still finds its
-// files on a case-sensitive filesystem (Linux/macOS/Android). Desktop-
+// written for Windows still finds its files on a case-sensitive
+// filesystem (Linux/macOS/Android). Windows is forgiving in two ways
+// the sample set leans on: NTFS/FAT ignore case, and the OS accepts
+// "\\" as a path separator - so .bb sources are full of
+// "sounds\\shoot.wav" and "castle\\CASTLE1.X". Both are normalised
+// here, the separator unconditionally (it is never a legal character
+// in a path component we could be shadowing) and the case only when
+// the literal path does not already open. Desktop-
 // only: directory listing isn't meaningful against an Android APK's
 // packaged assets (SDL_RWFromFile already reaches those through
 // AAssetManager), so there resolveCaseInsensitive() is a no-op and the
@@ -25,7 +31,7 @@ namespace engine
 {
     namespace
     {
-        bool fileOpens(const std::string &path)
+        bool fileOpens(const ct::String &path)
         {
             SDL_RWops *f = SDL_RWFromFile(path.c_str(), "rb");
             if (!f) return false;
@@ -34,7 +40,7 @@ namespace engine
         }
 
 #ifdef ENGINE_HAS_DIR_LISTING
-        bool ciEqual(const std::string &a, const std::string &b)
+        bool ciEqual(const ct::String &a, const ct::String &b)
         {
             if (a.size() != b.size()) return false;
             for (size_t k = 0; k < a.size(); ++k)
@@ -46,15 +52,15 @@ namespace engine
         // (both plain path strings, dir defaulting to "." for a bare
         // filename); returns the entry's real on-disk spelling, or empty
         // if the directory can't be listed or has no matching entry.
-        std::string findEntryCI(const std::string &dir, const std::string &name)
+        ct::String findEntryCI(const ct::String &dir, const ct::String &name)
         {
-            const std::string listDir = dir.empty() ? "." : dir;
+            const ct::String listDir = dir.empty() ? "." : dir;
 #ifdef _WIN32
-            std::string pattern = listDir + "\\*";
+            ct::String pattern = listDir + "\\*";
             WIN32_FIND_DATAA fd;
             HANDLE h = FindFirstFileA(pattern.c_str(), &fd);
-            if (h == INVALID_HANDLE_VALUE) return std::string();
-            std::string found;
+            if (h == INVALID_HANDLE_VALUE) return ct::String();
+            ct::String found;
             do
             {
                 if (ciEqual(fd.cFileName, name)) { found = fd.cFileName; break; }
@@ -63,8 +69,8 @@ namespace engine
             return found;
 #else
             DIR *d = opendir(listDir.c_str());
-            if (!d) return std::string();
-            std::string found;
+            if (!d) return ct::String();
+            ct::String found;
             while (struct dirent *e = readdir(d))
             {
                 if (ciEqual(e->d_name, name)) { found = e->d_name; break; }
@@ -76,7 +82,7 @@ namespace engine
 #endif
     }
 
-    std::string resolveCaseInsensitive(const std::string &path)
+    ct::String resolveCaseInsensitive(const ct::String &path)
     {
         if (path.empty() || fileOpens(path)) return path;
 
@@ -85,34 +91,38 @@ namespace engine
         // what's actually on disk so far - handles a whole path being
         // miscased (Textures/Wood.PNG vs textures/wood.png), not just
         // the filename.
-        std::string resolved;
+        ct::String resolved;
         size_t start = 0;
-        bool anyMismatch = false;
         while (start <= path.size())
         {
             size_t slash = path.find_first_of("/\\", start);
-            std::string comp = path.substr(start, slash == std::string::npos ? std::string::npos : slash - start);
-            char sep = slash == std::string::npos ? '\0' : path[slash];
+            ct::String comp = path.substr(start, slash == ct::String::npos ? ct::String::npos : slash - start);
 
             if (!comp.empty())
             {
-                std::string dirSoFar = resolved.empty() ? std::string() : resolved;
-                std::string real = findEntryCI(dirSoFar, comp);
+                ct::String dirSoFar = resolved.empty() ? ct::String() : resolved;
+                ct::String real = findEntryCI(dirSoFar, comp);
                 if (real.empty())
                 {
                     // no case-insensitive match either - give up and let
                     // the caller's own error handling report the failure
                     return path;
                 }
-                if (real != comp) anyMismatch = true;
                 resolved += real;
             }
-            if (slash == std::string::npos) break;
-            resolved += sep;
+            if (slash == ct::String::npos) break;
+            // Always '/': a rebuilt path has to be one this platform can
+            // actually open, so a Windows-style "\\" in the source is
+            // normalised rather than echoed straight back.
+            resolved += '/';
             start = slash + 1;
         }
 
-        if (anyMismatch && fileOpens(resolved)) return resolved;
+        // Compare the whole rebuilt path rather than tracking which
+        // components were respelled: the separator rewrite is a change
+        // too, and "sounds\\shoot.wav" has every component spelled
+        // correctly while still needing it.
+        if (resolved != path && fileOpens(resolved)) return resolved;
         return path;
 #else
         return path;

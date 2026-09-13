@@ -4,7 +4,7 @@
 
 #include <cstdint>
 
-namespace kx
+namespace engine
 {
 
   struct ProfileSample
@@ -75,8 +75,8 @@ namespace kx
     bool mActive = false;
   };
 
-} // namespace kx
+} // namespace engine
 
-#define KX_PROFILE_JOIN_IMPL(a, b) a##b
-#define KX_PROFILE_JOIN(a, b) KX_PROFILE_JOIN_IMPL(a, b)
-#define KX_PROFILE_SCOPE(name) ::kx::ProfileScope KX_PROFILE_JOIN(kxProfileScope, __LINE__)(name)
+#define ENGINE_PROFILE_JOIN_IMPL(a, b) a##b
+#define ENGINE_PROFILE_JOIN(a, b) ENGINE_PROFILE_JOIN_IMPL(a, b)
+#define ENGINE_PROFILE_SCOPE(name) ::engine::ProfileScope ENGINE_PROFILE_JOIN(engineProfileScope, __LINE__)(name)

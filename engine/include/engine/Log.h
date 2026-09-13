@@ -2,7 +2,7 @@
 
 #include <cstdarg>
 
-namespace kx
+namespace engine
 {
 
   enum LogLevel
@@ -38,4 +38,4 @@ namespace kx
     static void setSink(Sink sink);
   };
 
-} // namespace kx
+} // namespace engine

@@ -7,6 +7,7 @@
 #include "engine/Mirror.h"
 #include "engine/Listener.h"
 #include "engine/MeshRenderer.h"
+#include "engine/DynamicBVH.h"
 #include "engine/RenderContext.h"
 #include <ct/vector.hpp>
 
@@ -43,7 +44,7 @@ namespace engine
         World(const World &) = delete;
         World &operator=(const World &) = delete;
 
-        bool init(gpu::Device &dev, kx::ShaderDialect dialect) { return mRenderer.init(dev, dialect); }
+        bool init(gpu::Device &dev, ShaderDialect dialect) { return mRenderer.init(dev, dialect); }
         void shutdown() { mRenderer.shutdown(); }
         // per-frame 3D render counters (draw calls, state switches) -
         // the 3D counterpart of BatchRenderer::getStats()
@@ -81,13 +82,32 @@ namespace engine
 
         MeshRenderer mRenderer;
         Transform mCamTform;
-        Vector mAmbient{0.1f, 0.1f, 0.1f};
+        Vector mAmbient{0.5f, 0.5f, 0.5f};
 
     public:
         // AmbientLight - 0..1 per channel
         void setAmbient(const Vector &rgb) { mAmbient = rgb; }
 
     private:
+
+        /* Broad-phase culling: every model with a cull box goes into the
+           BVH in world space each frame, and a camera asks the tree which
+           ones its frustum touches instead of testing all of them. Models
+           without a usable box (no cull box, or a moving/boned one whose
+           box is rebuilt anyway) stay in mAlwaysVisit and are visited
+           unconditionally, so the result is never smaller than before.
+           MeshModel::render still does the exact per-model frustum test -
+           this only decides which models it is worth asking. */
+        DynamicBVH mCullTree;
+        /* A dynamic BVH is meant to be kept, not rebuilt: each model
+           holds its leaf ID and only re-inserts when its world box
+           actually changes (DynamicBVH::update returns early otherwise),
+           so a still scene costs one box compare per model per frame. */
+        struct CullEntry { Model *model; DynamicBVH::ID id; Box box; };
+        ct::Vector<CullEntry> mCullEntries;
+        ct::Vector<Model *> mAlwaysVisit, mCullHits;
+        void buildCullTree();
+        void gatherVisible(const Frustum &worldFrustum, ct::Vector<Model *> &out);
 
         ct::Vector<Model *> mOrdMods, mUnordMods;
         ct::Vector<Camera *> mCameras;

@@ -4,7 +4,7 @@
 
 #include <SDL2/SDL.h>
 
-namespace kx
+namespace engine
 {
 
   Profiler &Profiler::getSingleton()
@@ -140,4 +140,4 @@ namespace kx
       Profiler::getSingleton().end();
   }
 
-} // namespace kx
+} // namespace engine

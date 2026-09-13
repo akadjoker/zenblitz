@@ -7,7 +7,7 @@
 
 #include "gpu/GPUBackend.h"
 
-namespace kx
+namespace engine
 {
 
   Graphics::Graphics()
@@ -188,7 +188,7 @@ namespace kx
     if (!mGpu || !mInFrame)
       return;
     {
-      KX_PROFILE_SCOPE("Graphics/EndPass");
+      ENGINE_PROFILE_SCOPE("Graphics/EndPass");
       mGpu->endRenderPass();
     }
     mInFrame = false;
@@ -246,14 +246,14 @@ namespace kx
   {
     if (!mGpu) return;
     {
-      KX_PROFILE_SCOPE("Graphics/EndSurfacePass");
+      ENGINE_PROFILE_SCOPE("Graphics/EndSurfacePass");
       mGpu->endRenderPass();
     }
     {
-      KX_PROFILE_SCOPE("Graphics/Present");
+      ENGINE_PROFILE_SCOPE("Graphics/Present");
       mGpu->present();
     }
     logErrors("Graphics::endSurfaceBlit");
   }
 
-} // namespace kx
+} // namespace engine

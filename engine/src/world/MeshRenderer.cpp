@@ -1,8 +1,9 @@
 #include "engine/MeshRenderer.h"
+#include "engine/DynamicMesh.h"
 #include "engine/Profiler.h"
 #include <cstring>
 #include <cmath>
-#include <string>
+#include <ct/string.hpp>
 
 namespace engine
 {
@@ -21,9 +22,8 @@ namespace engine
         "  float u_fogNear;\n"
         "  float u_fogFar;\n"
         "  float u_morph;\n"
-        "  vec4 u_texMatrix;\n" // xy = scale, zw = position
-        "  float u_texRotation;\n"
-        "  int u_texMatrixUsed;\n"
+        "  vec4 u_texMatrix[2];\n"
+        "  vec4 u_texParams[2];\n"
         // no explicit padding here: std140 already rounds up to the next
         // 16-byte boundary before a vec4 array. An `int u_pad2[2]` would
         // take 32 bytes in std140 (every array element is 16-aligned),
@@ -33,6 +33,7 @@ namespace engine
         "  vec4 u_lightPosType[4];\n"
         "  vec4 u_lightColorRange[4];\n"
         "  vec4 u_lightDir[4];\n"
+        "  vec4 u_lightSpot[4];\n"
         "};\n";
 
     static const char kVertexBody[] =
@@ -41,7 +42,10 @@ namespace engine
         "#ifndef MORPH\n"
         "layout(location=2) in vec4 a_color;\n"
         "#endif\n"
-        "layout(location=3) in vec2 a_uv;\n"
+        "layout(location=3) in vec2 a_uv0;\n"
+        "#ifndef MORPH\n"
+        "layout(location=8) in vec2 a_uv1;\n"
+        "#endif\n"
         "#ifdef SKINNED\n"
         "layout(location=4) in vec4 a_bones;\n"
         "layout(location=5) in vec4 a_weights;\n"
@@ -54,7 +58,8 @@ namespace engine
         "out vec3 v_worldPos;\n"
         "out vec3 v_normal;\n"
         "out vec4 v_color;\n"
-        "out vec2 v_uv;\n"
+        "out vec2 v_uv0;\n"
+        "out vec2 v_uv1;\n"
         "void main(){\n"
         "#ifdef MORPH\n"
         "  vec4 lp = vec4(mix(a_pos, a_posB, u_morph),1.0);\n"
@@ -84,7 +89,12 @@ namespace engine
         "  v_worldPos = wp.xyz;\n"
         "  v_normal = mat3(u_model) * ln;\n"
         "  v_color = a_color;\n"
-        "  v_uv = a_uv;\n"
+        "  v_uv0 = a_uv0;\n"
+        "#ifdef MORPH\n"
+        "  v_uv1 = a_uv0;\n"
+        "#else\n"
+        "  v_uv1 = a_uv1;\n"
+        "#endif\n"
         "  gl_Position = u_mvp * lp;\n"
         "}\n";
 
@@ -92,8 +102,10 @@ namespace engine
         "in vec3 v_worldPos;\n"
         "in vec3 v_normal;\n"
         "in vec4 v_color;\n"
-        "in vec2 v_uv;\n"
-        "uniform sampler2D u_texture;\n"
+        "in vec2 v_uv0;\n"
+        "in vec2 v_uv1;\n"
+        "uniform sampler2D u_texture0;\n"
+        "uniform sampler2D u_texture1;\n"
         "out vec4 o_color;\n"
         "const int FX_FULLBRIGHT=0x0001;\n"
         "const int FX_VERTEXCOLOR=0x0002;\n"
@@ -105,14 +117,28 @@ namespace engine
         "void main(){\n"
         "  vec4 base = u_color;\n"
         "  if ((u_flags & FX_VERTEXCOLOR) != 0) base *= v_color;\n"
-        "  vec2 uv = v_uv;\n"
-        "  if (u_texMatrixUsed != 0) {\n"
-        "    float c = cos(u_texRotation), s = sin(u_texRotation);\n"
-        "    uv = vec2(uv.x*c*u_texMatrix.x - uv.y*s*u_texMatrix.y, uv.x*s*u_texMatrix.x + uv.y*c*u_texMatrix.y);\n"
-        "    uv += u_texMatrix.zw;\n"
+        "  vec2 uv0 = v_uv0;\n"
+        "  vec2 uv1 = v_uv1;\n"
+        "  if (u_texParams[0].y != 0.0) {\n"
+        "    float c = cos(u_texParams[0].x), s = sin(u_texParams[0].x);\n"
+        "    uv0 = vec2(uv0.x*c*u_texMatrix[0].x - uv0.y*s*u_texMatrix[0].y, uv0.x*s*u_texMatrix[0].x + uv0.y*c*u_texMatrix[0].y) + u_texMatrix[0].zw;\n"
         "  }\n"
-        "  vec4 tex = texture(u_texture, uv);\n"
-        "  base *= tex;\n"
+        "  if (u_texParams[1].y != 0.0) {\n"
+        "    float c = cos(u_texParams[1].x), s = sin(u_texParams[1].x);\n"
+        "    uv1 = vec2(uv1.x*c*u_texMatrix[1].x - uv1.y*s*u_texMatrix[1].y, uv1.x*s*u_texMatrix[1].x + uv1.y*c*u_texMatrix[1].y) + u_texMatrix[1].zw;\n"
+        "  }\n"
+        "  vec4 tex0 = texture(u_texture0, uv0);\n"
+        "  base *= tex0;\n"
+        "  if (u_texParams[1].z != 0.0) {\n"
+        "    vec4 tex1 = texture(u_texture1, u_texParams[1].w != 0.0 ? uv1 : uv0);\n"
+        "    int blend = int(u_texParams[1].z + 0.5) - 1;\n"
+        "    if (blend == 0) base = tex1;\n"
+        "    else if (blend == 1) base = mix(base, tex1, tex1.a);\n"
+        "    else if (blend == 2) base *= tex1;\n"
+        "    else if (blend == 3) base.rgb += tex1.rgb;\n"
+        "    else if (blend == 4) base.rgb = vec3(dot(base.rgb * 2.0 - 1.0, tex1.rgb * 2.0 - 1.0));\n"
+        "    else if (blend == 5) base.rgb *= tex1.rgb * 2.0;\n"
+        "  }\n"
         "  if ((u_flags & FX_ALPHATEST) != 0 && base.a < 0.5) discard;\n"
         "  vec3 n;\n"
         "  if ((u_flags & FX_FLATSHADED) != 0) {\n"
@@ -134,11 +160,15 @@ namespace engine
         "        vec3 delta = u_lightPosType[i].xyz - v_worldPos;\n"
         "        float dist = length(delta);\n"
         "        toLight = dist > 0.0001 ? delta / dist : vec3(0,1,0);\n"
-        "        atten = clamp(1.0 - dist / max(range,0.0001), 0.0, 1.0);\n"
+        "        atten = clamp(range / max(dist,0.0001), 0.0, 1.0);\n"
         "        if (type > 1.5) {\n"
-        "          float inner = u_lightDir[i].w;\n"
+        "          float cosInner = u_lightSpot[i].x;\n"
+        "          float cosOuter = u_lightSpot[i].y;\n"
         "          float cosAngle = dot(normalize(-toLight), normalize(u_lightDir[i].xyz));\n"
-        "          float spot = clamp((cosAngle - inner) / max(1.0 - inner, 0.0001), 0.0, 1.0);\n"
+        "          float spot = 0.0;\n"
+        "          if (cosAngle >= cosInner) spot = 1.0;\n"
+        "          else if (cosAngle > cosOuter)\n"
+        "            spot = (cosAngle - cosOuter) / max(cosInner - cosOuter, 0.0001);\n"
         "          atten *= spot;\n"
         "        }\n"
         "      }\n"
@@ -167,10 +197,10 @@ namespace engine
         "  o_color = vec4(litColor, alpha);\n"
         "}\n";
 
-    static std::string shaderSource(kx::ShaderDialect dialect, bool fragment, bool skinned, bool morph)
+    static ct::String shaderSource(ShaderDialect dialect, bool fragment, bool skinned, bool morph)
     {
-        std::string s;
-        if (dialect == kx::ShaderDialect::GLSLES300)
+        ct::String s;
+        if (dialect == ShaderDialect::GLSLES300)
         {
             s += "#version 300 es\n";
             s += "precision highp float;\n";
@@ -187,7 +217,7 @@ namespace engine
         return s;
     }
 
-    bool MeshRenderer::init(gpu::Device &dev, kx::ShaderDialect dialect)
+    bool MeshRenderer::init(gpu::Device &dev, ShaderDialect dialect)
     {
         mGpu = &dev;
         mDialect = dialect;
@@ -289,11 +319,22 @@ namespace engine
             mLightBlock.colorRange[i][1] = l->getColor().y;
             mLightBlock.colorRange[i][2] = l->getColor().z;
             mLightBlock.colorRange[i][3] = l->getRange();
-            float innerCos = std::cos(l->getInnerAngle() * blitz::PI / 180.0f);
+            float inner = l->getInnerAngle() * blitz::PI / 180.0f;
+            float outer = l->getOuterAngle() * blitz::PI / 180.0f;
+            if (inner < 0.0f) inner = 0.0f;
+            else if (inner > blitz::PI) inner = blitz::PI;
+            if (outer < inner) outer = inner;
+            else if (outer > blitz::PI) outer = blitz::PI;
+
             mLightBlock.dir[i][0] = dir.x;
             mLightBlock.dir[i][1] = dir.y;
             mLightBlock.dir[i][2] = dir.z;
-            mLightBlock.dir[i][3] = innerCos;
+            mLightBlock.dir[i][3] = 0.0f;
+
+            mLightBlock.spot[i][0] = std::cos(inner * 0.5f);
+            mLightBlock.spot[i][1] = std::cos(outer * 0.5f);
+            mLightBlock.spot[i][2] = 1.0f;
+            mLightBlock.spot[i][3] = 0.0f;
         }
     }
 
@@ -325,8 +366,8 @@ namespace engine
             if (mPipelines[i].key == key) return &mPipelines[i];
 
         const bool morph = pk.layout == GpuGeometry::LayoutMd2Morph;
-        std::string vs = shaderSource(mDialect, false, pk.skinned, morph);
-        std::string fs = shaderSource(mDialect, true, pk.skinned, morph);
+        ct::String vs = shaderSource(mDialect, false, pk.skinned, morph);
+        ct::String fs = shaderSource(mDialect, true, pk.skinned, morph);
 
         gpu::PipelineDesc desc;
         desc.vertex.source = {vs.data(), vs.size()};
@@ -351,20 +392,32 @@ namespace engine
             desc.vertexBuffers[2].attributeCount = 1;
             desc.vertexBuffers[2].attributes[0] = {gpu::VertexFormat::Float32x2, (std::uint32_t)offsetof(Md2Uv, u), 3};
         }
+        else if (pk.layout == GpuGeometry::LayoutDynamic)
+        {
+            desc.vertexBufferCount = 1;
+            desc.vertexBuffers[0].stride = sizeof(DynamicMesh::Vertex);
+            desc.vertexBuffers[0].attributeCount = 5;
+            desc.vertexBuffers[0].attributes[0] = {gpu::VertexFormat::Float32x3, (std::uint32_t)offsetof(DynamicMesh::Vertex, coords), 0};
+            desc.vertexBuffers[0].attributes[1] = {gpu::VertexFormat::Float32x3, (std::uint32_t)offsetof(DynamicMesh::Vertex, normal), 1};
+            desc.vertexBuffers[0].attributes[2] = {gpu::VertexFormat::Unorm8x4, (std::uint32_t)offsetof(DynamicMesh::Vertex, color), 2};
+            desc.vertexBuffers[0].attributes[3] = {gpu::VertexFormat::Float32x2, (std::uint32_t)offsetof(DynamicMesh::Vertex, texCoords), 3};
+            desc.vertexBuffers[0].attributes[4] = {gpu::VertexFormat::Float32x2, (std::uint32_t)(offsetof(DynamicMesh::Vertex, texCoords) + sizeof(float) * 2), 8};
+        }
         else
         {
             desc.vertexBufferCount = 1;
             desc.vertexBuffers[0].stride = sizeof(Surface::Vertex);
-            desc.vertexBuffers[0].attributeCount = pk.skinned ? 6 : 4;
+            desc.vertexBuffers[0].attributeCount = pk.skinned ? 7 : 5;
             desc.vertexBuffers[0].attributes[0] = {gpu::VertexFormat::Float32x3, (std::uint32_t)offsetof(Surface::Vertex, coords), 0};
             desc.vertexBuffers[0].attributes[1] = {gpu::VertexFormat::Float32x3, (std::uint32_t)offsetof(Surface::Vertex, normal), 1};
             desc.vertexBuffers[0].attributes[2] = {gpu::VertexFormat::Unorm8x4, (std::uint32_t)offsetof(Surface::Vertex, color), 2};
             desc.vertexBuffers[0].attributes[3] = {gpu::VertexFormat::Float32x2, (std::uint32_t)offsetof(Surface::Vertex, texCoords), 3};
+            desc.vertexBuffers[0].attributes[4] = {gpu::VertexFormat::Float32x2, (std::uint32_t)(offsetof(Surface::Vertex, texCoords) + sizeof(float) * 2), 8};
             if (pk.skinned)
             {
                 // bone indices as Unorm8x4: the shader decodes int(x*255+0.5)
-                desc.vertexBuffers[0].attributes[4] = {gpu::VertexFormat::Unorm8x4, (std::uint32_t)offsetof(Surface::Vertex, boneBones), 4};
-                desc.vertexBuffers[0].attributes[5] = {gpu::VertexFormat::Float32x4, (std::uint32_t)offsetof(Surface::Vertex, boneWeights), 5};
+                desc.vertexBuffers[0].attributes[5] = {gpu::VertexFormat::Unorm8x4, (std::uint32_t)offsetof(Surface::Vertex, boneBones), 4};
+                desc.vertexBuffers[0].attributes[6] = {gpu::VertexFormat::Float32x4, (std::uint32_t)offsetof(Surface::Vertex, boneWeights), 5};
             }
         }
         desc.topology = gpu::Topology::Triangles;
@@ -423,8 +476,10 @@ namespace engine
             cached.bonesSlot = pk.skinned ? mGpu->uniformBlockSlot(cached.pipeline, "Bones") : -1;
             // same story as uniform blocks: the GL linker assigns texture
             // units by active-sampler order, not source declaration order
-            std::int32_t t = mGpu->textureSlot(cached.pipeline, "u_texture");
-            cached.textureSlot = t >= 0 ? t : 0;
+            std::int32_t t0 = mGpu->textureSlot(cached.pipeline, "u_texture0");
+            std::int32_t t1 = mGpu->textureSlot(cached.pipeline, "u_texture1");
+            cached.texture0Slot = t0 >= 0 ? t0 : 0;
+            cached.texture1Slot = t1 >= 0 ? t1 : 1;
         }
         mPipelines.push_back(cached);
         return &mPipelines[mPipelines.size() - 1];
@@ -455,19 +510,27 @@ namespace engine
         u.fogFar = mPending.fogFar;
         u.flags = brush.getFX();
 
-        u.texMatrix[0] = u.texMatrix[1] = 1.0f;
-        u.texMatrix[2] = u.texMatrix[3] = 0.0f;
-        u.texRotation = 0.0f;
-        u.texMatrixUsed = 0;
-        if (brush.getTextureCount() > 0)
+        for (int index = 0; index < 2; ++index)
         {
-            const BrushTexture &bt = brush.getTexture(0);
-            u.texMatrix[0] = bt.uScale;
-            u.texMatrix[1] = bt.vScale;
-            u.texMatrix[2] = bt.uPos;
-            u.texMatrix[3] = bt.vPos;
-            u.texRotation = bt.rotation;
-            u.texMatrixUsed = (bt.uScale != 1.0f || bt.vScale != 1.0f || bt.uPos != 0.0f || bt.vPos != 0.0f || bt.rotation != 0.0f) ? 1 : 0;
+            u.texMatrix[index][0] = u.texMatrix[index][1] = 1.0f;
+            u.texMatrix[index][2] = u.texMatrix[index][3] = 0.0f;
+            u.texParams[index][0] = 0.0f;
+            u.texParams[index][1] = 0.0f;
+            u.texParams[index][2] = 0.0f;
+            u.texParams[index][3] = 0.0f;
+            if (index >= brush.getTextureCount()) continue;
+            const BrushTexture &bt = brush.getTexture(index);
+            u.texMatrix[index][0] = bt.uScale;
+            u.texMatrix[index][1] = bt.vScale;
+            u.texMatrix[index][2] = bt.uPos;
+            u.texMatrix[index][3] = bt.vPos;
+            u.texParams[index][0] = bt.rotation;
+            u.texParams[index][1] = (bt.uScale != 1.0f || bt.vScale != 1.0f || bt.uPos != 0.0f || bt.vPos != 0.0f || bt.rotation != 0.0f) ? 1.0f : 0.0f;
+            if (index == 1)
+            {
+                u.texParams[index][2] = (float)(bt.blend + 1);
+                u.texParams[index][3] = bt.flags == 1 ? 1.0f : 0.0f;
+            }
         }
 
 
@@ -475,6 +538,7 @@ namespace engine
         std::memcpy(u.lightPosType, mLightBlock.posType, sizeof(u.lightPosType));
         std::memcpy(u.lightColorRange, mLightBlock.colorRange, sizeof(u.lightColorRange));
         std::memcpy(u.lightDir, mLightBlock.dir, sizeof(u.lightDir));
+        std::memcpy(u.lightSpot, mLightBlock.spot, sizeof(u.lightSpot));
 
         std::uint64_t offset = (std::uint64_t)mStagedCount * mUniformStride;
         if (mStaged.size() < offset + mUniformStride) mStaged.resize(offset + mUniformStride);
@@ -484,7 +548,7 @@ namespace engine
 
     void MeshRenderer::flushUniforms(gpu::Device &dev)
     {
-        KX_PROFILE_SCOPE("Mesh/UploadUniforms");
+        ENGINE_PROFILE_SCOPE("Mesh/UploadUniforms");
         if (mStagedCount)
         {
             std::uint64_t bytes = (std::uint64_t)mStagedCount * mUniformStride;
@@ -531,7 +595,7 @@ namespace engine
 
         const CachedPipeline *cp = pipelineFor(pk);
         if (!cp->pipeline.valid()) return;
-        bindAndDraw(dev, cp, index, mClearQuad.geometry(), mWhiteTexture, -1);
+        bindAndDraw(dev, cp, index, mClearQuad.geometry(), mWhiteTexture, mWhiteTexture, -1);
     }
 
     void MeshRenderer::draw(gpu::Device &dev, int index, const GpuGeometry &geom, const Brush &brush, int boneSlot)
@@ -550,14 +614,16 @@ namespace engine
         const CachedPipeline *cp = pipelineFor(pk);
         if (!cp->pipeline.valid()) return;
 
-        gpu::TextureHandle tex = pk.hasTexture ? brush.getTexture(0).handle : mWhiteTexture;
-        if (!tex.valid()) tex = mWhiteTexture;
+        gpu::TextureHandle tex0 = pk.hasTexture ? brush.getTexture(0).handle : mWhiteTexture;
+        gpu::TextureHandle tex1 = brush.getTextureCount() > 1 ? brush.getTexture(1).handle : mWhiteTexture;
+        if (!tex0.valid()) tex0 = mWhiteTexture;
+        if (!tex1.valid()) tex1 = mWhiteTexture;
 
-        bindAndDraw(dev, cp, index, geom, tex, pk.skinned ? boneSlot : -1);
+        bindAndDraw(dev, cp, index, geom, tex0, tex1, pk.skinned ? boneSlot : -1);
     }
 
     void MeshRenderer::bindAndDraw(gpu::Device &dev, const CachedPipeline *cp, int index, const GpuGeometry &geom,
-                                   gpu::TextureHandle tex, int boneSlot)
+                                   gpu::TextureHandle tex0, gpu::TextureHandle tex1, int boneSlot)
     {
         const bool skinned = boneSlot >= 0;
         // the GL backend re-issues glUseProgram/glBindTexture/glBindBuffer
@@ -575,11 +641,18 @@ namespace engine
         if (skinned && cp->bonesSlot >= 0)
             dev.bindUniformBuffer((std::uint32_t)cp->bonesSlot, mBoneBuffer,
                                   (std::uint64_t)boneSlot * mBoneStride, kMaxGpuBones * sizeof(Matrix4));
-        if (tex.value() != mBound.texture || cp->textureSlot != mBound.textureSlot)
+        if (tex0.value() != mBound.texture0 || cp->texture0Slot != mBound.texture0Slot)
         {
-            dev.bindTexture((std::uint32_t)cp->textureSlot, tex, mSampler);
-            mBound.texture = tex.value();
-            mBound.textureSlot = cp->textureSlot;
+            dev.bindTexture((std::uint32_t)cp->texture0Slot, tex0, mSampler);
+            mBound.texture0 = tex0.value();
+            mBound.texture0Slot = cp->texture0Slot;
+            ++mStats.textureSwitches;
+        }
+        if (tex1.value() != mBound.texture1 || cp->texture1Slot != mBound.texture1Slot)
+        {
+            dev.bindTexture((std::uint32_t)cp->texture1Slot, tex1, mSampler);
+            mBound.texture1 = tex1.value();
+            mBound.texture1Slot = cp->texture1Slot;
             ++mStats.textureSwitches;
         }
         if (geom.vb.value() != mBound.vb || geom.vbOffset != mBound.vbOffset)

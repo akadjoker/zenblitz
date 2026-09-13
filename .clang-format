@@ -1,0 +1,56 @@
+# Pins the formatting this repo already uses, so format-on-save stops
+# reformatting files to whatever default the editor's C++ extension picked
+# that day. Chosen to match the existing code, not to impose a new style -
+# the two rules that matter most here are Allman braces and *not* touching
+# comments or include order.
+---
+Language: Cpp
+BasedOnStyle: LLVM
+
+# Braces always on their own line.
+BreakBeforeBraces: Allman
+
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+ColumnLimit: 110
+
+# namespace engine { ... } indents its contents, as engine/ does throughout.
+NamespaceIndentation: All
+# `public:` / `private:` sit one level out from the members they introduce.
+AccessModifierOffset: -4
+
+# `Surface *s`, not `Surface* s` - what the engine and editor sources use.
+PointerAlignment: Right
+ReferenceAlignment: Right
+
+# Leave comments exactly as written. Large parts of this codebase carry
+# hand-wrapped explanation blocks (and ported Blitz3D sources keep their
+# original comments verbatim); reflowing them rewrites text nobody asked
+# to have rewritten and makes diffs unreadable.
+ReflowComments: false
+
+# Include order here is deliberate (own header, then engine/, then SDL,
+# then ct/, then std) and in a few translation units it is load-bearing.
+# Sorting would churn every file and could break those.
+SortIncludes: false
+
+# Keep short constructs the sources already write on one line, without
+# forcing anything else onto one.
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortIfStatementsOnASingleLine: WithoutElse
+AllowShortLoopsOnASingleLine: true
+AllowShortCaseLabelsOnASingleLine: true
+AllowShortBlocksOnASingleLine: Empty
+
+# Constructor initialiser lists: `: Object(m), mSpace(m.mSpace),` wrapping
+# onto continuation lines rather than one-per-line.
+BreakConstructorInitializers: BeforeColon
+PackConstructorInitializers: NextLine
+
+AlignAfterOpenBracket: Align
+AlignTrailingComments: true
+KeepEmptyLinesAtTheStartOfBlocks: false
+MaxEmptyLinesToKeep: 1
+SpaceAfterCStyleCast: false
+Cpp11BracedListStyle: true

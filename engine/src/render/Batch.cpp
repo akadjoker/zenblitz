@@ -2,22 +2,24 @@
 
 #include "engine/Log.h"
 
-#include "FontData.h"
+#include "FontLiberationMono.h"
+
+#include "stb_truetype.h"
 
 #include <SDL2/SDL_timer.h>
 
 #include <cmath>
 #include <cstring>
 
-namespace kx
+namespace engine
 {
 
   namespace
   {
 
-    constexpr int kFontCols = 16;
-    constexpr int kFontAtlasWidth = 128;
-    constexpr int kFontAtlasHeight = 48;
+    constexpr float kFontBakeHeight = 32.0f;
+    constexpr int kFontAtlasWidth = 512;
+    constexpr int kFontAtlasHeight = 512;
     constexpr float kPi = 3.14159265359f;
     constexpr float kDeg2Rad = kPi / 180.0f;
 
@@ -1502,23 +1504,54 @@ namespace kx
 
   void BatchRenderer::setupFontTexture()
   {
-    ct::Vector<unsigned char> atlas(static_cast<std::size_t>(kFontAtlasWidth) * kFontAtlasHeight * 4, static_cast<unsigned char>(0));
-    for (int g = 0; g < 96; ++g)
+    ct::Vector<unsigned char> coverage(static_cast<std::size_t>(kFontAtlasWidth) * kFontAtlasHeight,
+                                       static_cast<unsigned char>(0));
+    stbtt_bakedchar baked[kFontGlyphCount];
+    const int rows = stbtt_BakeFontBitmap(kLiberationMonoRegular, 0, kFontBakeHeight, coverage.data(),
+                                          kFontAtlasWidth, kFontAtlasHeight,
+                                          kFontFirstChar, kFontGlyphCount, baked);
+    if (rows <= 0)
     {
-      const int cellX = (g % kFontCols) * 8;
-      const int cellY = (g / kFontCols) * 8;
-      for (int row = 0; row < 8; ++row)
-      {
-        const unsigned char bits = kFont8x8[g][row];
-        for (int col = 0; col < 8; ++col)
-        {
-          if (!((bits >> col) & 1))
-            continue;
-          unsigned char *p = &atlas[(static_cast<std::size_t>(cellY + row) * kFontAtlasWidth + cellX + col) * 4];
-          p[0] = p[1] = p[2] = p[3] = 255;
-        }
-      }
+      Log::error("BatchRenderer: could not bake the font atlas");
+      return;
     }
+
+    stbtt_fontinfo info;
+    if (stbtt_InitFont(&info, kLiberationMonoRegular,
+                       stbtt_GetFontOffsetForIndex(kLiberationMonoRegular, 0)))
+    {
+      int ascent = 0, descent = 0, lineGap = 0;
+      stbtt_GetFontVMetrics(&info, &ascent, &descent, &lineGap);
+      const float scale = stbtt_ScaleForPixelHeight(&info, kFontBakeHeight);
+      mFontAscent = ascent * scale;
+      mFontLineHeight = (ascent - descent + lineGap) * scale;
+    }
+    else
+    {
+      mFontAscent = kFontBakeHeight * 0.8f;
+      mFontLineHeight = kFontBakeHeight;
+    }
+
+    const float invW = 1.0f / static_cast<float>(kFontAtlasWidth);
+    const float invH = 1.0f / static_cast<float>(kFontAtlasHeight);
+    for (int g = 0; g < kFontGlyphCount; ++g)
+    {
+      const stbtt_bakedchar &b = baked[g];
+      FontGlyph &glyph = mGlyphs[g];
+      glyph.u0 = b.x0 * invW;
+      glyph.v0 = b.y0 * invH;
+      glyph.u1 = b.x1 * invW;
+      glyph.v1 = b.y1 * invH;
+      glyph.width = static_cast<float>(b.x1 - b.x0);
+      glyph.height = static_cast<float>(b.y1 - b.y0);
+      glyph.xoff = b.xoff;
+      glyph.yoff = b.yoff;
+      glyph.advance = b.xadvance;
+    }
+
+    ct::Vector<unsigned char> atlas(coverage.size() * 4, static_cast<unsigned char>(255));
+    for (std::size_t i = 0; i < coverage.size(); ++i)
+      atlas[i * 4 + 3] = coverage[i];
 
     gpu::TextureDesc desc;
     desc.width = kFontAtlasWidth;
@@ -1554,14 +1587,14 @@ namespace kx
     z = transformed.z;
   }
 
-  FloatRect fontGlyphUVRect(unsigned char code)
+  const FontGlyph *BatchRenderer::glyphFor(unsigned char code) const
   {
-    if (code < 32 || code > 127 || code == ' ')
-      return FloatRect{0.0f, 0.0f, 0.0f, 0.0f};
-    const float cw = 8.0f / static_cast<float>(kFontAtlasWidth);
-    const float ch = 8.0f / static_cast<float>(kFontAtlasHeight);
-    const int g = code - 32;
-    return FloatRect{static_cast<float>(g % kFontCols) * cw, static_cast<float>(g / kFontCols) * ch, cw, ch};
+    if (code < kFontFirstChar)
+      return nullptr;
+    const int index = code - kFontFirstChar;
+    if (index >= kFontGlyphCount)
+      return nullptr;
+    return &mGlyphs[index];
   }
 
   void BatchRenderer::drawText(float x, float y, float size, const char *text)
@@ -1569,53 +1602,69 @@ namespace kx
     if (!text || size <= 0.0f)
       return;
 
+    const float scale = size / kFontBakeHeight;
+    const float lineStep = (mFontLineHeight > 0.0f ? mFontLineHeight : kFontBakeHeight) * scale;
+
     setTexture(mFontTexture);
     begin(ModeTriangles);
     float penX = x;
-    float penY = y;
+    float baseline = y + mFontAscent * scale;
     for (const char *c = text; *c; ++c)
     {
       if (*c == '\n')
       {
         penX = x;
-        penY += size;
+        baseline += lineStep;
         continue;
       }
-      unsigned char code = static_cast<unsigned char>(*c);
-      if (code < 32 || code > 127)
-        code = '?';
-      const FloatRect rect = fontGlyphUVRect(code);
-      if (rect.width > 0.0f)
+      const FontGlyph *glyph = glyphFor(static_cast<unsigned char>(*c));
+      if (!glyph)
+        glyph = glyphFor('?');
+      if (!glyph)
+        continue;
+
+      if (glyph->width > 0.0f && glyph->height > 0.0f)
       {
-        const float u0 = rect.x, v0 = rect.y, u1 = rect.x + rect.width, v1 = rect.y + rect.height;
-        emitTexturedTriangle(penX, penY, u0, v0, penX + size, penY, u1, v0, penX, penY + size, u0, v1);
-        emitTexturedTriangle(penX + size, penY, u1, v0, penX + size, penY + size, u1, v1, penX, penY + size, u0, v1);
+        const float x0 = penX + glyph->xoff * scale;
+        const float y0 = baseline + glyph->yoff * scale;
+        const float x1 = x0 + glyph->width * scale;
+        const float y1 = y0 + glyph->height * scale;
+        emitTexturedTriangle(x0, y0, glyph->u0, glyph->v0, x1, y0, glyph->u1, glyph->v0,
+                             x0, y1, glyph->u0, glyph->v1);
+        emitTexturedTriangle(x1, y0, glyph->u1, glyph->v0, x1, y1, glyph->u1, glyph->v1,
+                             x0, y1, glyph->u0, glyph->v1);
       }
-      penX += size;
+      penX += glyph->advance * scale;
     }
     end();
   }
 
   float BatchRenderer::textWidth(float size, const char *text) const
   {
-    if (!text)
+    if (!text || size <= 0.0f)
       return 0.0f;
-    std::uint32_t longest = 0;
-    std::uint32_t line = 0;
+
+    const float scale = size / kFontBakeHeight;
+    float longest = 0.0f;
+    float line = 0.0f;
     for (const char *c = text; *c; ++c)
     {
       if (*c == '\n')
       {
         if (line > longest)
           longest = line;
-        line = 0;
+        line = 0.0f;
         continue;
       }
-      ++line;
+      const FontGlyph *glyph = glyphFor(static_cast<unsigned char>(*c));
+      if (!glyph)
+        glyph = glyphFor('?');
+      if (glyph)
+        line += glyph->advance * scale;
     }
     if (line > longest)
       longest = line;
-    return static_cast<float>(longest) * size;
+    return longest;
   }
 
-} // namespace kx
+} // namespace engine

@@ -1,53 +1,51 @@
 #include "engine/MeshModel.h"
 #include "engine/Animator.h"
+#include <utility>
 
 namespace engine
 {
-    MeshModel::MeshModel() {}
+    MeshModel::MeshModel() : mRep(new Rep()) {}
 
-    MeshModel::MeshModel(const MeshModel &t) : Model(t)
+    MeshModel::MeshModel(const MeshModel &t) : Model(t), mRep(t.mRep)
     {
-        for (size_t k = 0; k < t.mSurfaces.size(); ++k)
-        {
-            Surface *src = t.mSurfaces[k];
-            Surface *dst = new Surface();
-            dst->setName(src->getName());
-            dst->setBrush(src->getBrush());
-            for (int j = 0; j < src->numVertices(); ++j) dst->addVertex(src->getVertex(j));
-            for (int j = 0; j < src->numTriangles(); ++j) dst->addTriangle(src->getTriangle(j));
-            mSurfaces.push_back(dst);
-        }
-        mCullBox = t.mCullBox;
+        ++mRep->refCount;
         mSurfBones.resize(t.mSurfBones.size());
     }
 
     MeshModel::~MeshModel()
     {
-        delete mCollider;
-        for (size_t k = 0; k < mSurfaces.size(); ++k) delete mSurfaces[k];
+        if (!--mRep->refCount) delete mRep;
     }
 
     void MeshModel::freeGpu(gpu::Device &dev)
     {
-        for (size_t k = 0; k < mSurfaces.size(); ++k) mSurfaces[k]->freeGpu(dev);
+        // The Rep (and so every Surface's vertex/index buffer) is shared
+        // by every model cloned from it, so only the last one may free
+        // them - same rule MD2Model::freeGpu already follows. Without
+        // this, freeing one CopyEntity() clone destroys buffers its
+        // siblings are still binding, and the next frame's draw fails
+        // with "invalid resource handle" (castle.bb, which frees a
+        // bullet/spark copy every few frames).
+        if (mRep->refCount != 1) return;
+        for (size_t k = 0; k < mRep->surfaces.size(); ++k) mRep->surfaces[k]->freeGpu(dev);
     }
 
     Surface *MeshModel::createSurface(const Brush &b)
     {
-        Surface *s = new Surface();
-        mSurfaces.push_back(s);
+        Surface *s = new Surface(&mRep->mon);
+        mRep->surfaces.push_back(s);
         s->setBrush(b);
-        ++mGeomChanges;
-        ++mBrushChanges;
+        ++mRep->geomChanges;
+        ++mRep->brushChanges;
         return s;
     }
 
     Surface *MeshModel::findSurface(const Brush &b) const
     {
-        for (size_t k = 0; k < mSurfaces.size(); ++k)
+        for (size_t k = 0; k < mRep->surfaces.size(); ++k)
         {
-            Surface *s = mSurfaces[k];
-            if (s->getBrush().getColor() != b.getColor()) continue;
+            Surface *s = mRep->surfaces[k];
+            if (!s->getBrush().sameAs(b)) continue;
             return s;
         }
         return nullptr;
@@ -55,17 +53,17 @@ namespace engine
 
     void MeshModel::paint(const Brush &b)
     {
-        for (size_t k = 0; k < mSurfaces.size(); ++k) mSurfaces[k]->setBrush(b);
-        ++mBrushChanges;
+        for (size_t k = 0; k < mRep->surfaces.size(); ++k) mRep->surfaces[k]->setBrush(b);
+        ++mRep->brushChanges;
     }
 
     void MeshModel::add(const MeshModel &t)
     {
-        if (mCullBox.empty() && !t.mCullBox.empty()) setCullBox(t.mCullBox);
+        if (mRep->cullBox.empty() && !t.mRep->cullBox.empty()) setCullBox(t.mRep->cullBox);
 
-        for (size_t k = 0; k < t.mSurfaces.size(); ++k)
+        for (size_t k = 0; k < t.mRep->surfaces.size(); ++k)
         {
-            Surface *src = t.mSurfaces[k];
+            Surface *src = t.mRep->surfaces[k];
             Surface *dst = findSurface(src->getBrush());
             if (!dst) dst = createSurface(src->getBrush());
             int base = dst->numVertices();
@@ -79,15 +77,15 @@ namespace engine
             }
             for (int j = 0; j < src->numVertices(); ++j) dst->addVertex(src->getVertex(j));
         }
-        ++mGeomChanges;
+        ++mRep->geomChanges;
     }
 
     void MeshModel::transform(const Transform &t)
     {
         blitz::Matrix co = t.m.cofactor();
-        for (size_t k = 0; k < mSurfaces.size(); ++k)
+        for (size_t k = 0; k < mRep->surfaces.size(); ++k)
         {
-            Surface *s = mSurfaces[k];
+            Surface *s = mRep->surfaces[k];
             for (int j = 0; j < s->numVertices(); ++j)
             {
                 const Vector &v = s->getVertex(j).coords;
@@ -96,14 +94,14 @@ namespace engine
                 s->setNormal(j, co * n);
             }
         }
-        ++mGeomChanges;
+        ++mRep->geomChanges;
     }
 
     void MeshModel::flipTriangles()
     {
-        for (size_t k = 0; k < mSurfaces.size(); ++k)
+        for (size_t k = 0; k < mRep->surfaces.size(); ++k)
         {
-            Surface *s = mSurfaces[k];
+            Surface *s = mRep->surfaces[k];
             for (int j = 0; j < s->numVertices(); ++j)
                 s->setNormal(j, -s->getVertex(j).normal);
             for (int j = 0; j < s->numTriangles(); ++j)
@@ -113,44 +111,44 @@ namespace engine
                 s->setTriangle(j, t);
             }
         }
-        ++mGeomChanges;
+        ++mRep->geomChanges;
     }
 
     void MeshModel::updateNormals()
     {
-        if (mNormsValid != mGeomChanges)
+        if (mRep->normsValid != mRep->geomChanges)
         {
-            for (size_t k = 0; k < mSurfaces.size(); ++k) mSurfaces[k]->updateNormals();
-            mNormsValid = mGeomChanges;
+            for (size_t k = 0; k < mRep->surfaces.size(); ++k) mRep->surfaces[k]->updateNormals();
+            mRep->normsValid = mRep->geomChanges;
         }
     }
 
     const Box &MeshModel::getBox() const
     {
-        if (mBoxValid != mGeomChanges)
+        if (mRep->boxValid != mRep->geomChanges)
         {
-            mBox.clear();
-            for (size_t k = 0; k < mSurfaces.size(); ++k)
+            mRep->box.clear();
+            for (size_t k = 0; k < mRep->surfaces.size(); ++k)
             {
-                Surface *s = mSurfaces[k];
+                Surface *s = mRep->surfaces[k];
                 for (int j = 0; j < s->numVertices(); ++j)
-                    mBox.update(s->getVertex(j).coords);
+                    mRep->box.update(s->getVertex(j).coords);
             }
-            mBoxValid = mGeomChanges;
+            mRep->boxValid = mRep->geomChanges;
         }
-        return mBox;
+        return mRep->box;
     }
 
     MeshCollider *MeshModel::getCollider() const
     {
-        if (mCollValid != mGeomChanges)
+        if (mRep->collValid != mRep->geomChanges)
         {
-            delete mCollider;
+            delete mRep->collider;
             ct::Vector<MeshCollider::Vertex> verts;
             ct::Vector<MeshCollider::Triangle> tris;
-            for (size_t k = 0; k < mSurfaces.size(); ++k)
+            for (size_t k = 0; k < mRep->surfaces.size(); ++k)
             {
-                Surface *s = mSurfaces[k];
+                Surface *s = mRep->surfaces[k];
                 for (int j = 0; j < s->numTriangles(); ++j)
                 {
                     MeshCollider::Triangle q;
@@ -168,10 +166,10 @@ namespace engine
                     verts.push_back(q);
                 }
             }
-            mCollider = new MeshCollider(verts, tris);
-            mCollValid = mGeomChanges;
+            mRep->collider = new MeshCollider(verts, tris);
+            mRep->collValid = mRep->geomChanges;
         }
-        return mCollider;
+        return mRep->collider;
     }
 
     bool MeshModel::collide(const Line &line, float radius, Collision *currColl, const Transform &t)
@@ -186,7 +184,7 @@ namespace engine
 
     void MeshModel::setRenderBrush(const Brush &b)
     {
-        ++mBrushChanges;
+        ++mRep->brushChanges;
         Model::setRenderBrush(b);
     }
 
@@ -196,10 +194,10 @@ namespace engine
         const ct::Vector<Object *> &bones = getAnimator()->getObjects();
 
         mSurfBones.resize(bones.size());
-        mBoneTforms.resize(bones.size());
+        mRep->boneTforms.resize(bones.size());
 
         for (size_t k = 0; k < bones.size(); ++k)
-            mBoneTforms[k] = -bones[k]->getWorldTform();
+            mRep->boneTforms[k] = -bones[k]->getWorldTform();
     }
 
     bool MeshModel::render(const RenderContext &rc)
@@ -210,22 +208,22 @@ namespace engine
         Frustum modelFrustum(rc.getWorldFrustum(), -getRenderTform());
         if (!modelFrustum.cull(b)) return false;
 
-        if (mLocalBrushChanges != mBrushChanges)
+        if (mLocalBrushChanges != mRep->brushChanges)
         {
             mBrushes.clear();
-            for (size_t k = 0; k < mSurfaces.size(); ++k)
+            for (size_t k = 0; k < mRep->surfaces.size(); ++k)
             {
-                Surface *s = mSurfaces[k];
+                Surface *s = mRep->surfaces[k];
                 mBrushes.push_back(Brush(s->getBrush(), getRenderBrush()));
             }
-            mLocalBrushChanges = mBrushChanges;
+            mLocalBrushChanges = mRep->brushChanges;
         }
 
         if (mSurfBones.empty())
         {
-            for (size_t k = 0; k < mSurfaces.size(); ++k)
+            for (size_t k = 0; k < mRep->surfaces.size(); ++k)
             {
-                Surface *s = mSurfaces[k];
+                Surface *s = mRep->surfaces[k];
                 if (s->numTriangles())
                     enqueue(s, mBrushes[k]);
             }
@@ -236,16 +234,16 @@ namespace engine
         mBoneMats.resize(bones.size());
         for (size_t k = 0; k < bones.size(); ++k)
         {
-            Transform t = bones[k]->getRenderTform() * mBoneTforms[k];
+            Transform t = bones[k]->getRenderTform() * mRep->boneTforms[k];
             mSurfBones[k].coordTform = t;
             mSurfBones[k].normalTform = t.m.cofactor();
             mBoneMats[k] = Matrix4::fromBlitz(t);
         }
 
         bool trans = false;
-        for (size_t k = 0; k < mSurfaces.size(); ++k)
+        for (size_t k = 0; k < mRep->surfaces.size(); ++k)
         {
-            Surface *s = mSurfaces[k];
+            Surface *s = mRep->surfaces[k];
             if (mBrushes[k].getBlend() == BlendReplace)
             {
                 if (s->numTriangles())
@@ -263,9 +261,9 @@ namespace engine
     {
         if (type == QueueTransparent && !mSurfBones.empty())
         {
-            for (size_t k = 0; k < mSurfaces.size(); ++k)
+            for (size_t k = 0; k < mRep->surfaces.size(); ++k)
             {
-                Surface *s = mSurfaces[k];
+                Surface *s = mRep->surfaces[k];
                 if (mBrushes[k].getBlend() != BlendReplace)
                 {
                     if (s->numTriangles())
@@ -280,9 +278,6 @@ namespace engine
         ct::Vector<QueueEntry> &q = queue(type);
         for (size_t k = 0; k < q.size(); ++k)
         {
-            // GPU skinning keeps the bind-pose vertex buffer static (uploaded
-            // once); only models with more bones than the shader's block
-            // holds are skinned on the CPU every frame.
             if (mSurfBones.empty() || gpuSkinned())
                 q[k].surface->ensureGpu(dev);
             else

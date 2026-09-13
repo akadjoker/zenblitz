@@ -12,12 +12,18 @@
 #include "engine/Platform.h"
 #include "engine/Texture.h"
 #include "engine/Model.h"
+#include "engine/VoxelSprite.h"
 #include <cstdio>
 
 namespace bb3d
 {
     extern engine::Platform *platform_for(zen::VM *vm);
     extern engine::Entity *entity_of(long long h);
+    // bb_cmds_image.cpp: encodes a (texture, frame) pair into the same
+    // negative handle space ImageBuffer uses, so SetBuffer/Color/Rect/
+    // Text and friends can target a CreateTexture()'d texture's canvas
+    // without knowing it isn't an Image.
+    extern long long texture_buffer_handle(long long texture, int frame);
 }
 
 namespace
@@ -40,6 +46,15 @@ namespace bb3d
     static ct::HashMap<long long, engine::Texture *> g_textures;
     static long long g_next_texture = 0;
 
+    struct VoxelMaterial
+    {
+        engine::Texture *texture = nullptr;
+        int columns = 1, rows = 1;
+        int firstFrame = 0, frameCount = 1;
+    };
+    static ct::HashMap<long long, VoxelMaterial *> g_voxel_materials;
+    static long long g_next_voxel_material = 0;
+
     static long long store_texture(engine::Texture *t)
     {
         long long h = ++g_next_texture;
@@ -58,6 +73,13 @@ namespace bb3d
         for (auto &e : g_textures) engine::Texture::release(e.value);
         g_textures.clear();
         g_next_texture = 0;
+        for (auto &e : g_voxel_materials)
+        {
+            engine::Texture::release(e.value->texture);
+            delete e.value;
+        }
+        g_voxel_materials.clear();
+        g_next_voxel_material = 0;
         for (size_t k = 0; k < g_brushes.size(); ++k) delete g_brushes[k];
         g_brushes.clear();
     }
@@ -85,6 +107,36 @@ namespace bb3d
         return 1;
     }
 
+    static int c_CreateTexture(VM *vm, Value *args, int nargs)
+    {
+        (void)nargs;
+        engine::Texture *t = engine::Texture::create(
+            (int)arg_int(args[0]), (int)arg_int(args[1]), (int)arg_int(args[2]), (int)arg_int(args[3]));
+        if (!t)
+        {
+            char msg[128];
+            snprintf(msg, sizeof(msg), "CreateTexture: illegal size or frame count");
+            zen::backend_log(vm->backend(), zen::LOG_WARN, msg);
+        }
+        args[0] = val_int(t ? store_texture(t) : 0);
+        return 1;
+    }
+
+    // TextureBuffer(texture,frame): only a create()d texture has a canvas
+    // to draw into (Texture::canvas is null for a load()ed one, same as
+    // the original's getCanvas() needing color depth to draw with) - so
+    // this returns 0 for anything else, and SetBuffer's own "buffer does
+    // not exist" check catches a script trying to draw on it anyway.
+    static int c_TextureBuffer(VM *vm, Value *args, int nargs)
+    {
+        (void)vm; (void)nargs;
+        const long long handle = arg_int(args[0]);
+        const int frame = (int)arg_int(args[1]);
+        engine::Texture *t = texture_of(handle);
+        args[0] = val_int(t && t->canvas(frame) ? texture_buffer_handle(handle, frame) : 0);
+        return 1;
+    }
+
     static int c_LoadAnimTexture(VM *vm, Value *args, int nargs)
     {
         (void)nargs;
@@ -95,6 +147,56 @@ namespace bb3d
         if (!t) warn_load_failed(vm, "LoadAnimTexture", file);
         args[0] = val_int(t ? store_texture(t) : 0);
         return 1;
+    }
+
+    static int c_LoadMaterial(VM *vm, Value *args, int nargs)
+    {
+        (void)nargs;
+        const char *file = arg_cstr(args[0]);
+        engine::Texture *texture = engine::Texture::load(file, (int)arg_int(args[1]));
+        if (!texture) { warn_load_failed(vm, "LoadMaterial", file); args[0] = val_int(0); return 1; }
+
+        int frameWidth = (int)arg_int(args[2]);
+        int frameHeight = (int)arg_int(args[3]);
+        if (frameWidth < 1) frameWidth = texture->width();
+        if (frameHeight < 1) frameHeight = texture->height();
+        int columns = frameWidth > 0 ? texture->width() / frameWidth : 0;
+        int rows = frameHeight > 0 ? texture->height() / frameHeight : 0;
+        if (columns < 1 || rows < 1)
+        {
+            engine::Texture::release(texture);
+            args[0] = val_int(0);
+            return 1;
+        }
+        const int total = columns * rows;
+        int firstFrame = (int)arg_int(args[4]);
+        if (firstFrame < 0) firstFrame = 0;
+        if (firstFrame >= total) firstFrame = total - 1;
+        int frameCount = (int)arg_int(args[5]);
+        if (frameCount < 1 || frameCount > total - firstFrame) frameCount = total - firstFrame;
+
+        VoxelMaterial *material = new VoxelMaterial;
+        material->texture = texture;
+        material->columns = columns;
+        material->rows = rows;
+        material->firstFrame = firstFrame;
+        material->frameCount = frameCount;
+        const long long handle = ++g_next_voxel_material;
+        g_voxel_materials.put(handle, material);
+        args[0] = val_int(handle);
+        return 1;
+    }
+
+    static int c_FreeMaterial(VM *vm, Value *args, int nargs)
+    {
+        (void)vm; (void)nargs;
+        const long long handle = arg_int(args[0]);
+        VoxelMaterial **found = g_voxel_materials.find(handle);
+        if (!found) return 0;
+        engine::Texture::release((*found)->texture);
+        delete *found;
+        g_voxel_materials.erase(handle);
+        return 0;
     }
 
     static int c_FreeTexture(VM *vm, Value *args, int nargs)
@@ -158,6 +260,42 @@ namespace bb3d
             int index = (int)arg_int(args[3]);
             m->setTexture(index, engine::BrushTexture::fromTexture(platform_for(vm)->device(), t, frame));
         }
+        return 0;
+    }
+
+    static int c_VoxelSpriteTexture(VM *vm, Value *args, int nargs)
+    {
+        (void)nargs;
+        engine::Entity *entity = entity_of(arg_int(args[0]));
+        engine::VoxelSprite *voxel = entity && entity->getModel()
+            ? dynamic_cast<engine::VoxelSprite *>(entity->getModel()) : nullptr;
+        engine::Texture *texture = texture_of(arg_int(args[1]));
+        if (!voxel || !texture) return 0;
+
+        int frameWidth = (int)arg_int(args[2]);
+        int frameHeight = (int)arg_int(args[3]);
+        if (frameWidth < 1) frameWidth = texture->width();
+        if (frameHeight < 1) frameHeight = texture->height();
+        int columns = frameWidth > 0 ? texture->width() / frameWidth : 1;
+        int rows = frameHeight > 0 ? texture->height() / frameHeight : 1;
+        if (columns < 1) columns = 1;
+        if (rows < 1) rows = 1;
+        voxel->setTexture(0, engine::BrushTexture::fromTexture(platform_for(vm)->device(), texture, 0));
+        voxel->setAtlas(columns, rows, (int)arg_int(args[4]), (int)arg_int(args[5]));
+        return 0;
+    }
+
+    static int c_VoxelSpriteMaterial(VM *vm, Value *args, int nargs)
+    {
+        (void)nargs;
+        engine::Entity *entity = entity_of(arg_int(args[0]));
+        engine::VoxelSprite *voxel = entity && entity->getModel()
+            ? dynamic_cast<engine::VoxelSprite *>(entity->getModel()) : nullptr;
+        VoxelMaterial **found = g_voxel_materials.find(arg_int(args[1]));
+        if (!voxel || !found) return 0;
+        VoxelMaterial *material = *found;
+        voxel->setTexture(0, engine::BrushTexture::fromTexture(platform_for(vm)->device(), material->texture, 0));
+        voxel->setAtlas(material->columns, material->rows, material->firstFrame, material->frameCount);
         return 0;
     }
 
@@ -245,18 +383,54 @@ namespace bb3d
         return 0;
     }
 
+    /* bbLoadBrush (bbblitz3d.cpp:487): load a texture, optionally rescale
+       its UVs, and hand back a plain white brush carrying it on slot 0.
+       The original passes 1/u_scale to Texture::setScale exactly as
+       ScaleTexture does, so the same inversion is kept here. A failed
+       texture load returns 0 (no brush created), matching the original's
+       early-out on a null canvas. */
+    static int c_LoadBrush(VM *vm, Value *args, int nargs)
+    {
+        (void)nargs;
+        const char *file = arg_cstr(args[0]);
+        engine::Texture *t = engine::Texture::load(file, (int)arg_int(args[1]));
+        if (!t)
+        {
+            warn_load_failed(vm, "LoadBrush", file);
+            args[0] = val_int(0);
+            return 1;
+        }
+        const float uScale = arg_float(args[2]), vScale = arg_float(args[3]);
+        if (uScale != 1.0f || vScale != 1.0f) t->setScale(1.0f / uScale, 1.0f / vScale);
+
+        engine::Brush *b = new engine::Brush();
+        g_brushes.push_back(b);
+        b->setColor(engine::Vector(1.0f, 1.0f, 1.0f));
+        b->setTexture(0, engine::BrushTexture::fromTexture(platform_for(vm)->device(), t, 0));
+        store_texture(t);
+        args[0] = val_int((long long)(std::intptr_t)b);
+        return 1;
+    }
+
     extern const zen::CommandDecl bb3d_cmds_texture[] = {
         {"%LoadTexture$file%flags=1", c_LoadTexture},
+        {"%CreateTexture%width%height%flags=1%frames=1", c_CreateTexture},
+        {"%TextureBuffer%texture%frame=0", c_TextureBuffer},
         {"%LoadAnimTexture$file%flags%width%height%first%count", c_LoadAnimTexture},
+        {"%LoadMaterial$file%flags=0%frame_width=0%frame_height=0%first_frame=0%frame_count=0", c_LoadMaterial},
         {"FreeTexture%texture", c_FreeTexture},
+        {"FreeMaterial%material", c_FreeMaterial},
         {"ScaleTexture%texture#u_scale#v_scale", c_ScaleTexture},
         {"RotateTexture%texture#angle", c_RotateTexture},
         {"PositionTexture%texture#u_offset#v_offset", c_PositionTexture},
         {"TextureBlend%texture%blend", c_TextureBlend},
         {"TextureCoords%texture%coords", c_TextureCoords},
         {"EntityTexture%entity%texture%frame=0%index=0", c_EntityTexture},
+        {"VoxelSpriteTexture%voxel%texture%frame_width=0%frame_height=0%first_frame=0%frame_count=0", c_VoxelSpriteTexture},
+        {"VoxelSpriteMaterial%voxel%material", c_VoxelSpriteMaterial},
 
         {"%CreateBrush#red=255#green=255#blue=255", c_CreateBrush},
+        {"%LoadBrush$file%texture_flags=1#u_scale=1#v_scale=1", c_LoadBrush},
         {"FreeBrush%brush", c_FreeBrush},
         {"BrushColor%brush#red#green#blue", c_BrushColor},
         {"BrushAlpha%brush#alpha", c_BrushAlpha},

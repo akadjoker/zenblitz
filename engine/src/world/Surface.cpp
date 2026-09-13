@@ -69,6 +69,19 @@ namespace engine
 
     bool Surface::ensureGpu(gpu::Device &dev)
     {
+        // A new device means every handle the old one issued is dead (a
+        // stale handle still looks "valid" as a value, so updating
+        // through it fails with "invalid resource handle"). Drop them
+        // without destroying - the old device already released them -
+        // and let the growth path below build fresh buffers.
+        if (mGpuOwner != &dev)
+        {
+            mVertexBuffer = gpu::BufferHandle();
+            mIndexBuffer = gpu::BufferHandle();
+            mMeshVs = mMeshTs = 0;
+            mValidVs = mValidTs = 0;
+            mGpuOwner = &dev;
+        }
         if (mValidVs == (int)mVertices.size() && mValidTs == (int)mTriangles.size() && mVertexBuffer.valid())
             return true;
 

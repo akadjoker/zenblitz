@@ -7,7 +7,7 @@
 
 #include <cstdint>
 
-namespace kx
+namespace engine
 {
 
   class Device;
@@ -78,4 +78,4 @@ namespace kx
     bool mScreenCleared = false;
   };
 
-} // namespace kx
+} // namespace engine

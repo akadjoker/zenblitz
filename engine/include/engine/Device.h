@@ -6,7 +6,7 @@
 
 #include <SDL2/SDL.h>
 
-namespace kx
+namespace engine
 {
 
   class Device
@@ -116,4 +116,4 @@ namespace kx
     double mFpsLastSampleTime;
   };
 
-} // namespace kx
+} // namespace engine

@@ -10,6 +10,7 @@
 #include "bb_handles.h"
 #include "object.h"
 #include "ct/string.hpp"
+#include "ct/vector.hpp"
 #include <cstring>
 #include <cstdlib>
 
@@ -47,6 +48,30 @@ namespace bb
     {
         const Backend &b = bk(vm);
         if (f && b.close) b.close(f, b.userdata);
+    }
+
+    /* bbCopyStream: read a buffer at a time until either side ends. */
+    static int c_CopyStream(VM *vm, Value *args, int)
+    {
+        ZenFile src = file_of(args[0]);
+        ZenFile dst = file_of(args[1]);
+        long long size = bb_arg_int(args[2]);
+        if (size < 1 || size > 1024 * 1024)
+        {
+            vm->runtime_error("Illegal buffer size");
+            return -1;
+        }
+        if (!src || !dst) return 0;
+
+        ct::Vector<char> buffer((size_t)size, 0);
+        for (;;)
+        {
+            const int64_t n = bk_read(vm, src, buffer.data(), size);
+            if (n <= 0) break;
+            bk_write(vm, dst, buffer.data(), n);
+            if (n < size) break;
+        }
+        return 0;
     }
 
     /* ================= file handles ================= */
@@ -422,6 +447,8 @@ namespace bb
         {"WriteFloat%stream#float", c_WriteFloat},
         {"WriteString%stream$string", c_WriteString},
         {"WriteLine%stream$string", c_WriteLine},
+
+        {"CopyStream%src_stream%dest_stream%buffer_size=16384", c_CopyStream},
 
         {"%ReadDir$dirname", c_ReadDir},
         {"CloseDir%dir", c_CloseDir},

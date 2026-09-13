@@ -10,7 +10,7 @@ extern "C" const char *__lsan_default_suppressions()
          "leak:SDL_DBus\n";
 }
 
-namespace kx
+namespace engine
 {
 
   Device::Device()
@@ -74,6 +74,13 @@ namespace kx
       destroy();
       return false;
     }
+    // Wayland compositors can briefly map a window created with
+    // SDL_WINDOW_HIDDEN before honouring the flag (the xdg_surface
+    // commit that follows GL context creation can trigger this) - an
+    // explicit SDL_HideWindow right after creation is the reliable way
+    // to keep a headless run (ZENBLITZ_HIDDEN=1) from flashing a window.
+    if (!visible)
+      SDL_HideWindow(mWindow.handle());
     mFullscreen = fullscreen;
 
     mWidth = width;
@@ -95,7 +102,12 @@ namespace kx
     mWindow.destroy();
     if (mSdlInitialized)
     {
-      SDL_Quit();
+      // Only tear down what create() brought up (video + game
+      // controller); a full SDL_Quit() here also resets subsystems
+      // other code in this process may depend on across an
+      // EndGraphics/Graphics3D cycle (input state, hints), and gains
+      // nothing this narrower call doesn't already give EndGraphics.
+      SDL_QuitSubSystem(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER);
       mSdlInitialized = false;
     }
     mRunning = false;
@@ -126,8 +138,8 @@ namespace kx
      engine::Platform (not Device) owns SDL_PollEvent, so there is exactly
      one place consuming the queue instead of two competing for it. Called
      from Platform::pumpEvents() for every event it reads; keyboard/mouse
-     dispatch (kx::Input, mathc Vec2-based) lived in the same loop and is
-     gone along with kx::Input, since Platform's own DIK-based handling
+     dispatch (the old Input class, mathc Vec2-based) lived in the same loop
+     and is gone along with it, since Platform's own DIK-based handling
      covers that already. */
   void Device::handleEvent(const SDL_Event &e)
   {
@@ -362,4 +374,4 @@ namespace kx
 
   int Device::getMonitorCount() const { return SDL_GetNumVideoDisplays(); }
 
-} // namespace kx
+} // namespace engine

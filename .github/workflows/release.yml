@@ -1,14 +1,14 @@
 name: release
 
-# Builds the binaries for each platform, packages them with the sample
-# programs, and publishes them to a GitHub Release when a vX.Y.Z tag is
+# Builds the compiler, runtime, 3D runtime and editor for each platform,
+# packages them with the sample programs, and publishes them to a GitHub Release when a vX.Y.Z tag is
 # pushed. workflow_dispatch does the same dry: it ends in a DRAFT prerelease
 # you can inspect and delete, and creates no tag.
 #
-# Each archive is a complete, ready-to-use distribution: both executables —
-# `zenblitz` (compiler + runtime) and `zenblitz-rt` (runtime only), which
-# `--build` looks for next to itself as the stub for standalone programs —
-# plus the sample programs and the userlibs directory.
+# Each archive is a complete, ready-to-use distribution: `zenblitz` (compiler
+# + runtime), `zenblitz-rt` (runtime-only stub), `zenblitz3d` (the engine
+# runtime), and `zenblitz-editor`.  The Windows ZIP also contains SDL2.dll,
+# next to the executables that load it.
 on:
   push:
     tags:
@@ -24,8 +24,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
       - name: Configure
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DZEN_BUILD_ENGINE=ON -DZEN_BUILD_EDITOR=ON
       - name: Build
         run: cmake --build build -j"$(nproc)"
       - name: Snapshot tests
@@ -42,8 +44,10 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
       - name: Configure
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DZEN_BUILD_ENGINE=ON -DZEN_BUILD_EDITOR=ON
       - name: Build
         run: cmake --build build -j"$(sysctl -n hw.ncpu)"
       - name: Snapshot tests
@@ -63,6 +67,8 @@ jobs:
         shell: msys2 {0}
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
       - uses: msys2/setup-msys2@v2
         with:
           msystem: UCRT64
@@ -73,7 +79,7 @@ jobs:
             mingw-w64-ucrt-x86_64-ninja
             zip
       - name: Configure
-        run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+        run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DZEN_BUILD_ENGINE=ON -DZEN_BUILD_EDITOR=ON
       - name: Build
         run: cmake --build build -j"$(nproc)"
       - name: Snapshot tests

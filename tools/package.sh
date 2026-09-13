@@ -7,9 +7,13 @@
 #
 # Produces stage/zenblitz/ holding everything a user needs:
 #
-#   zenblitz[.exe]      compiler + runtime
-#   zenblitz-rt[.exe]   runtime only — the stub `--build` appends programs
-#                       to, and what a released game ships with
+#   zenblitz[.exe]         compiler + runtime
+#   zenblitz-rt[.exe]      runtime only — the stub `--build` appends programs
+#                          to, and what a released game ships with
+#   zenblitz3d[.exe]       compiler + 2D/3D engine runtime
+#   zenblitz-editor[.exe]  editor, configured to launch zenblitz3d beside it
+#   SDL2.dll                Windows SDL runtime needed by the editor and 3D
+#                           runtime (Windows packages only)
 #   userlibs/           user library declarations (Blitz's userlibs)
 #   Games/ Samples/ tutorials/   sample programs, when present
 #   README.md
@@ -32,14 +36,24 @@ rm -rf "$root/stage"
 mkdir -p "$stage"
 
 # --- binaries ---
-for b in zenblitz zenblitz-rt; do
+for b in zenblitz zenblitz-rt zenblitz3d zenblitz-editor; do
     src="$root/bin/$b$exe"
     [[ -f "$src" ]] || { echo "missing binary: $src" >&2; exit 1; }
     cp "$src" "$stage/"
 done
 # Debug symbols are not worth the download; strip when the toolchain can.
 if command -v strip >/dev/null 2>&1; then
-    strip "$stage/zenblitz$exe" "$stage/zenblitz-rt$exe" 2>/dev/null || true
+    strip "$stage/zenblitz$exe" "$stage/zenblitz-rt$exe" \
+          "$stage/zenblitz3d$exe" "$stage/zenblitz-editor$exe" 2>/dev/null || true
+fi
+
+# SDL2 is copied into bin/ by zen_copy_sdl2_runtime() after each Windows
+# executable is linked. Keep one copy next to every executable in the ZIP so
+# Windows' normal DLL lookup can start both the editor and zenblitz3d.
+if [[ "$platform" == windows* ]]; then
+    sdl="$root/bin/SDL2.dll"
+    [[ -f "$sdl" ]] || { echo "missing SDL runtime: $sdl" >&2; exit 1; }
+    cp "$sdl" "$stage/SDL2.dll"
 fi
 
 # --- docs, samples, userlibs ---
