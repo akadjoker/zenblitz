@@ -518,7 +518,24 @@ namespace zed
             const ig::Rect outputBounds(outputOrigin.x, outputOrigin.y, codeWidth, outputHeight);
             if (ui.beginChild("output", outputHeight, true, codeWidth))
             {
-                outputPanel_.draw(ui, tab.lastOutput, tab.hasRunOnce, outputVisible_);
+                // Only while something is actually running: a finished
+                // program has no stdin left to answer.
+                const bool running = tab.runHandle != nullptr;
+                outputPanel_.draw(ui, tab.lastOutput, tab.hasRunOnce, outputVisible_, running);
+                if (running && outputVisible_)
+                {
+                    ig::String line;
+                    if (outputPanel_.drawInputRow(ui, line))
+                    {
+                        // Echo it into the log: the child's own stdout does
+                        // not include what was typed (its stdin is a pipe,
+                        // not a terminal), so without this the answer never
+                        // appears next to the question it answered.
+                        tab.lastOutput += line;
+                        tab.lastOutput += "\n";
+                        runner_.sendInput(tab.runHandle, line);
+                    }
+                }
                 ui.endChild();
             }
             // Opened against the panel's own outer bounds, not inside the

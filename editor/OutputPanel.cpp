@@ -3,7 +3,8 @@
 namespace zed
 {
 
-void OutputPanel::draw(ig::Context& ui, ig::String& output, bool hasRunOnce, bool& visible)
+void OutputPanel::draw(ig::Context& ui, ig::String& output, bool hasRunOnce, bool& visible,
+                       bool reserveInputRow)
 {
     const ig::Theme& t = ui.theme();
     const ig::Vec2 origin = ui.cursor();
@@ -65,7 +66,39 @@ void OutputPanel::draw(ig::Context& ui, ig::String& output, bool hasRunOnce, boo
     // scratch every single frame, which got visibly slower the more a
     // program logged, and reset the widget's selection each frame so
     // select-then-Ctrl+C never held. Editing in place costs neither.
-    ui.inputTextMultiline("##output", output, 0.0f, ui.availableHeight());
+    float logHeight = ui.availableHeight();
+    if (reserveInputRow)
+    {
+        const float reserved = t.buttonHeight + gap;
+        logHeight = logHeight > reserved ? logHeight - reserved : 0.0f;
+    }
+    ui.inputTextMultiline("##output", output, 0.0f, logHeight);
+}
+
+bool OutputPanel::drawInputRow(ig::Context& ui, ig::String& line)
+{
+    const ig::Theme& t = ui.theme();
+    const ig::Vec2 origin = ui.cursor();
+    const float rowHeight = t.buttonHeight;
+    const float width = ui.availableWidth();
+    const float gap = 4.0f;
+    const float buttonWidth = 56.0f;
+    const float fieldWidth = width - buttonWidth - gap;
+
+    const bool changed =
+        ui.inputText("##stdin", inputBuffer_, ig::Rect(origin.x, origin.y, fieldWidth, rowHeight));
+    // inputText reports edits, not submission, so Enter is read separately.
+    const bool entered = changed && ui.isKeyPressed(ig::KeyCode::Enter);
+    const bool sent = ui.smallButton(
+        "Send", ig::Rect(origin.x + fieldWidth + gap, origin.y, buttonWidth, rowHeight));
+
+    if (!entered && !sent) return false;
+
+    // An empty line is still worth sending: a script that just waits for
+    // Enter (Input$ with no prompt) is answered by exactly that.
+    line = inputBuffer_;
+    inputBuffer_.clear();
+    return true;
 }
 
 } // namespace zed
