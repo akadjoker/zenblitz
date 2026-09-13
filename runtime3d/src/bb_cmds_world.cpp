@@ -22,6 +22,7 @@
 #include "engine/LoaderB3DS.h"
 #include "engine/LoaderX.h"
 #include "engine/LoaderGltf.h"
+#include "engine/LoaderFbx.h"
 #include "engine/Image.h"
 #include "engine/Sound.h"
 #include "engine/FilePath.h"
@@ -853,6 +854,14 @@ namespace bb3d
             e = loader.load(file, engine::Transform(), engine::MeshLoader::HintCollapse,
                             &platform_for(vm)->device());
         }
+        else if (ext == "fbx")
+        {
+            // Not an original Blitz3D format - see [[project-gltf-fbx-extension]].
+            // Same HintCollapse convention as .x/.gltf above.
+            engine::LoaderFbx loader;
+            e = loader.load(file, engine::Transform(), engine::MeshLoader::HintCollapse,
+                            &platform_for(vm)->device());
+        }
         else
         {
             // .b3d and anything else fall back to the B3D loader, same as
@@ -919,6 +928,13 @@ namespace bb3d
         {
             // Same hierarchy-keeping split as .x above.
             engine::LoaderGltf loader;
+            entity = loader.load(file, engine::Transform(), 0, &platform_for(vm)->device());
+        }
+        else if (ext == "fbx")
+        {
+            // Same hierarchy-keeping split as .x/.gltf above - keeps the
+            // bone chain and skin so Animate/SetAnimTime can drive it.
+            engine::LoaderFbx loader;
             entity = loader.load(file, engine::Transform(), 0, &platform_for(vm)->device());
         }
         else

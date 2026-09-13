@@ -1,0 +1,52 @@
+ofbx.h / ofbx.cpp — vendored from nem0/OpenFBX, unmodified.
+
+License: MIT (per upstream nem0/OpenFBX; not embedded as a header
+comment in these files, same as they ship from upstream).
+
+What this is: a from-scratch (no Autodesk FBX SDK) parser for both text
+and binary FBX, including MZ-deflate-compressed binary geometry blocks
+(via miniz, see ../miniz/VERSION). `ofbx::load(const u8* data, int size,
+u64 flags)` takes the whole file already in memory and returns an
+IScene* the caller walks directly (getMeshCount/getMesh/getGeometry/
+getSkin/getAnimationStackCount/...) - no file-callback indirection to
+route through SDL_RWops the way cgltf's cgltf_load_buffers needs (see
+../cgltf/VERSION): this engine's LoaderFbx reads the whole .fbx into one
+buffer itself (same SDL_RWops read-loop LoaderX/LoaderGltf already use)
+and hands it straight to ofbx::load().
+
+External texture references (Material -> Texture -> a relative/absolute
+filename) are still resolved and opened through this engine's own
+Texture::load()/setTexturePath(), which is SDL_RWops-backed - ofbx.cpp
+itself never opens a texture file, only records the filename string it
+read out of the FBX.
+
+Caller contract LoaderFbx.cpp relies on (established by reading the
+akadjoker/Radion project's own FbxImporter.cpp, which uses the same
+vendored source, as a working reference for correct usage - not a
+license/attribution relationship, ofbx is third-party in both
+projects):
+ - A Mesh's Geometry exposes ONE VERTEX PER FACE CORNER
+   (getVertexCount()/getVertices() line up with getFaceIndices()'s
+   count/3, not a deduplicated indexed buffer) - a loader that wants a
+   normal shared-vertex mesh has to weld afterwards. See the zenblitz
+   memory note [[project-gltf-fbx-extension]] and the akadjoker/Radion
+   FbxImporter weld-after-import fix from this same session for why this
+   matters (that engine's own bug was skipping the weld and shipping
+   meshes with ~3x the vertices their triangle count needed).
+ - getFaceIndices() winds the LAST index of each polygon as its bitwise
+   NOT (~i, i.e. a negative int after the cast) to mark the polygon
+   boundary - unwind with `idx < 0 ? -idx - 1 : idx` before using it,
+   the same convention loader_x.cpp-style binary formats use for their
+   own polygon-boundary marker.
+ - A skinned mesh's Skin holds Clusters, each linking one bone (Object*,
+   resolved by matching a bone Object's own id against the skeleton
+   this engine already built from the FBX's LIMB_NODE objects) to
+   per-vertex index/weight pairs (getIndices()/getWeights(),
+   getIndicesCount()) - weights are NOT guaranteed already normalized to
+   sum to 1 per vertex and NOT capped to 4 influences; both have to be
+   enforced by the loader the way Surface::Vertex's fixed 4-slot
+   boneBones/boneWeights arrays require.
+ - Node/mesh world transforms are D3D-style row-major 4x4 (Matrix::m[16],
+   translation in the last row) - same convention LoaderX's
+   readFrameTransform already converts to blitz::Transform for .x, reuse
+   that shape rather than re-deriving it.

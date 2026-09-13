@@ -1,0 +1,12 @@
+miniz.h / miniz.c — vendored from richgel999/miniz, version 3.1.2, unmodified.
+
+License: public domain (Unlicense statement at the end of the file).
+
+What this is: single-file deflate/inflate + ZIP reader/writer. Vendored
+here only because engine/third_party/ofbx's ofbx.cpp (see ../ofbx/VERSION)
+calls the zlib-compatible inflate API (mz_stream/mz_inflateInit/
+mz_inflate/mz_inflateEnd) to decompress the zlib-compressed geometry
+blocks a binary FBX file can contain - nothing else in this engine uses
+miniz. Not trimmed down to just the inflate path: kept as upstream ships
+it, same as the akadjoker/Radion project's own vendoring of the same
+file (this copy is byte-identical to that one).

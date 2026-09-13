@@ -136,12 +136,20 @@ namespace engine
 
     void Animator::setAnimTime(float time, int seq)
     {
-        if (seq < 0 || seq > (int)mSeqs.size()) return;
+        // seq indexes mSeqs directly below, so the valid range is
+        // [0, size()) - >= not > (animate() right below gets this right;
+        // this one previously let seq == size() through, one past the end).
+        if (seq < 0 || seq >= (int)mSeqs.size()) return;
 
         mMode = 0;
         mSpeed = 0;
         mSeq = seq;
         mSeqLen = mSeqs[mSeq].frames;
+
+        // A zero-length sequence (a loader found no usable keyframes for
+        // this handle) would otherwise reach fmod(x, 0) below, which is
+        // NaN - see the same guard in update().
+        if (mSeqLen <= 0) { mTime = 0; return; }
 
         mTime = std::fmod(time, (float)mSeqLen);
         if (mTime < 0) mTime += mSeqLen;
@@ -195,6 +203,12 @@ namespace engine
         }
 
         mTime += mSpeed * elapsed;
+
+        // A zero-length sequence (a loader found no usable keyframes for
+        // this handle) would otherwise reach fmod(x, 0) below, which is
+        // NaN - stop here instead of letting NaN propagate into every
+        // frame's pose from then on.
+        if (mSeqLen <= 0) { mTime = 0; return; }
 
         switch (mMode)
         {

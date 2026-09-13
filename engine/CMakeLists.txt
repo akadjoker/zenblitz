@@ -46,6 +46,9 @@ add_library(zenblitz_engine STATIC
     third_party/xfile/xfile_parse.c
     third_party/xfile/xfile_mszip.c
     src/world/LoaderGltf.cpp
+    src/world/LoaderFbx.cpp
+    third_party/ofbx/ofbx.cpp
+    third_party/miniz/miniz.c
     src/world/FilePath.cpp
     src/world/Md2Norms.cpp
     src/world/MD2Rep.cpp
@@ -59,7 +62,7 @@ target_include_directories(zenblitz_engine PUBLIC
     include
     ${CMAKE_CURRENT_SOURCE_DIR}/../libzen/third_party
 )
-target_include_directories(zenblitz_engine PRIVATE third_party/stb third_party/miniaudio third_party/xfile third_party/cgltf)
+target_include_directories(zenblitz_engine PRIVATE third_party/stb third_party/miniaudio third_party/xfile third_party/cgltf third_party/ofbx third_party/miniz)
 
 # gpu_sdl (GPUSDLWindow, which engine::Device wraps) links SDL2 and the
 # umbrella `gpu` target itself; nothing else to add here.
