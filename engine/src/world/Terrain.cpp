@@ -44,6 +44,11 @@ namespace engine
         return x >= 0 && z >= 0 && x <= mRep->getSize() && z <= mRep->getSize() ? mRep->getHeight(x, z) : 0.0f;
     }
 
+    float Terrain::heightAtPoint(float x, float z) const
+    {
+        return mRep->heightAtPoint(x, z);
+    }
+
     bool Terrain::render(const RenderContext &context)
     {
         mRep->render(this, context);

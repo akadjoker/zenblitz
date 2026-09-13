@@ -24,6 +24,7 @@ namespace engine
 
         int getSize() const;
         float getHeight(int x, int z) const;
+        float heightAtPoint(float x, float z) const;
 
         bool render(const RenderContext &rc) override;
         void uploadQueue(gpu::Device &dev, int type) override;

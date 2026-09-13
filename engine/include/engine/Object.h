@@ -66,6 +66,11 @@ namespace engine
         const Collisions &getCollisions() const { return mColls; }
         const Transform &getRenderTform() const;
         const Transform &getPrevWorldTform() const { return mPrevTform; }
+        /* Moves the point this frame's sweep starts from. Only for
+           depenetration, which has to shift both ends of the sweep: leave
+           mPrevTform behind and the sweep just walks the entity straight
+           back down into the geometry it was lifted out of. */
+        void setPrevWorldPosition(const Vector &v) { mPrevTform.v = v; }
         int getPickGeometry() const { return mPickGeom; }
         bool getObscurer() const { return mObscurer; }
         Animation getAnimation() const { return mAnim; }

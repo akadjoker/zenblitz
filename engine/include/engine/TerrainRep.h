@@ -35,6 +35,13 @@ namespace engine
 
         int getSize() const;
         float getHeight(int x, int z) const;
+        // Surface height at an arbitrary point in terrain-local cell
+        // coordinates, interpolated across whichever of the cell's two
+        // triangles (x, z) falls in - the same p00-p11 split collideBlock
+        // tests against, so this agrees with the collision mesh rather
+        // than approximating it. Outside the terrain it clamps to the
+        // edge, matching getHeight()'s own bounds contract.
+        float heightAtPoint(float x, float z) const;
         void render(Model *model, const RenderContext &context);
         bool collide(const blitz::Line &line, float radius, Collision *current, const Transform &transform) const;
 

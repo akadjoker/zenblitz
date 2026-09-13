@@ -92,6 +92,27 @@ namespace engine
         return heightNorm(x, z);
     }
 
+    float TerrainRep::heightAtPoint(float x, float z) const
+    {
+        if (x < 0.0f) x = 0.0f; else if (x > (float)mCellSize) x = (float)mCellSize;
+        if (z < 0.0f) z = 0.0f; else if (z > (float)mCellSize) z = (float)mCellSize;
+
+        int cx = (int)x, cz = (int)z;
+        if (cx >= mCellSize) cx = mCellSize - 1;
+        if (cz >= mCellSize) cz = mCellSize - 1;
+        if (cx < 0) cx = 0;
+        if (cz < 0) cz = 0;
+
+        const float fx = x - (float)cx, fz = z - (float)cz;
+        const float h00 = heightNorm(cx, cz), h10 = heightNorm(cx + 1, cz);
+        const float h01 = heightNorm(cx, cz + 1), h11 = heightNorm(cx + 1, cz + 1);
+
+        // Same diagonal collideBlock splits the cell on: (p00,p01,p11) and
+        // (p00,p11,p10). fx < fz puts the point in the first of those.
+        if (fx < fz) return h00 + (h01 - h00) * fz + (h11 - h01) * fx;
+        return h00 + (h11 - h10) * fz + (h10 - h00) * fx;
+    }
+
     void TerrainRep::setHeight(int x, int z, float height, bool realtime)
     {
         if (x < 0) x = 0; else if (x > mCellSize) x = mCellSize;
