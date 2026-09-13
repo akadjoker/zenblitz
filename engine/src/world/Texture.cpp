@@ -1,4 +1,5 @@
 #include "engine/Texture.h"
+#include <cctype>
 #include "engine/FilePath.h"
 #include <SDL2/SDL_rwops.h>
 #include <algorithm>
@@ -51,8 +52,46 @@ namespace engine
         return resolveCaseInsensitive(file);
     }
 
+    namespace
+    {
+        // texture.cpp's `filters`: TextureFilter registers a substring
+        // and a set of flags, and every texture whose filename contains
+        // that substring gets those flags OR'd in. Matching is
+        // case-insensitive on both sides, as in the original's tolower().
+        struct TexFilter { ct::String match; int flags; };
+        ct::Vector<TexFilter> g_filters;
+
+        ct::String toLower(const ct::String &s)
+        {
+            ct::String out = s;
+            for (size_t k = 0; k < out.size(); ++k)
+                out[k] = (char)std::tolower((unsigned char)out[k]);
+            return out;
+        }
+
+        int filterFile(const ct::String &name, int flags)
+        {
+            const ct::String lower = toLower(name);
+            for (size_t k = 0; k < g_filters.size(); ++k)
+                if (lower.find(g_filters[k].match) != ct::String::npos)
+                    flags |= g_filters[k].flags;
+            return flags;
+        }
+    }
+
+    void Texture::addFilter(const ct::String &match, int flags)
+    {
+        TexFilter f;
+        f.match = toLower(match);
+        f.flags = flags;
+        g_filters.push_back(f);
+    }
+
+    void Texture::clearFilters() { g_filters.clear(); }
+
     Texture *Texture::load(const ct::String &file, int flags)
     {
+        flags = filterFile(file, flags);
         Texture *t = new Texture();
         t->mName = file;
         t->mFlags = flags;

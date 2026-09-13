@@ -1,7 +1,7 @@
 /*
 ** bb_cmds_entityquery.cpp — EntityX/EntityY/EntityZ, ResetEntity,
 ** AlignToVector, EntityPitch/Yaw/Roll, EntityDistance, the TForm*
-** coordinate-space family and GetEntityType.
+** coordinate-space family, GetEntityType and TextureFilter.
 ** Ported from bbblitz3d.cpp; this is a separate file (not
 ** bb_cmds_world.cpp, which is being worked on in parallel) so these
 ** land without touching anyone else's in-progress edits.
@@ -11,6 +11,7 @@
 #include "object.h"
 #include "engine/Entity.h"
 #include "engine/Object.h"
+#include "engine/Texture.h"
 
 namespace bb3d
 {
@@ -230,6 +231,25 @@ namespace bb3d
         return 1;
     }
 
+    /* bbTextureFilter/bbClearTextureFilters (bbblitz3d.cpp:2002-2003).
+       A filter is a filename substring plus flags: any texture loaded
+       afterwards whose name contains it gets those flags added. Scripts
+       use it to force masking or mipmapping on a mesh's own textures,
+       which they never name directly. */
+    static int c_TextureFilter(VM *vm, Value *args, int)
+    {
+        (void)vm;
+        if (zen::is_string(args[0]))
+            engine::Texture::addFilter(ct::String(zen::as_cstring(args[0])), (int)arg_int(args[1]));
+        return 0;
+    }
+    static int c_ClearTextureFilters(VM *vm, Value *args, int)
+    {
+        (void)vm; (void)args;
+        engine::Texture::clearFilters();
+        return 0;
+    }
+
     extern const zen::CommandDecl bb3d_cmds_entityquery[] = {
         {"#EntityX%entity%global=0", c_EntityX},
         {"#EntityY%entity%global=0", c_EntityY},
@@ -243,6 +263,8 @@ namespace bb3d
         {"#TFormedY", c_TFormedY},
         {"#TFormedZ", c_TFormedZ},
         {"%GetEntityType%entity", c_GetEntityType},
+        {"TextureFilter$match_text%texture_flags=0", c_TextureFilter},
+        {"ClearTextureFilters", c_ClearTextureFilters},
         {"#EntityPitch%entity%global=0", c_EntityPitch},
         {"#EntityYaw%entity%global=0", c_EntityYaw},
         {"#EntityRoll%entity%global=0", c_EntityRoll},

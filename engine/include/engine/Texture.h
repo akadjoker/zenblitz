@@ -27,6 +27,10 @@ namespace engine
     {
     public:
         static Texture *load(const ct::String &file, int flags);
+        // TextureFilter/ClearTextureFilters: extra flags applied to any
+        // texture whose filename contains `match` (case-insensitive).
+        static void addFilter(const ct::String &match, int flags);
+        static void clearFilters();
         // Same as load(), but decodes an already-in-memory image buffer
         // instead of reading a file - a glTF/GLB image embedded in a
         // buffer_view or a base64 data: URI has no file path to give
