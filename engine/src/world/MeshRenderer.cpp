@@ -425,7 +425,9 @@ namespace engine
         desc.colorTargets[0].format = gpu::Format::RGBA8;
         desc.depthStencil.depthTestEnabled = true;
         desc.depthStencil.depthWriteEnabled = (pk.blend == BlendReplace);
-        desc.raster.cullMode = pk.doubleSided ? gpu::CullMode::None : gpu::CullMode::Back;
+        desc.raster.cullMode = pk.doubleSided ? gpu::CullMode::None
+                             : pk.flippedTris ? gpu::CullMode::Front
+                                              : gpu::CullMode::Back;
         // Blitz3D/DirectX winds front faces clockwise; keep ported geometry
         // and loaders untouched instead of flipping winding everywhere.
         desc.raster.frontFace = gpu::FrontFace::Clockwise;
@@ -607,6 +609,7 @@ namespace engine
         PipelineKey pk;
         pk.blend = brush.getBlend();
         pk.doubleSided = (brush.getFX() & FxDoubleSided) != 0;
+        pk.flippedTris = mFlippedTris;
         pk.hasTexture = brush.getTextureCount() > 0;
         pk.skinned = boneSlot >= 0 && geom.layout == GpuGeometry::LayoutSurface;
         pk.layout = geom.layout;
@@ -634,6 +637,16 @@ namespace engine
             dev.setPipeline(cp->pipeline);
             mBound.pipeline = cp->pipeline.value();
             ++mStats.pipelineSwitches;
+            // Vertex and index bindings belong to the pipeline's own VAO in
+            // the GL backend, so a new pipeline starts with none of them
+            // bound. Forget what was bound or the checks below skip the
+            // rebind and the draw runs with no index buffer ("invalid
+            // indexed draw state"). Textures and uniform buffers are bound
+            // per unit/slot rather than per VAO, so they survive.
+            mBound.vb = 0; mBound.vbOffset = 0;
+            mBound.vb2 = 0; mBound.vb2Offset = 0;
+            mBound.uvb = 0;
+            mBound.indexBuffer = 0;
         }
         dev.bindUniformBuffer((std::uint32_t)cp->uniformsSlot, mUniformBuffer,
                               (std::uint64_t)index * mUniformStride, sizeof(Uniforms));

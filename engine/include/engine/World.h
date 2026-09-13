@@ -35,6 +35,11 @@ namespace engine
             // 0 = normal draw; else a camera viewport clear: bit 1 colour,
             // bit 2 depth (CameraClsMode). surface is null for clears.
             int clear;
+            // Recorded per call rather than held as renderer state: every
+            // pass only queues here, and the actual draw happens later in
+            // World::draw(), by which point a single "are we mirroring"
+            // flag would already have settled on the last pass's value.
+            bool flippedTris;
         };
 
         World() = default;
@@ -82,6 +87,8 @@ namespace engine
 
         MeshRenderer mRenderer;
         Transform mCamTform;
+        // True while queueing the reflected pass - see DrawCall::flippedTris
+        bool mFlippedTris = false;
         Vector mAmbient{0.5f, 0.5f, 0.5f};
 
     public:
@@ -128,6 +135,7 @@ namespace engine
         PendingCamera mPendingCamera;
 
         void collide(Object *src);
+        void depenetrateTerrain(Object *src);
         void enumEnabled();
         void enumVisible();
 

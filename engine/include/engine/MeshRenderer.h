@@ -54,6 +54,12 @@ namespace engine
         // format/streams (Surface, or MD2 two-frame morph).
         void draw(gpu::Device &dev, int index, const GpuGeometry &geom, const Brush &brush, int boneSlot);
 
+        // gxScene::setFlippedTris: cull the front face instead of the back
+        // for the duration of a mirror pass, because reflecting the camera
+        // reverses every triangle's winding. World::render sets it around
+        // the reflected pass and clears it for the normal one.
+        void setFlippedTris(bool flipped) { mFlippedTris = flipped; }
+
         // Camera viewport clear (CameraClsColor/CameraClsMode): stages a
         // draw of a full-viewport quad at far depth in the given colour.
         // No render pass may be open; occupies a prepare() index like any
@@ -88,12 +94,22 @@ namespace engine
             bool hasTexture = false;
             bool skinned = false;
             bool clear = false, clearColor = false, clearDepth = false;
+            // Mirror pass: reflecting the camera through the mirror plane
+            // is a negative-determinant transform, so every triangle comes
+            // out wound the other way and back-face culling would throw
+            // away exactly the faces that should be visible. Culling the
+            // front face instead restores it - the original did the same
+            // through gxScene::setFlippedTris (D3DCULL_CW in place of
+            // D3DCULL_CCW). Part of the key so the mirror pass gets its
+            // own pipeline rather than mutating the shared one.
+            bool flippedTris = false;
             GpuGeometry::Layout layout = GpuGeometry::LayoutSurface;
             std::uint32_t key() const
             {
                 return (std::uint32_t)blend | (doubleSided ? 0x100u : 0u) | (hasTexture ? 0x200u : 0u) |
                        (skinned ? 0x400u : 0u) | (clear ? 0x800u : 0u) | (clearColor ? 0x1000u : 0u) |
-                       (clearDepth ? 0x2000u : 0u) | ((std::uint32_t)layout << 16);
+                       (clearDepth ? 0x2000u : 0u) | (flippedTris ? 0x4000u : 0u) |
+                       ((std::uint32_t)layout << 16);
             }
         };
         struct CachedPipeline
@@ -106,6 +122,7 @@ namespace engine
             std::int32_t texture1Slot = 1;
         };
 
+        bool mFlippedTris = false;
         gpu::Device *mGpu = nullptr;
         ShaderDialect mDialect = ShaderDialect::GLSL330;
         gpu::BufferHandle mUniformBuffer;
