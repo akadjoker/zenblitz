@@ -2,7 +2,8 @@ Global info1$="Birds Demo, by Adam Gore"
 Global info2$="A small Blitz3D compatibility test"
 Global info3$="Spline data imported from Lightwave"
 
-Include "../start.bb"
+
+;Include "../start.bb"
 
 Include "KBSplines.bb"
 
@@ -11,7 +12,7 @@ Global gheight = 480;600
 Const FPS = 30
 Global fstep
 
-;Graphics3D gwidth,gheight
+Graphics3D gwidth,gheight
 
 period=1000/FPS
 time=MilliSecs()-period

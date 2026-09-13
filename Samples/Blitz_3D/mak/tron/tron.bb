@@ -21,7 +21,7 @@ EntityBlend grid_plane,1
 EntityAlpha grid_plane,.6
 EntityFX grid_plane,1
 
-;mirror=CreateMirror()
+mirror=CreateMirror()
 
 pivot=CreatePivot()
 

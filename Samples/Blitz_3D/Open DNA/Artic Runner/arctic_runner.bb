@@ -1,7 +1,7 @@
 ; Little Artic Runner
 ; By Reda Borchardt
 
-Include "start.bb"
+;Include "start.bb"
 Include "keyconstants.bb"
 
 SetBuffer BackBuffer()
