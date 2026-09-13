@@ -105,9 +105,25 @@ namespace bb3d
         g_next_entity = 0;
     }
 
+    /* bbblitz3d.cpp's insert(), which every command that creates or
+       copies an entity runs it through. It is what makes CopyEntity of a
+       hidden entity come back visible: the flags are forced on for the
+       whole subtree rather than inherited from the source, so a script
+       can keep a hidden "template" model around and stamp visible copies
+       out of it - exactly what castle.bb does with player_model. */
+    static void reset_entity_tree(engine::Entity *e)
+    {
+        e->setVisible(true);
+        e->setEnabled(true);
+        if (engine::Object *o = e->getObject()) o->reset();
+        for (engine::Entity *c = e->children(); c; c = c->successor())
+            reset_entity_tree(c);
+    }
+
     void insert_entity(engine::Entity *e, engine::Entity *parent)
     {
         if (parent) e->setParent(parent);
+        reset_entity_tree(e);
     }
 
     static engine::ObjCollision &pick_for(VM *vm)
