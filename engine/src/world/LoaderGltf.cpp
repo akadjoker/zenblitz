@@ -11,6 +11,7 @@
 #include "engine/MeshModel.h"
 #include "engine/Animator.h"
 #include "engine/Texture.h"
+#include "engine/TextureCache.h"
 
 #define CGLTF_IMPLEMENTATION
 #include "cgltf.h"
@@ -33,7 +34,6 @@ namespace engine
         // convention.
         constexpr float kFramesPerSecond = 30.0f;
 
-        ct::Vector<Texture *> g_textures;
         gpu::Device *g_dev;
         // The cgltf_options this file's load() built, kept for the
         // duration of one parse so readMaterial's base64-image decode
@@ -108,8 +108,9 @@ namespace engine
                     ? (const unsigned char *)view.data
                     : (view.buffer ? (const unsigned char *)view.buffer->data : nullptr);
                 if (base)
-                    return Texture::loadFromMemory(img->name ? img->name : "", base + (view.data ? 0 : view.offset),
-                                                   (unsigned)view.size, 0);
+                    return TextureCache::acquireFromMemory(img->name ? img->name : "",
+                                                          base + (view.data ? 0 : view.offset),
+                                                          (unsigned)view.size, 0);
                 return nullptr;
             }
 
@@ -127,9 +128,9 @@ namespace engine
                     if (g_options && cgltf_load_buffer_base64(g_options, approxSize, comma + 1, &decoded) ==
                                          cgltf_result_success)
                     {
-                        Texture *tex = Texture::loadFromMemory(img->name ? img->name : "",
-                                                               (const unsigned char *)decoded,
-                                                               (unsigned)approxSize, 0);
+                        Texture *tex = TextureCache::acquireFromMemory(img->name ? img->name : "",
+                                                                      (const unsigned char *)decoded,
+                                                                      (unsigned)approxSize, 0);
                         free(decoded);
                         return tex;
                     }
@@ -138,7 +139,7 @@ namespace engine
             }
 
             if (img->uri && img->uri[0])
-                return Texture::load(img->uri, 0);
+                return TextureCache::acquire(img->uri, 0);
 
             return nullptr;
         }
@@ -163,12 +164,6 @@ namespace engine
                         if (g_dev)
                             brush.setTexture(0, BrushTexture::fromTexture(*g_dev, loaded, 0));
                         brush.setColor(Vector(1, 1, 1));
-                        // kept alive for the process lifetime, same
-                        // contract as LoaderX's g_textures - see
-                        // LoaderX.cpp's declaration comment for why
-                        // releasing here would free a GPU texture a
-                        // still-live mesh just bound.
-                        g_textures.push_back(loaded);
                     }
                 }
             }

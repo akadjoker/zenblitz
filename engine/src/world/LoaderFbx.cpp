@@ -20,6 +20,7 @@
 #include "engine/Object.h"
 #include "engine/Animator.h"
 #include "engine/Texture.h"
+#include "engine/TextureCache.h"
 
 #include "ofbx.h"
 
@@ -40,7 +41,6 @@ namespace engine
         constexpr float kFramesPerSecond = 30.0f;
         constexpr float kDegToRad = 0.0174532925199432957692369076848861f;
 
-        ct::Vector<Texture *> g_textures;
         gpu::Device *g_dev;
 
         Vector toVector(const ofbx::Vec3 &v) { return Vector((float)v.x, (float)v.y, (float)v.z); }
@@ -111,14 +111,14 @@ namespace engine
                 tex->getFileName().toString(filename);
                 if (filename[0])
                 {
-                    Texture *loaded = Texture::load(filename, 0);
+                    // Owned by TextureCache, which keeps it alive as long
+                    // as any mesh still draws with it and releases it on
+                    // shutdown - this loader does not hold a reference.
+                    Texture *loaded = TextureCache::acquire(filename, 0);
                     if (loaded)
                     {
                         if (g_dev) brush.setTexture(0, BrushTexture::fromTexture(*g_dev, loaded, 0));
                         brush.setColor(Vector(1, 1, 1));
-                        // kept alive for the process lifetime, same
-                        // contract as LoaderX/LoaderGltf's own g_textures.
-                        g_textures.push_back(loaded);
                     }
                 }
             }

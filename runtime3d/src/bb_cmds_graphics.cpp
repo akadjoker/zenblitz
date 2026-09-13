@@ -11,6 +11,7 @@
 #include "engine/World.h"
 #include "engine/Profiler.h"
 #include "engine/Sound.h"
+#include "engine/TextureCache.h"
 #include <SDL2/SDL.h>
 #include <cstdio>
 
@@ -70,6 +71,9 @@ namespace bb3d
         // the device has to outlive the GPU buffers the scene owns
         free_all_entities(p && (*p)->isOpen() ? &(*p)->device() : nullptr);
         free_all_textures();
+        // after free_all_entities: a mesh's Brush holds the GPU handle
+        // these back, so they can only go once nothing draws with them.
+        engine::TextureCache::clear();
         free_all_fonts();
         free_all_images();
 

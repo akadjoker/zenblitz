@@ -10,6 +10,7 @@
 #include "engine/MeshModel.h"
 #include "engine/Animator.h"
 #include "engine/Texture.h"
+#include "engine/TextureCache.h"
 
 extern "C"
 {
@@ -35,22 +36,13 @@ namespace engine
         bool g_flipTris;
         gpu::Device *g_dev;
         ct::HashMap<ct::String, MeshModel *> g_framesByName;
-        // Textures loaded while parsing materials. A Brush only stores
-        // the GPU handle BrushTexture::fromTexture copies out, not the
-        // Texture object itself, and nothing in MeshModel/Brush's
-        // destruction path releases one - so once a texture is uploaded
-        // it has to stay alive for the rest of the process (same
-        // contract LoaderB3D's own g_textures relies on for a script
-        // that loads one mesh and keeps it). Unlike LoaderB3D, LoaderX
-        // never clears/releases this list: a script routinely calls
-        // LoadMesh/LoadAnimMesh more than once, and releasing a
-        // previous load's textures here would free GPU resources a
-        // still-live earlier mesh is still drawing with (the bug this
-        // comment is here to stop someone reintroducing).
-        ct::Vector<Texture *> g_textures;
-        // filename -> already-loaded Texture, so a file named by several
-        // materials is decoded and uploaded once (see readMaterial)
-        ct::HashMap<ct::String, Texture *> g_textureByName;
+        // Textures parsed out of materials are owned by TextureCache, not
+        // by this loader. A Brush only stores the GPU handle
+        // BrushTexture::fromTexture copies out, so a texture has to stay
+        // alive for as long as any mesh still draws with it - which is
+        // past the end of the load that pulled it in, and past the next
+        // load too. The cache holds them until shutdown and dedups a file
+        // named by several materials.
         // Backing storage for parse_buffer::pxo_globals: one entry per
         // top-level object parsed so far in this file, so a nested
         // "{ObjectName}" reference (xfile_parse.c's parse_object_parts,
@@ -71,8 +63,6 @@ namespace engine
             g_framesByName.clear();
             g_globals.clear();
             g_globals.reserve(MAX_OBJECTS);
-            // g_textures is deliberately NOT cleared/released here - see
-            // its declaration.
         }
 
         const char *templateNameFor(const GUID &type)
@@ -142,34 +132,15 @@ namespace engine
                     const char *filename = nullptr;
                     std::memcpy(&filename, tp, sizeof(filename));
                     // Materials routinely name the same file (castle1.x
-                    // uses castlest.jpg for most of its 20 surfaces), and
-                    // since nothing here ever releases a Texture, loading
-                    // it once per material meant decoding and uploading
-                    // the same image several times over and keeping every
-                    // copy alive. Reuse the one already loaded.
-                    Texture *tex = nullptr;
-                    if (filename)
-                    {
-                        ct::String key(filename);
-                        if (Texture **hit = g_textureByName.find(key)) tex = *hit;
-                        else
-                        {
-                            tex = Texture::load(filename, 0);
-                            if (tex) g_textureByName.put(key, tex);
-                        }
-                    }
+                    // uses castlest.jpg for most of its 20 surfaces).
+                    // TextureCache hands back the one already loaded
+                    // instead of decoding and uploading it again, and
+                    // owns it from here on.
+                    Texture *tex = filename ? TextureCache::acquire(filename, 0) : nullptr;
                     if (tex)
                     {
                         if (g_dev) brush.setTexture(0, BrushTexture::fromTexture(*g_dev, tex, 0));
                         brush.setColor(Vector(1, 1, 1));
-                        // kept alive in g_textures (see its declaration) -
-                        // not released here, unlike a plain load-and-drop.
-                        // Only the first load of a given file adds an
-                        // entry; repeats reuse the cached Texture above.
-                        bool known = false;
-                        for (size_t q = 0; q < g_textures.size(); ++q)
-                            if (g_textures[q] == tex) { known = true; break; }
-                        if (!known) g_textures.push_back(tex);
                     }
                 }
             }

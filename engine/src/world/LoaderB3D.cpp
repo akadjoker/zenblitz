@@ -90,6 +90,11 @@ namespace engine
                 readFloatArray(scl, 2);
                 float rot = readFloat();
 
+                // Deliberately not TextureCache: a .b3d TEXS chunk carries
+                // per-texture blend/pos/scale/rotation that are applied to
+                // the Texture object below, so two files naming the same
+                // image with different transforms must not share one. This
+                // loader owns these and releases them in clearState().
                 Texture *tex = g_dev ? Texture::load(name, flags & 0xffff) : nullptr;
                 if (tex)
                 {
