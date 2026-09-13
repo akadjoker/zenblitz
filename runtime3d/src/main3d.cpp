@@ -6,6 +6,11 @@
 #include "runtime.h"
 #include "runtime3d.h"
 #include "backend_stdio.h" /* Print/DebugLog/files: same console backend as zenblitz */
+
+/* bb_cmds.cpp, via bb_runtime.h - declared here rather than pulling in a
+   libzen-internal header just to free the timers a script left behind. */
+namespace bb { void free_all_timers(); }
+static void bb_free_all_timers() { bb::free_all_timers(); }
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -88,5 +93,6 @@ int main(int argc, char **argv)
 
     int rc = vm.had_error() ? 1 : 0;
     bb3d::shutdown_graphics(&vm);
+    bb_free_all_timers();
     return rc;
 }

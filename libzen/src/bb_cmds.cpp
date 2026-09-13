@@ -477,6 +477,19 @@ namespace bb
         return 0;
     }
 
+    /* Releases the timers a script created and never passed to
+       FreeTimer. A Blitz program normally runs until its window closes,
+       so CreateTimer's allocation is routinely still live at exit -
+       which AddressSanitizer rightly reports as a leak. */
+    void free_all_timers()
+    {
+        for (size_t k = 0; k < timers.slots.size(); ++k)
+        {
+            delete timers.slots[k].value;
+            timers.slots[k].value = nullptr;
+        }
+    }
+
     /* ================= table ================= */
     const BBCommand bb_cmds_basic[] = {
         {"Print$string=\"\"", c_Print},

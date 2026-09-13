@@ -122,6 +122,9 @@ namespace bb
     void bb_print(zen::VM *vm, const char *s, int n);
 
     /* command tables (bb_cmds.cpp) */
+    /* Frees timers a script never passed to FreeTimer; call at exit. */
+    void free_all_timers();
+
     extern const BBCommand bb_cmds_basic[];
     extern const int bb_cmds_basic_count;
     extern const BBCommand bb_cmds_io[];
