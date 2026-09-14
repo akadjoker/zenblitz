@@ -6,9 +6,11 @@
 #include "runtime.h"
 #include "runtime3d.h"
 #include "backend_stdio.h" /* Print/DebugLog/files: same console backend as zenblitz */
-#include <cstdio>
+#include <SDL2/SDL_log.h>
+#include <SDL2/SDL_rwops.h>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 #if defined(_WIN32)
 #include <direct.h>
 #define zen_chdir _chdir
@@ -33,22 +35,55 @@ static void chdir_to_program(const char *path)
     directory[length] = '\0';
 
     if (zen_chdir(directory) != 0)
-        fprintf(stderr, "zenblitz3d: could not enter '%s' - relative media paths may not resolve\n",
-                directory);
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                 "zenblitz3d: could not enter '%s' - relative media paths may not resolve",
+                 directory);
     free(directory);
 }
 
 static char *read_file(const char *path)
 {
-    FILE *f = fopen(path, "rb");
-    if (!f) { fprintf(stderr, "zenblitz3d: cannot open '%s'\n", path); return nullptr; }
-    fseek(f, 0, SEEK_END);
-    long size = ftell(f);
-    fseek(f, 0, SEEK_SET);
-    char *buf = (char *)malloc(size + 1);
-    size_t n = fread(buf, 1, size, f);
+    SDL_RWops *f = SDL_RWFromFile(path, "rb");
+    if (!f)
+    {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "zenblitz3d: cannot open '%s'", path);
+        return nullptr;
+    }
+    Sint64 size = SDL_RWsize(f);
+    if (size < 0 || static_cast<Uint64>(size) >=
+                        static_cast<Uint64>(std::numeric_limits<size_t>::max()))
+    {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                 "zenblitz3d: cannot determine size of '%s'", path);
+        SDL_RWclose(f);
+        return nullptr;
+    }
+    if (SDL_RWseek(f, 0, RW_SEEK_SET) < 0)
+    {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "zenblitz3d: cannot seek '%s'", path);
+        SDL_RWclose(f);
+        return nullptr;
+    }
+
+    const size_t length = static_cast<size_t>(size);
+    char *buf = (char *)malloc(length + 1);
+    if (!buf)
+    {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                 "zenblitz3d: out of memory reading '%s'", path);
+        SDL_RWclose(f);
+        return nullptr;
+    }
+    size_t n = SDL_RWread(f, buf, 1, length);
+    if (n != length)
+    {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "zenblitz3d: cannot read '%s'", path);
+        free(buf);
+        SDL_RWclose(f);
+        return nullptr;
+    }
     buf[n] = '\0';
-    fclose(f);
+    SDL_RWclose(f);
     return buf;
 }
 
@@ -56,7 +91,7 @@ int main(int argc, char **argv)
 {
     if (argc < 2)
     {
-        fprintf(stderr, "usage: zenblitz3d program.bb\n");
+        SDL_Log("usage: zenblitz3d program.bb");
         return 1;
     }
 
@@ -75,7 +110,7 @@ int main(int argc, char **argv)
     free(source);
     if (!fn)
     {
-        fprintf(stderr, "zenblitz3d: compilation failed.\n");
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "zenblitz3d: compilation failed.");
         return 1;
     }
 
