@@ -9,6 +9,19 @@
 
 namespace zed
 {
+    static ig::String parentDirectory(const ig::String& path)
+    {
+        const size_t slash = path.find_last_of("/\\");
+        return slash == ig::String::npos ? ig::String(".") : path.substr(0, slash);
+    }
+
+    static ig::String nativeBasePath(const ig::String& scriptPath)
+    {
+        const size_t dot = scriptPath.find_last_of(".");
+        const size_t slash = scriptPath.find_last_of("/\\");
+        return dot != ig::String::npos && (slash == ig::String::npos || dot > slash)
+            ? scriptPath.substr(0, dot) : scriptPath;
+    }
 
     // Runner's own default already picks the right spelling per platform
     // (see Runner.hpp) - ".\zenblitz3d.exe" on Windows, "./zenblitz3d"
@@ -167,6 +180,74 @@ namespace zed
         activeTab_->runHandle = runner_.runAsync(activeTab_->path);
     }
 
+    void Editor::buildNative(bool runAfterBuild)
+    {
+        if (!activeTab_ || activeTab_->isRunning)
+            return;
+        if (activeTab_->path.empty())
+            activeTab_->path = "untitled.bb";
+        if (!writeFile(activeTab_->path.c_str(), activeTab_->code.text()))
+        {
+            activeTab_->lastOutput = ig::String("zenblitz-editor: could not write ") + activeTab_->path;
+            activeTab_->lastExitCode = -1;
+            activeTab_->hasRunOnce = true;
+            return;
+        }
+
+        activeTab_->isDirty = false;
+        activeTab_->lastOutput.clear();
+        activeTab_->hasRunOnce = true;
+        activeTab_->runNativeAfterBuild = runAfterBuild;
+        activeTab_->nativeCppPath = nativeBasePath(activeTab_->path) + ".native.cpp";
+        activeTab_->nativeBinaryPath = nativeBasePath(activeTab_->path) + ".native";
+#if defined(_WIN32)
+        activeTab_->nativeBinaryPath += ".exe";
+#endif
+
+        const ig::String zencc = NativeFileDialogProvider::executableDirectory()
+#if defined(_WIN32)
+            + "\\zencc.exe";
+#else
+            + "/zencc";
+#endif
+        ct::Vector<ig::String> arguments;
+        arguments.push_back("--emit-c");
+        arguments.push_back(activeTab_->path);
+        arguments.push_back(activeTab_->nativeCppPath);
+        activeTab_->nativeBuildPhase = 1;
+        activeTab_->isRunning = true;
+        activeTab_->runHandle = runner_.runAsync(zencc, arguments);
+    }
+
+    void Editor::startNativeCompile(DocumentTab& tab)
+    {
+        ct::Vector<ig::String> arguments;
+        arguments.push_back("-std=c++11");
+        arguments.push_back("-O2");
+        arguments.push_back(ig::String("-I") + ZEN_EDITOR_SOURCE_DIR + "/codegen");
+        arguments.push_back(ig::String("-I") + ZEN_EDITOR_SOURCE_DIR + "/engine/include");
+        arguments.push_back(ig::String("-I") + ZEN_EDITOR_SOURCE_DIR + "/extern/GPU/gpu/include");
+        arguments.push_back(ig::String("-I") + ZEN_EDITOR_SOURCE_DIR + "/libzen/third_party");
+        arguments.push_back(ig::String("-I") + ZEN_EDITOR_SOURCE_DIR + "/extern/SDL/include");
+        arguments.push_back(ig::String("-I") + ZEN_EDITOR_BUILD_DIR + "/extern/SDL/include");
+        arguments.push_back(tab.nativeCppPath);
+        arguments.push_back("-o");
+        arguments.push_back(tab.nativeBinaryPath);
+        arguments.push_back(ZEN_EDITOR_ENGINE_LIBRARY);
+        arguments.push_back(ZEN_EDITOR_GPU_SDL_LIBRARY);
+        arguments.push_back(ZEN_EDITOR_GPU_LIBRARY);
+        arguments.push_back(ZEN_EDITOR_GPU_COMMON_LIBRARY);
+        arguments.push_back(ZEN_EDITOR_SDL_LIBRARY);
+#if !defined(_WIN32)
+        arguments.push_back(ig::String("-Wl,-rpath,") + ZEN_EDITOR_BUILD_DIR + "/extern/SDL");
+        arguments.push_back("-lm");
+        arguments.push_back("-lpthread");
+        arguments.push_back("-ldl");
+#endif
+        tab.nativeBuildPhase = 2;
+        tab.runHandle = runner_.runAsync(ZEN_EDITOR_CXX_COMPILER, arguments);
+    }
+
     void Editor::stop()
     {
         if (activeTab_ && activeTab_->isRunning)
@@ -239,10 +320,24 @@ namespace zed
             }
             if (finished)
             {
-                t.runHandle = nullptr;
-                t.isRunning = false;
                 t.lastExitCode = result.exitCode;
                 t.hasRunOnce = true;
+                if (t.nativeBuildPhase == 1 && result.exitCode == 0)
+                {
+                    startNativeCompile(t);
+                    continue;
+                }
+                if (t.nativeBuildPhase == 2 && result.exitCode == 0 && t.runNativeAfterBuild)
+                {
+                    ct::Vector<ig::String> arguments;
+                    t.nativeBuildPhase = 3;
+                    t.runHandle = runner_.runAsync(t.nativeBinaryPath, arguments, parentDirectory(t.path));
+                    continue;
+                }
+                t.runHandle = nullptr;
+                t.isRunning = false;
+                t.nativeBuildPhase = 0;
+                t.runNativeAfterBuild = false;
             }
         }
 
@@ -292,6 +387,12 @@ namespace zed
             break;
         case ToolbarAction::Play:
             play();
+            break;
+        case ToolbarAction::Build:
+            buildNative(false);
+            break;
+        case ToolbarAction::BuildAndRun:
+            buildNative(true);
             break;
         case ToolbarAction::Stop:
             stop();

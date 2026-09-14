@@ -2,6 +2,7 @@
 #define ZEN_CODEGEN_SUPPORT_HPP
 
 #include <cctype>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -11,14 +12,55 @@
 #include <string>
 
 inline std::string zen_str(int64_t value) { return std::to_string(value); }
+inline std::string zen_str(bool value) { return std::to_string(static_cast<int64_t>(value)); }
 inline std::string zen_str(double value)
 {
+    if (std::isnan(value)) return "NaN";
+    if (std::isinf(value)) return value > 0 ? "Infinity" : "-Infinity";
+
+    const int digits = 6, exponent_negative = -4, exponent_positive = 8;
     char buffer[64];
-    std::snprintf(buffer, sizeof(buffer), "%.6g", value);
-    std::string result(buffer);
-    if (result.find('.') == std::string::npos && result.find('e') == std::string::npos && result.find('E') == std::string::npos)
-        result += ".0";
-    return result;
+    std::string result;
+    int decimal;
+    bool negative = value < 0;
+    double absolute = std::fabs(value);
+
+    if (absolute == 0.0)
+    {
+        result = "000000";
+        decimal = 0;
+    }
+    else
+    {
+        std::snprintf(buffer, sizeof(buffer), "%.5e", absolute);
+        result += buffer[0];
+        int index = 2;
+        for (; buffer[index] && buffer[index] != 'e'; ++index) result += buffer[index];
+        decimal = std::atoi(buffer + index + 1) + 1;
+    }
+
+    if (decimal <= exponent_negative + 1 || decimal > exponent_positive)
+    {
+        std::snprintf(buffer, sizeof(buffer), "%.6g", value);
+        return buffer;
+    }
+    if (decimal <= 0)
+    {
+        result = "0." + std::string(static_cast<size_t>(-decimal), '0') + result;
+        decimal = 1;
+    }
+    else if (decimal < digits)
+        result = result.substr(0, static_cast<size_t>(decimal)) + "." + result.substr(static_cast<size_t>(decimal));
+    else
+    {
+        result += std::string(static_cast<size_t>(decimal - digits), '0') + ".0";
+        decimal += decimal - digits;
+    }
+
+    int end = static_cast<int>(result.length());
+    while (--end > decimal + 1 && result[static_cast<size_t>(end)] == '0') {}
+    result.resize(static_cast<size_t>(end + 1));
+    return negative ? "-" + result : result;
 }
 inline int64_t zen_int(const std::string &value) { return std::strtoll(value.c_str(), 0, 10); }
 inline double zen_float(const std::string &value) { return std::strtod(value.c_str(), 0); }
@@ -114,10 +156,78 @@ inline std::string zen_bin(int64_t n)
     for (int i = 31; i >= 0; --i, value >>= 1) out[static_cast<size_t>(i)] = (value & 1) ? '1' : '0';
     return out;
 }
+inline int64_t zen_round_int(double value) { return (int64_t)std::nearbyint(value); }
+inline void zen_runtime_error(const std::string &msg);
+
+inline int64_t zen_div(int64_t a, int64_t b)
+{
+    /* the VM's OP_IDIV raises this; without the message and with a bare
+       exit the two disagree on stderr while agreeing on stdout, which the
+       parity harness cannot see */
+    if (b == 0) zen_runtime_error("Division by zero");
+    return a / b;
+}
+inline int64_t zen_mod(int64_t a, int64_t b)
+{
+    if (b == 0) zen_runtime_error("Division by zero");
+    return a % b;
+}
+struct ZenDataValue
+{
+    int kind;
+    int64_t i;
+    double f;
+    std::string s;
+};
+static ZenDataValue *z_data = 0;
+static int64_t z_data_ptr = 0;
+static int64_t z_gosub_stack[256] __attribute__((unused));
+static int64_t z_gosub_sp __attribute__((unused)) = 0;
+inline int64_t z_read_int()
+{
+    ZenDataValue &v = z_data[z_data_ptr++];
+    if (v.kind == 1) return zen_round_int(v.f);
+    if (v.kind == 2) return zen_int(v.s);
+    return v.i;
+}
+inline double z_read_float()
+{
+    ZenDataValue &v = z_data[z_data_ptr++];
+    if (v.kind == 1) return v.f;
+    if (v.kind == 2) return zen_float(v.s);
+    return static_cast<double>(v.i);
+}
+inline std::string z_read_str()
+{
+    ZenDataValue &v = z_data[z_data_ptr++];
+    if (v.kind == 2) return v.s;
+    if (v.kind == 1) return zen_str(v.f);
+    return zen_str(v.i);
+}
 inline void zen_print(const std::string &value)
 {
     std::fputs(value.c_str(), stdout);
     std::fputc('\n', stdout);
+}
+inline void zen_write(const std::string &value)
+{
+    std::fputs(value.c_str(), stdout);
+}
+inline int64_t zen_millisecs()
+{
+    return static_cast<int64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count());
+}
+inline void zen_end()
+{
+    std::fflush(stdout);
+    std::exit(0);
+}
+inline void zen_runtime_error(const std::string &msg)
+{
+    std::fflush(stdout);
+    std::fprintf(stderr, "[runtime error] %s\n", msg.c_str());
+    std::exit(1);
 }
 
 #endif

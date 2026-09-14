@@ -33,7 +33,31 @@ for source in "$@"; do
 
     cxx=${CXX:-c++}
     support_dir=$(CDPATH= cd -- "$(dirname "$zencc")/../codegen" && pwd)
-    "$cxx" -std=c++11 -Wall -Wextra -Werror -I"$support_dir" "$generated" -o "$native"
+    engine_dir=$(CDPATH= cd -- "$(dirname "$zencc")/../engine/include" && pwd)
+    gpu_dir=$(CDPATH= cd -- "$(dirname "$zencc")/../extern/GPU/gpu/include" && pwd)
+    runtime_third_party_dir=$(CDPATH= cd -- "$(dirname "$zencc")/../libzen/third_party" && pwd)
+    build_dir=$(CDPATH= cd -- "$(dirname "$zencc")/../build" && pwd)
+    sdl2_dir=$(CDPATH= cd -- "$(dirname "$zencc")/../extern/SDL" && pwd)
+    sdl2_build="$build_dir/extern/SDL"
+    cxxflags="${NATIVE_CXXFLAGS:-}"
+    ldflags="${NATIVE_LDFLAGS:-}"
+    # If SDL2 is available via pkg-config, use it; otherwise fall back to the vendored build
+    if pkg-config --exists sdl2 2>/dev/null; then
+        cxxflags="$cxxflags $(pkg-config --cflags sdl2)"
+        ldflags="$ldflags $(pkg-config --libs sdl2)"
+    else
+        cxxflags="$cxxflags -I$sdl2_dir/include -I$sdl2_build/include"
+        if [ -f "$sdl2_build/libSDL2.a" ]; then
+            ldflags="$ldflags $sdl2_build/libSDL2.a -lm -lpthread -ldl"
+        elif ls "$sdl2_build"/libSDL2-*.so.* >/dev/null 2>&1; then
+            sdl2_shared=$(ls "$sdl2_build"/libSDL2-*.so.* | head -1)
+            ldflags="$ldflags $sdl2_shared -Wl,-rpath,$sdl2_build -lm -lpthread -ldl"
+        else
+            ldflags="$ldflags -lSDL2"
+        fi
+    fi
+    engine_ldflags="$build_dir/engine/libzenblitz_engine.a $build_dir/extern/GPU/gpu/libgpu_sdl.a $build_dir/extern/GPU/gpu/libgpu.a $build_dir/extern/GPU/gpu/libgpu_common.a"
+    "$cxx" -std=c++11 -Wall -Wextra -Werror $cxxflags -I"$support_dir" -I"$engine_dir" -I"$gpu_dir" -I"$runtime_third_party_dir" "$generated" -o "$native" $engine_ldflags $ldflags
     timeout 30 "$native" >"$native_out" 2>"$workdir/$name.native.err"
     native_status=$?
     set -e

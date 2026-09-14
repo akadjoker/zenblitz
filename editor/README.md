@@ -13,7 +13,7 @@ cd bin
 
 Run from `bin` so the editor can find the sibling `zenblitz3d` executable. Programs run in a child process: stdout/stderr appears progressively in Output, and F5 stops the active program while it is running. This is a visual adaptation, not a complete port of MFC BlitzIDE (debugger, executable publishing and integrated help are not implemented).
 
-Toolbar: New, Open, Save, Close, Cut, Copy, Paste, Find, Run. Shortcuts: Ctrl+N, Ctrl+O, Ctrl+S, Ctrl+F4, Ctrl+F and F5. Closing a modified tab asks whether to save, discard or cancel.
+Toolbar: New, Open, Save, Close, Cut, Copy, Paste, Find and Run. The Program menu also provides Build native and Build and run native: it emits `<script>.native.cpp`, compiles `<script>.native` next to the source, and runs it from the script directory so relative assets resolve normally. Shortcuts: Ctrl+N, Ctrl+O, Ctrl+S, Ctrl+F4, Ctrl+F and F5. Closing a modified tab asks whether to save, discard or cancel.
 
 Focused regressions (from repository root):
 

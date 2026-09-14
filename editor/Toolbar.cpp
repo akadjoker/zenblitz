@@ -46,7 +46,12 @@ ToolbarAction Toolbar::draw(ig::Context& ui, const ToolbarState& state)
             {
                 if (ui.menuItem("Stop program (F5)")) action = ToolbarAction::Stop;
             }
-            else if (ui.menuItem("Run program (F5)")) action = ToolbarAction::Play;
+            else
+            {
+                if (ui.menuItem("Run program (F5)")) action = ToolbarAction::Play;
+                if (ui.menuItem("Build native")) action = ToolbarAction::Build;
+                if (ui.menuItem("Build and run native")) action = ToolbarAction::BuildAndRun;
+            }
             ui.endMenu();
         }
         if (ui.beginMenu("Theme")) {

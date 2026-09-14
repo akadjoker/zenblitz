@@ -25,6 +25,16 @@ add_executable(zenblitz-editor
     ${ZEN_NATIVE_FILE_DIALOG_SRC}
 )
 target_link_libraries(zenblitz-editor PRIVATE igui_sdl2 igui)
+target_compile_definitions(zenblitz-editor PRIVATE
+    ZEN_EDITOR_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+    ZEN_EDITOR_BUILD_DIR="${CMAKE_BINARY_DIR}"
+    ZEN_EDITOR_CXX_COMPILER="${CMAKE_CXX_COMPILER}"
+    ZEN_EDITOR_ENGINE_LIBRARY="$<TARGET_FILE:zenblitz_engine>"
+    ZEN_EDITOR_GPU_SDL_LIBRARY="$<TARGET_FILE:gpu_sdl>"
+    ZEN_EDITOR_GPU_LIBRARY="$<TARGET_FILE:gpu>"
+    ZEN_EDITOR_GPU_COMMON_LIBRARY="$<TARGET_FILE:gpu_common>"
+    ZEN_EDITOR_SDL_LIBRARY="$<TARGET_FILE:SDL2>"
+)
 if (WIN32)
     # SHGetKnownFolderPath needs Shell32 + Ole32 (CoTaskMemFree).
     target_link_libraries(zenblitz-editor PRIVATE Shell32 Ole32)
@@ -55,3 +65,13 @@ endif()
 
 target_sources(zenblitz-editor-tests PRIVATE Editor.cpp EditorSettings.cpp Toolbar.cpp FindBar.cpp
     SymbolPanel.cpp OutputPanel.cpp Runner.cpp FileIO.cpp ${ZEN_NATIVE_FILE_DIALOG_SRC})
+target_compile_definitions(zenblitz-editor-tests PRIVATE
+    ZEN_EDITOR_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+    ZEN_EDITOR_BUILD_DIR="${CMAKE_BINARY_DIR}"
+    ZEN_EDITOR_CXX_COMPILER="${CMAKE_CXX_COMPILER}"
+    ZEN_EDITOR_ENGINE_LIBRARY="$<TARGET_FILE:zenblitz_engine>"
+    ZEN_EDITOR_GPU_SDL_LIBRARY="$<TARGET_FILE:gpu_sdl>"
+    ZEN_EDITOR_GPU_LIBRARY="$<TARGET_FILE:gpu>"
+    ZEN_EDITOR_GPU_COMMON_LIBRARY="$<TARGET_FILE:gpu_common>"
+    ZEN_EDITOR_SDL_LIBRARY="$<TARGET_FILE:SDL2>"
+)

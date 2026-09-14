@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdint.h>
+#include <vector>
 #include <SDL_mutex.h>
 #if defined(_WIN32)
 #include <windows.h>
@@ -24,16 +25,18 @@ struct Runner::RunHandle
     SDL_atomic_t stopRequested;
     RunResult result;
     ig::String pendingOutput;
-    ig::String runnerPathCopy;
-    ig::String scriptPathCopy;
+    ig::String programPathCopy;
+    ct::Vector<ig::String> argumentsCopy;
+    ig::String workingDirectoryCopy;
 #if defined(_WIN32)
     void* processHandle = nullptr;
 #else
     void* pidSlot = nullptr;
 #endif
 
-    RunHandle(const Runner& r, const ig::String& scriptPath)
-        : runnerPathCopy(r.runnerPath_), scriptPathCopy(scriptPath)
+    RunHandle(const ig::String& programPath, const ct::Vector<ig::String>& arguments,
+              const ig::String& workingDirectory)
+        : programPathCopy(programPath), argumentsCopy(arguments), workingDirectoryCopy(workingDirectory)
     {
         outputMutex = SDL_CreateMutex();
         SDL_AtomicSet(&done, 0);
@@ -65,7 +68,20 @@ static void captureOutput(RunResult& result, Runner::RunHandle* handle,
 
 #if defined(_WIN32)
 
-static RunResult runWindows(const ig::String& runnerPath, const ig::String& scriptPath, Runner::RunHandle* handle)
+static ig::String quoteWindowsArgument(const ig::String& argument)
+{
+    ig::String quoted("\"");
+    for (char c : argument)
+    {
+        if (c == '\"') quoted += '\\';
+        quoted += c;
+    }
+    quoted += '\"';
+    return quoted;
+}
+
+static RunResult runWindows(const ig::String& programPath, const ct::Vector<ig::String>& arguments,
+                            const ig::String& workingDirectory, Runner::RunHandle* handle)
 {
     RunResult result;
 
@@ -77,18 +93,19 @@ static RunResult runWindows(const ig::String& runnerPath, const ig::String& scri
     HANDLE readEnd = nullptr, writeEnd = nullptr;
     if (!CreatePipe(&readEnd, &writeEnd, &sa, 0))
     {
-        result.output = ig::String("zenblitz-editor: could not create a pipe to ") + runnerPath;
+        result.output = ig::String("zenblitz-editor: could not create a pipe to ") + programPath;
         result.exitCode = -1;
         result.ranAtAll = false;
         return result;
     }
     SetHandleInformation(readEnd, HANDLE_FLAG_INHERIT, 0);
 
-    ig::String commandLine = "\"";
-    commandLine += runnerPath;
-    commandLine += "\" \"";
-    commandLine += scriptPath;
-    commandLine += "\"";
+    ig::String commandLine = quoteWindowsArgument(programPath);
+    for (const ig::String& argument : arguments)
+    {
+        commandLine += " ";
+        commandLine += quoteWindowsArgument(argument);
+    }
 
     STARTUPINFOA si;
     ZeroMemory(&si, sizeof(si));
@@ -105,14 +122,14 @@ static RunResult runWindows(const ig::String& runnerPath, const ig::String& scri
     memcpy(mutableCommandLine, commandLine.c_str(), commandLine.size() + 1);
 
     const BOOL started = CreateProcessA(nullptr, mutableCommandLine, nullptr, nullptr, TRUE, 0,
-                                        nullptr, nullptr, &si, &pi);
+                                        nullptr, workingDirectory.empty() ? nullptr : workingDirectory.c_str(), &si, &pi);
     delete[] mutableCommandLine;
     CloseHandle(writeEnd);
 
     if (!started)
     {
         CloseHandle(readEnd);
-        result.output = ig::String("zenblitz-editor: could not launch ") + runnerPath;
+        result.output = ig::String("zenblitz-editor: could not launch ") + programPath;
         result.exitCode = -1;
         result.ranAtAll = false;
         return result;
@@ -146,14 +163,15 @@ static RunResult runWindows(const ig::String& runnerPath, const ig::String& scri
 
 #else
 
-static RunResult runPosix(const ig::String& runnerPath, const ig::String& scriptPath, Runner::RunHandle* handle)
+static RunResult runPosix(const ig::String& programPath, const ct::Vector<ig::String>& arguments,
+                          const ig::String& workingDirectory, Runner::RunHandle* handle)
 {
     RunResult result;
 
     int pipeFds[2];
     if (pipe(pipeFds) != 0)
     {
-        result.output = ig::String("zenblitz-editor: could not create a pipe to ") + runnerPath;
+        result.output = ig::String("zenblitz-editor: could not create a pipe to ") + programPath;
         result.exitCode = -1;
         result.ranAtAll = false;
         return result;
@@ -164,7 +182,7 @@ static RunResult runPosix(const ig::String& runnerPath, const ig::String& script
     {
         close(pipeFds[0]);
         close(pipeFds[1]);
-        result.output = ig::String("zenblitz-editor: could not launch ") + runnerPath;
+        result.output = ig::String("zenblitz-editor: could not launch ") + programPath;
         result.exitCode = -1;
         result.ranAtAll = false;
         return result;
@@ -176,7 +194,15 @@ static RunResult runPosix(const ig::String& runnerPath, const ig::String& script
         dup2(pipeFds[1], STDERR_FILENO);
         close(pipeFds[0]);
         close(pipeFds[1]);
-        execlp(runnerPath.c_str(), runnerPath.c_str(), scriptPath.c_str(), (char*)nullptr);
+        if (!workingDirectory.empty() && chdir(workingDirectory.c_str()) != 0)
+            _exit(126);
+        std::vector<char*> argv;
+        argv.reserve(arguments.size() + 2);
+        argv.push_back(const_cast<char*>(programPath.c_str()));
+        for (const ig::String& argument : arguments)
+            argv.push_back(const_cast<char*>(argument.c_str()));
+        argv.push_back(nullptr);
+        execvp(programPath.c_str(), argv.data());
         _exit(127);
     }
 
@@ -208,10 +234,18 @@ static RunResult runPosix(const ig::String& runnerPath, const ig::String& script
 
 RunResult Runner::run(const ig::String& scriptPath) const
 {
+    ct::Vector<ig::String> arguments;
+    arguments.push_back(scriptPath);
+    return run(runnerPath_, arguments);
+}
+
+RunResult Runner::run(const ig::String& programPath, const ct::Vector<ig::String>& arguments,
+                      const ig::String& workingDirectory) const
+{
 #if defined(_WIN32)
-    return runWindows(runnerPath_, scriptPath, nullptr);
+    return runWindows(programPath, arguments, workingDirectory, nullptr);
 #else
-    return runPosix(runnerPath_, scriptPath, nullptr);
+    return runPosix(programPath, arguments, workingDirectory, nullptr);
 #endif
 }
 
@@ -221,9 +255,9 @@ int runThreadEntry(void* data)
 {
     Runner::RunHandle* handle = static_cast<Runner::RunHandle*>(data);
 #if defined(_WIN32)
-    handle->result = runWindows(handle->runnerPathCopy, handle->scriptPathCopy, handle);
+    handle->result = runWindows(handle->programPathCopy, handle->argumentsCopy, handle->workingDirectoryCopy, handle);
 #else
-    handle->result = runPosix(handle->runnerPathCopy, handle->scriptPathCopy, handle);
+    handle->result = runPosix(handle->programPathCopy, handle->argumentsCopy, handle->workingDirectoryCopy, handle);
 #endif
     SDL_AtomicSet(&handle->done, 1);
     return 0;
@@ -232,7 +266,15 @@ int runThreadEntry(void* data)
 
 Runner::RunHandle* Runner::runAsync(const ig::String& scriptPath) const
 {
-    RunHandle* handle = new RunHandle(*this, scriptPath);
+    ct::Vector<ig::String> arguments;
+    arguments.push_back(scriptPath);
+    return runAsync(runnerPath_, arguments);
+}
+
+Runner::RunHandle* Runner::runAsync(const ig::String& programPath, const ct::Vector<ig::String>& arguments,
+                                    const ig::String& workingDirectory) const
+{
+    RunHandle* handle = new RunHandle(programPath, arguments, workingDirectory);
     if (!handle->outputMutex)
     {
         handle->result.output = ig::String("zenblitz-editor: could not create output lock: ") +

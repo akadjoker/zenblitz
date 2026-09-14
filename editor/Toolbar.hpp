@@ -24,6 +24,8 @@ enum class ToolbarAction
     OpenRecent, // see Toolbar::lastRecentFilePicked() for which one
     Save,
     Play,
+    Build,
+    BuildAndRun,
     Stop,
     Close,
     Copy,

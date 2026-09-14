@@ -32,6 +32,10 @@ public:
     // and clears it.
     Runner::RunHandle* runHandle = nullptr;
     bool isRunning = false;
+    int nativeBuildPhase = 0;
+    bool runNativeAfterBuild = false;
+    ig::String nativeCppPath;
+    ig::String nativeBinaryPath;
 
     SymbolPanel symbols;
 

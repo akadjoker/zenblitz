@@ -75,7 +75,7 @@ namespace bb
 
     void ExprSeqNode::castTo(DeclSeq *decls, Environ *e, bool cfunc)
     {
-        if ((int)exprs.size() > decls->size()) ex("Too many parameters");
+        if ((int)exprs.size() > decls->size()) ex("Too many parameters for function");
         for (int k = 0; k < decls->size(); ++k)
         {
             Decl *d = decls->decls[k];
@@ -113,6 +113,8 @@ namespace bb
         FuncType *f = sem_decl->type->funcType();
         if (t && f->returnType != t) ex("incorrect function return type");
         exprs->semant(e);
+        if ((int)exprs->size() > f->params->size())
+            ex("Too many parameters for function '" + ident + "'");
         exprs->castTo(f->params, e, f->cfunc);
         sem_type = f->returnType;
         return this;

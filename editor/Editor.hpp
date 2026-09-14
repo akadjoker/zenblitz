@@ -101,6 +101,8 @@ private:
     void openFromDialog(const ig::String& path);
     void save();
     void play();
+    void buildNative(bool runAfterBuild);
+    void startNativeCompile(DocumentTab& tab);
     void stop();
     // Closes immediately if the tab has no unsaved changes; otherwise opens
     // the confirmation prompt update() draws and defers to its answer.
