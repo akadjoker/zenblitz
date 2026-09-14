@@ -6,6 +6,7 @@ project(zen LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+enable_testing()
 
 # Common warnings (MSVC spells them differently and rejects the GCC forms)
 if(MSVC)
@@ -92,7 +93,6 @@ endif()
 #   cd build && ctest --output-on-failure
 # Refresh snapshots with:
 #   tests/run_tests.sh ./bin/zenblitz --update
-enable_testing()
 if(ZEN_BUILD_CLI AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_tests.sh")
     add_test(
         NAME zen_snapshot_suite
