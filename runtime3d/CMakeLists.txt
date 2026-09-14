@@ -24,11 +24,13 @@ target_compile_options(zenblitz_runtime3d PRIVATE $<$<CONFIG:Release>:-O3>)
 # commands). Reuses cli/backend_stdio.cpp for Print/files, same as zenblitz.
 add_executable(zenblitz3d src/main3d.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../cli/backend_stdio.cpp)
 target_include_directories(zenblitz3d PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../cli)
-target_link_libraries(zenblitz3d PRIVATE zenblitz_runtime3d)
+# SDL2::SDL2 is created by the vendored extern/SDL subdirectory in the root
+# build. Keep this dependency explicit so this runtime cannot fall back to a
+# system SDL installation.
+target_link_libraries(zenblitz3d PRIVATE zenblitz_runtime3d SDL2::SDL2)
 target_compile_options(zenblitz3d PRIVATE $<$<CONFIG:Release>:-O3>)
 set_target_properties(zenblitz3d PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/bin)
-# SDL2.dll beside bin/zenblitz3d.exe on Windows; no-op on Linux/Mac and
-# against a system SDL2. main3d.cpp has a plain main() (no #include
-# <SDL.h>), so unlike the editor this target must NOT link SDL2::SDL2main -
-# see zen_copy_sdl2_runtime's comment in the root CMakeLists.txt.
+# SDL2.dll beside bin/zenblitz3d.exe on Windows; no-op on Linux/Mac.
+# main3d.cpp has a plain main() (no #include <SDL.h>), so this target must not
+# link SDL2::SDL2main.
 zen_copy_sdl2_runtime(zenblitz3d)
