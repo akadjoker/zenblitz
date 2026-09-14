@@ -22,6 +22,7 @@ else()
     target_link_options(zenblitz PRIVATE -Wl,--stack,8388608)
 endif()
 
+
 # Runtime-only executable: what `zenblitz --build` appends the program to
 # (it looks for this file next to itself). No compiler, so a distributed
 # game carries only the VM and the command set.

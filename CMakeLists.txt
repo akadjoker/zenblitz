@@ -82,6 +82,11 @@ if(ZEN_BUILD_CLI)
     add_subdirectory(cli)
 endif()
 
+option(ZEN_BUILD_CODEGEN "Build the native C++ code generator" OFF)
+if(ZEN_BUILD_CODEGEN)
+    add_subdirectory(codegen)
+endif()
+
 # --- Snapshot tests for tests/*.bb (ctest integration) ---
 # Run with:
 #   cd build && ctest --output-on-failure

@@ -19,7 +19,7 @@
 /stage/
 /zenblitz-*.tar.gz
 /zenblitz-*.zip
-
+/tmp
 # Scratch files the test scripts write next to the repo
 /zen_tmp_*
 .claude
