@@ -2038,6 +2038,143 @@ inline void zen_entity_texture(int64_t entity, int64_t texture, int64_t frame = 
         engine::BrushTexture::fromTexture(z_platform.device(), it->second, (int)frame));
 }
 
+/* ================= Surface and vertex queries ================= */
+
+/* Every command here mirrors runtime3d's own of the same name. A surface
+   travels as its own pointer (z_surface_of is a straight cast), so GetSurface
+   hands back the pointer it found and the vertex queries answer 0 when the
+   surface is gone - VertexW included, which Blitz3D defines as a constant 1. */
+inline int64_t zen_image_width(int64_t image)
+{
+    engine::Image *img = z_image_of(image);
+    return img ? img->width() : 0;
+}
+inline int64_t zen_image_height(int64_t image)
+{
+    engine::Image *img = z_image_of(image);
+    return img ? img->height() : 0;
+}
+inline int64_t zen_count_surfaces(int64_t mesh)
+{
+    engine::MeshModel *m = z_mesh_of(mesh);
+    return m ? (int64_t)m->getSurfaces().size() : 0;
+}
+inline int64_t zen_count_vertices(int64_t surface)
+{
+    engine::Surface *s = z_surface_of(surface);
+    return s ? s->numVertices() : 0;
+}
+inline int64_t zen_count_triangles(int64_t surface)
+{
+    engine::Surface *s = z_surface_of(surface);
+    return s ? s->numTriangles() : 0;
+}
+inline int64_t zen_get_surface(int64_t mesh, int64_t index)
+{
+    /* Surface indices are 1-based, as in Blitz3D. */
+    engine::MeshModel *m = z_mesh_of(mesh);
+    engine::Surface *s = nullptr;
+    if (m && index >= 1 && (size_t)index <= m->getSurfaces().size())
+        s = m->getSurfaces()[(size_t)index - 1];
+    return (int64_t)(std::intptr_t)s;
+}
+inline int64_t zen_triangle_vertex(int64_t surface, int64_t index, int64_t vertex)
+{
+    engine::Surface *s = z_surface_of(surface);
+    return s ? s->getTriangle((int)index).verts[(int)vertex] : 0;
+}
+inline double zen_vertex_x(int64_t surface, int64_t index)
+{
+    engine::Surface *s = z_surface_of(surface);
+    return s ? s->getVertex((int)index).coords.x : 0.0;
+}
+inline double zen_vertex_y(int64_t surface, int64_t index)
+{
+    engine::Surface *s = z_surface_of(surface);
+    return s ? s->getVertex((int)index).coords.y : 0.0;
+}
+inline double zen_vertex_z(int64_t surface, int64_t index)
+{
+    engine::Surface *s = z_surface_of(surface);
+    return s ? s->getVertex((int)index).coords.z : 0.0;
+}
+inline double zen_vertex_w(int64_t = 0, int64_t = 0, int64_t = 0) { return 1.0; }
+inline double zen_vertex_u(int64_t surface, int64_t index, int64_t coordSet = 0)
+{
+    engine::Surface *s = z_surface_of(surface);
+    return s ? s->getVertex((int)index).texCoords[(int)coordSet][0] : 0.0;
+}
+inline double zen_vertex_v(int64_t surface, int64_t index, int64_t coordSet = 0)
+{
+    engine::Surface *s = z_surface_of(surface);
+    return s ? s->getVertex((int)index).texCoords[(int)coordSet][1] : 0.0;
+}
+inline double zen_vertex_nx(int64_t surface, int64_t index)
+{
+    engine::Surface *s = z_surface_of(surface);
+    return s ? s->getVertex((int)index).normal.x : 0.0;
+}
+inline double zen_vertex_ny(int64_t surface, int64_t index)
+{
+    engine::Surface *s = z_surface_of(surface);
+    return s ? s->getVertex((int)index).normal.y : 0.0;
+}
+inline double zen_vertex_nz(int64_t surface, int64_t index)
+{
+    engine::Surface *s = z_surface_of(surface);
+    return s ? s->getVertex((int)index).normal.z : 0.0;
+}
+inline double zen_vertex_red(int64_t surface, int64_t index)
+{
+    engine::Surface *s = z_surface_of(surface);
+    const unsigned c = s ? s->getVertex((int)index).color : 0u;
+    return (double)((c & 0xff0000u) >> 16);
+}
+inline double zen_vertex_green(int64_t surface, int64_t index)
+{
+    engine::Surface *s = z_surface_of(surface);
+    const unsigned c = s ? s->getVertex((int)index).color : 0u;
+    return (double)((c & 0xff00u) >> 8);
+}
+inline double zen_vertex_blue(int64_t surface, int64_t index)
+{
+    engine::Surface *s = z_surface_of(surface);
+    const unsigned c = s ? s->getVertex((int)index).color : 0u;
+    return (double)(c & 0xffu);
+}
+inline void zen_vertex_color(int64_t surface, int64_t index, double red, double green, double blue,
+                             double alpha = 1.0)
+{
+    engine::Surface *s = z_surface_of(surface);
+    if (!s) return;
+    /* The colour arrives 0..255 and the alpha 0..1, both clamped, exactly as
+       runtime3d's c_VertexColor packs them into one ARGB value. */
+    double r = red, g = green, b = blue, a = alpha * 255.0;
+    if (r < 0) r = 0; else if (r > 255) r = 255;
+    if (g < 0) g = 0; else if (g > 255) g = 255;
+    if (b < 0) b = 0; else if (b > 255) b = 255;
+    if (a < 0) a = 0; else if (a > 255) a = 255;
+    const unsigned argb =
+        ((unsigned)a << 24) | ((unsigned)r << 16) | ((unsigned)g << 8) | (unsigned)b;
+    s->setColor((int)index, argb);
+}
+inline void zen_vertex_normal(int64_t surface, int64_t index, double nx, double ny, double nz)
+{
+    if (engine::Surface *s = z_surface_of(surface))
+        s->setNormal((int)index, engine::Vector((float)nx, (float)ny, (float)nz));
+}
+inline void zen_vertex_tex_coords(int64_t surface, int64_t index, double u, double v, double = 1.0,
+                                  int64_t coordSet = 0)
+{
+    if (engine::Surface *s = z_surface_of(surface))
+        s->setTexCoords((int)index, (float)u, (float)v, (int)coordSet);
+}
+inline void zen_clear_surface(int64_t surface, int64_t clearVertices = 1, int64_t clearTriangles = 1)
+{
+    if (engine::Surface *s = z_surface_of(surface))
+        s->clear(clearVertices != 0, clearTriangles != 0);
+}
+
 /* ================= Mesh loading ================= */
 
 inline int64_t zen_load_mesh(const std::string &file, int64_t parent = 0)
