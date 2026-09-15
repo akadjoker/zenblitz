@@ -475,10 +475,13 @@ inline int64_t zen_add_triangle(int64_t surface, int64_t v0, int64_t v1, int64_t
     engine::Surface::Triangle triangle{{(unsigned short)v0, (unsigned short)v1, (unsigned short)v2}};
     return s->addTriangle(triangle);
 }
-inline void zen_update_normals(int64_t surface)
+inline void zen_update_normals(int64_t mesh)
 {
-    engine::Surface *s = z_surface(surface);
-    if (s) s->updateNormals();
+    /* UpdateNormals takes a mesh, not a surface: runtime3d's c_UpdateNormals
+       walks entity -> model -> MeshModel the same way. */
+    engine::Entity *e = z_entity(mesh);
+    engine::MeshModel *m = (e && e->getModel()) ? e->getModel()->getMeshModel() : nullptr;
+    if (m) m->updateNormals();
 }
 inline void zen_vertex_coords(int64_t surface, int64_t index, double x, double y, double z)
 {
