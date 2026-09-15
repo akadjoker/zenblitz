@@ -25,6 +25,7 @@
 #include "engine/Surface.h"
 #include "engine/Animator.h"
 #include "engine/Pixmap.h"
+#include "engine/Image.h"
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
@@ -51,6 +52,15 @@ static int64_t z_next_entity = 0;
    nothing reads this yet, but programs that never touch it must still compile
    under -Wall -Wextra -Werror. */
 static int64_t __attribute__((unused)) z_draw_buffer = 1;
+
+/* Buffers. Blitz3D hands a buffer around as one integer: positive values are
+   the screen - kScreenBuffer is 1, the same value runtime3d uses - while an
+   image or a texture canvas gets a negative handle that packs the resource
+   and its frame. Same encoding as runtime3d's image_buffer() reads. */
+static std::map<int64_t, engine::Image *> z_images;
+static std::map<int64_t, engine::Texture *> z_textures;
+static int64_t z_next_image = 0;
+static int64_t z_canvas_buffer = 1;
 static unsigned z_draw_color = 0xff000000u;
 static int z_origin_x = 0, z_origin_y = 0;
 static int z_viewport_x = 0, z_viewport_y = 0, z_viewport_width = 0, z_viewport_height = 0;
@@ -97,6 +107,45 @@ static inline int64_t z_store_entity(engine::Entity *e, engine::Entity *parent =
     z_entities[h] = e;
     return h;
 }
+
+/* Buffer handles and the frame they resolve to - see the state block. */
+static inline int64_t z_buffer_handle(int64_t resource, int frame, int kind)
+{
+    return -((((resource * 256) + frame) << 1) | kind) - 1;
+}
+
+static inline engine::Image *z_image(int64_t handle)
+{
+    auto it = z_images.find(handle);
+    return it != z_images.end() ? it->second : nullptr;
+}
+
+static inline engine::Texture *z_texture(int64_t handle)
+{
+    auto it = z_textures.find(handle);
+    return it != z_textures.end() ? it->second : nullptr;
+}
+
+static inline engine::ImageFrame *z_buffer_frame(int64_t handle)
+{
+    if (handle >= 0) return nullptr;                    /* the screen */
+    const int64_t encoded = -handle - 1;
+    const int kind = (int)(encoded & 1);
+    const int64_t rest = encoded >> 1;
+    const int64_t resource = rest / 256;
+    const int frame = (int)(rest % 256);
+    if (kind == 0)
+    {
+        engine::Image *image = z_image(resource);
+        return image && frame >= 0 && frame < image->frameCount() ? &image->frame(frame) : nullptr;
+    }
+    engine::Texture *texture = z_texture(resource);
+    return texture ? texture->canvas(frame) : nullptr;
+}
+
+/* The frame the 2D commands are painting into; null means the screen, which
+   goes through the batch renderer instead of a pixmap. */
+static inline engine::ImageFrame *z_canvas_target() { return z_buffer_frame(z_canvas_buffer); }
 
 static constexpr float kDegToRad = 0.0174532925199432957692369076848861f;
 
@@ -163,27 +212,55 @@ inline void zen_color(int64_t r, int64_t g, int64_t b)
     z_platform.batch().setColor((unsigned char)r, (unsigned char)g, (unsigned char)b);
 }
 
+/* The 2D commands split the same way runtime3d's do: with an image or texture
+   buffer current they rasterise into that pixmap, otherwise they go through
+   the batch renderer and land on the screen. */
 inline void zen_plot(int64_t x, int64_t y)
 {
     if (!z_graphics_open) return;
+    if (engine::ImageFrame *f = z_canvas_target())
+    {
+        f->pixels.set_pixel((engine::u32)x, (engine::u32)y, z_draw_color);
+        f->dirty = true;
+        return;
+    }
     z_platform.batch().drawRect((float)x, (float)y, 1.0f, 1.0f, true);
 }
 
 inline void zen_line(int64_t x1, int64_t y1, int64_t x2, int64_t y2)
 {
     if (!z_graphics_open) return;
+    if (engine::ImageFrame *f = z_canvas_target())
+    {
+        f->pixels.draw_line((int)x1, (int)y1, (int)x2, (int)y2, engine::Color(z_draw_color));
+        f->dirty = true;
+        return;
+    }
     z_platform.batch().drawLine((float)x1, (float)y1, (float)x2, (float)y2);
 }
 
 inline void zen_rect(int64_t x, int64_t y, int64_t w, int64_t h, int64_t solid = 1)
 {
     if (!z_graphics_open) return;
+    if (engine::ImageFrame *f = z_canvas_target())
+    {
+        f->pixels.draw_rect((int)x, (int)y, (int)w, (int)h, engine::Color(z_draw_color), solid != 0);
+        f->dirty = true;
+        return;
+    }
     z_platform.batch().drawRect((float)x, (float)y, (float)w, (float)h, solid != 0);
 }
 
 inline void zen_oval(int64_t x, int64_t y, int64_t w, int64_t h, int64_t solid = 1)
 {
     if (!z_graphics_open) return;
+    if (engine::ImageFrame *f = z_canvas_target())
+    {
+        f->pixels.draw_circle((int)(x + w / 2), (int)(y + h / 2), (int)((w < h ? w : h) / 2),
+                              engine::Color(z_draw_color), solid != 0);
+        f->dirty = true;
+        return;
+    }
     z_platform.batch().drawEllipse(x + w * 0.5f, y + h * 0.5f, w * 0.5f, h * 0.5f, solid != 0);
 }
 
@@ -203,11 +280,32 @@ inline void zen_flush_keys() { z_platform.flushKeyHits(); }
 inline void zen_hide_pointer() { z_platform.showPointer(false); }
 inline void zen_show_pointer() { z_platform.showPointer(true); }
 
-/* 2D canvas buffer (no-op: always back buffer) */
-inline int64_t zen_back_buffer() { return 1; }
-inline int64_t zen_front_buffer() { return 1; }
-inline void zen_set_buffer(int64_t) {}
-inline void zen_origin(int64_t x, int64_t y) { (void)x; (void)y; }
+/* 2D canvas buffer. kScreenBuffer is 1 in this runtime: a positive buffer is
+   the screen, a negative one a pixmap (see the state block). */
+static constexpr int64_t kScreenBuffer = 1;
+
+inline int64_t zen_back_buffer() { return kScreenBuffer; }
+inline int64_t zen_front_buffer() { return kScreenBuffer; }
+inline void zen_set_buffer(int64_t buffer)
+{
+    /* bbSetBuffer rejected a buffer that does not resolve: "SetBuffer:
+       buffer does not exist". */
+    if (buffer != kScreenBuffer && !z_buffer_frame(buffer))
+    {
+        zen_runtime_error("SetBuffer: buffer does not exist");
+        return;
+    }
+    z_canvas_buffer = buffer;
+    /* bbSetBuffer reset the origin and the viewport to the new buffer, so a
+       region set for one never clipped another. */
+    z_origin_x = 0;
+    z_origin_y = 0;
+}
+inline void zen_origin(int64_t x, int64_t y)
+{
+    z_origin_x = (int)x;
+    z_origin_y = (int)y;
+}
 
 /* Random — #Rnd#from#to=0, %Rand%from%to=1 */
 inline double zen_rnd(double from, double to = 0.0)
@@ -354,29 +452,34 @@ inline int64_t zen_gfx_mode3d_exists(int64_t width, int64_t height, int64_t dept
 /* Buffer lock (no-op) */
 inline void zen_lock_buffer(int64_t = 0) {}
 inline void zen_unlock_buffer(int64_t = 0) {}
-inline int64_t zen_texture_buffer(int64_t, int64_t = 0) { return 1; }
+inline int64_t zen_texture_buffer(int64_t texture, int64_t frame = 0)
+{
+    /* The buffer a texture's own pixels live in: this is what a script hands
+       to SetBuffer to paint art with the 2D commands (Tron draws its grid
+       texture that way). */
+    engine::Texture *t = z_texture(texture);
+    return t && t->canvas((int)frame) ? z_buffer_handle(texture, (int)frame, 1) : 0;
+}
 /* SaveBuffer: the image side is not ported yet (LoadImage and friends are
    stubs), so a buffer handle cannot be resolved to pixels. The screen case is
    implemented the way runtime3d's c_SaveBuffer does it, row by row. */
 inline int64_t zen_save_buffer(int64_t buffer, const std::string &bmpfile)
 {
-    if (buffer == 0 && z_graphics_open)
-    {
-        const int w = z_platform.width(), h = z_platform.height();
-        if (w > 0 && h > 0)
+    /* kScreenBuffer is 1, so BackBuffer() is what saves the screen - the
+       same readback c_SaveBuffer does. A negative handle is an image or
+       texture buffer, which has no pixels to write back yet. */
+    if (buffer < 0 || !z_graphics_open) return 0;
+    const int w = z_platform.width(), h = z_platform.height();
+    if (w <= 0 || h <= 0) return 0;
+    engine::Pixmap shot(w, h, 4);
+    for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x)
         {
-            engine::Pixmap shot(w, h, 4);
-            for (int y = 0; y < h; ++y)
-                for (int x = 0; x < w; ++x)
-                {
-                    const unsigned argb = z_platform.readScreenPixel(x, y);
-                    shot.set_pixel((engine::u32)x, (engine::u32)y, (engine::u8)((argb >> 16) & 0xff),
-                                   (engine::u8)((argb >> 8) & 0xff), (engine::u8)(argb & 0xff), 255);
-                }
-            return shot.save(bmpfile.c_str()) ? 1 : 0;
+            const unsigned argb = z_platform.readScreenPixel(x, y);
+            shot.set_pixel((engine::u32)x, (engine::u32)y, (engine::u8)((argb >> 16) & 0xff),
+                           (engine::u8)((argb >> 8) & 0xff), (engine::u8)(argb & 0xff), 255);
         }
-    }
-    return 0;
+    return shot.save(bmpfile.c_str()) ? 1 : 0;
 }
 
 /* Entity extras */
@@ -391,7 +494,17 @@ inline int64_t zen_get_entity_type(int64_t entity)
     return (e && e->getObject()) ? e->getObject()->getCollisionType() : 0;
 }
 inline void zen_entity_pick_mode(int64_t, int64_t, int64_t = 1) {}
-inline int64_t zen_copy_entity(int64_t, int64_t = 0) { return 0; }
+inline int64_t zen_copy_entity(int64_t entity, int64_t parent = 0)
+{
+    /* Object::copy() clones the whole subtree - children, geometry and
+       animator - so a copied pivot brings its cubes along. Reparent the copy
+       the way every Create* does rather than duplicating that here, exactly
+       as runtime3d's c_CopyEntity does. */
+    engine::Entity *src = z_entity(entity);
+    if (!src || !src->getObject()) return 0;
+    engine::Object *copy = src->getObject()->copy();
+    return z_store_entity(copy, z_entity(parent));
+}
 
 /* Mesh extras */
 inline void zen_scale_mesh(int64_t mesh, double xs, double ys, double zs)
@@ -584,10 +697,8 @@ inline std::string zen_gfx_driver_name(int64_t driver)
 inline void zen_mask_image(int64_t, int64_t, int64_t, int64_t) {}
 inline void zen_mid_handle(int64_t) {}
 inline void zen_auto_mid_handle(int64_t) {}
-inline int64_t zen_image_buffer(int64_t, int64_t = 0) { return 1; }
 inline int64_t zen_copy_image(int64_t) { return 0; }
 inline void zen_resize_image(int64_t, int64_t, int64_t) {}
-inline void zen_free_image(int64_t) {}
 inline void zen_save_image(int64_t, const std::string &, int64_t = 0) {}
 inline void zen_handle_image(int64_t, int64_t, int64_t) {}
 inline void zen_draw_block(int64_t, int64_t, int64_t, int64_t = 0) {}
@@ -614,10 +725,31 @@ inline int64_t zen_load_sprite(const std::string &, int64_t texture_flags = 1, i
 }
 inline int64_t zen_create_image(int64_t width, int64_t height, int64_t frames = 1)
 {
-    (void)width;
-    (void)height;
-    (void)frames;
-    return 0;
+    if (width <= 0 || height <= 0 || frames <= 0) return 0;
+    engine::Image *image = new engine::Image();
+    for (int64_t i = 0; i < frames; ++i)
+    {
+        engine::Pixmap pixels((int)width, (int)height, 4);
+        pixels.clear();
+        image->addFrame(std::move(pixels));
+    }
+    int64_t handle = ++z_next_image;
+    z_images[handle] = image;
+    return handle;
+}
+
+inline int64_t zen_image_buffer(int64_t image, int64_t frame = 0)
+{
+    engine::Image *img = z_image(image);
+    return img && frame >= 0 && frame < img->frameCount() ? z_buffer_handle(image, (int)frame, 0) : 0;
+}
+
+inline void zen_free_image(int64_t image)
+{
+    auto it = z_images.find(image);
+    if (it == z_images.end()) return;
+    delete it->second;
+    z_images.erase(it);
 }
 
 /* Mesh extras (stubs) */
@@ -930,7 +1062,6 @@ inline void zen_capture_world()
 
 /* ================= Textures ================= */
 
-static std::map<int64_t, engine::Texture *> z_textures;
 static int64_t z_next_texture = 0;
 
 inline int64_t zen_load_texture(const std::string &file, int64_t flags = 1)
@@ -943,13 +1074,24 @@ inline int64_t zen_load_texture(const std::string &file, int64_t flags = 1)
     return h;
 }
 
-inline int64_t zen_create_texture(int64_t w, int64_t h, int64_t = 1, int64_t = 1)
+inline int64_t zen_create_texture(int64_t w, int64_t h, int64_t flags = 1, int64_t frames = 1)
 {
-    (void)w; (void)h;
-    return 0;
+    /* Blank and paintable: this is what a script draws its own art into,
+       through the buffer TextureBuffer() hands back. */
+    engine::Texture *t = engine::Texture::create((int)w, (int)h, (int)flags, (int)frames);
+    if (!t) return 0;
+    int64_t handle = ++z_next_texture;
+    z_textures[handle] = t;
+    return handle;
 }
 
-inline void zen_scale_texture(int64_t, double, double) {}
+inline void zen_scale_texture(int64_t texture, double u, double v)
+{
+    /* runtime3d stores the reciprocal, so ScaleTexture 10,10 tiles ten
+       times rather than shrinking to a tenth. */
+    engine::Texture *t = z_texture(texture);
+    if (t && u != 0.0 && v != 0.0) t->setScale(1.0f / (float)u, 1.0f / (float)v);
+}
 
 inline void zen_free_texture(int64_t h)
 {
