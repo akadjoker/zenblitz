@@ -61,6 +61,14 @@ static std::map<int64_t, engine::Image *> z_images;
 static std::map<int64_t, engine::Texture *> z_textures;
 static int64_t z_next_image = 0;
 static int64_t z_canvas_buffer = 1;
+
+/* The size text is drawn at: LoadFont makes one of these and SetFont picks
+   it, the point size being all this runtime's single bitmap font needs.
+   The "_state" suffix matters: the generator names a script's own `font`
+   variable z_font, and this header is compiled into the same translation
+   unit as that code. */
+struct z_font_state { float size; };
+static float z_font_size = 16.0f;
 static unsigned z_draw_color = 0xff000000u;
 static int z_origin_x = 0, z_origin_y = 0;
 static int z_viewport_x = 0, z_viewport_y = 0, z_viewport_width = 0, z_viewport_height = 0;
@@ -114,7 +122,7 @@ static inline int64_t z_buffer_handle(int64_t resource, int frame, int kind)
     return -((((resource * 256) + frame) << 1) | kind) - 1;
 }
 
-static inline engine::Image *z_image(int64_t handle)
+static inline engine::Image *z_image_of(int64_t handle)
 {
     auto it = z_images.find(handle);
     return it != z_images.end() ? it->second : nullptr;
@@ -136,7 +144,7 @@ static inline engine::ImageFrame *z_buffer_frame(int64_t handle)
     const int frame = (int)(rest % 256);
     if (kind == 0)
     {
-        engine::Image *image = z_image(resource);
+        engine::Image *image = z_image_of(resource);
         return image && frame >= 0 && frame < image->frameCount() ? &image->frame(frame) : nullptr;
     }
     engine::Texture *texture = z_texture(resource);
@@ -179,8 +187,11 @@ inline void zen_flip(int64_t vwait = 1)
     if (z_platform.isVSync() != vsync) z_platform.setVSync(vsync);
     z_platform.pumpEvents();
     if (!z_platform.isOpen()) { std::fflush(stdout); std::exit(0); }
+    /* Present only. The next frame's Cls reopens the pass (beginFrame); doing
+       it here cleared the screen texture the moment it had been presented,
+       so nothing a script drew was left to read back. runtime3d's c_Flip
+       stops at endFrame for the same reason. */
     z_platform.endFrame();
-    z_platform.beginFrame();
 }
 
 inline void zen_graphics_close()
@@ -195,10 +206,14 @@ inline void zen_graphics_close()
 
 inline void zen_cls()
 {
-    /* Cls clears the back buffer; beginFrame already clears with the
-       current ClsColor, so this just ensures a fresh frame start. */
+    /* Cls is where a Blitz3D frame's 2D begins: it reopens the screen pass
+       with a clear in the current ClsColor, which is what Platform's own
+       beginFrame is for ("Cls: (re)open the screen pass with a clear").
+       runtime3d's c_Cls calls beginFrame too - flushing here instead closed
+       the pass the frame's 2D was about to draw into, so nothing a script
+       drew after Cls ever reached the screen. */
     if (!z_graphics_open) return;
-    z_platform.flushCanvasPass();
+    z_platform.beginFrame();
 }
 
 inline void zen_cls_color(int64_t r, int64_t g, int64_t b)
@@ -268,9 +283,10 @@ inline void zen_text(int64_t x, int64_t y, const std::string &text, int64_t cent
 {
     if (!z_graphics_open) return;
     float fx = (float)x, fy = (float)y;
-    if (centre_x) fx -= z_platform.batch().textWidth(16.0f, text.c_str()) * 0.5f;
-    if (centre_y) fy -= 8.0f;
-    z_platform.batch().drawText(fx, fy, 16.0f, text.c_str());
+    /* SetFont picks the size the text is drawn at - see the font block. */
+    if (centre_x) fx -= z_platform.batch().textWidth(z_font_size, text.c_str()) * 0.5f;
+    if (centre_y) fy -= z_font_size * 0.5f;
+    z_platform.batch().drawText(fx, fy, z_font_size, text.c_str());
 }
 
 inline int64_t zen_key_down(int64_t key) { return z_platform.keyDown((int)key) ? 1 : 0; }
@@ -379,22 +395,35 @@ inline void zen_viewport(int64_t x, int64_t y, int64_t w, int64_t h)
         z_platform.batch().setClipRect((float)z_viewport_x, (float)z_viewport_y, (float)z_viewport_width, (float)z_viewport_height);
 }
 
-/* Fonts (stubs — engine has one embedded font) */
+/* Fonts. The engine ships one embedded bitmap font, so a "font" here is just
+   the point size to draw with - the family name is accepted and ignored
+   rather than pretending to have TrueType families, the same bargain
+   runtime3d's Bb3dFont makes. The handle is the pointer, as there. The state
+   itself sits with the other globals, because zen_text uses it. */
 inline int64_t zen_load_font(const std::string &, int64_t height = 12, int64_t bold = 0,
                              int64_t italic = 0, int64_t underline = 0)
 {
-    (void)height;
     (void)bold;
     (void)italic;
     (void)underline;
-    return 1;
+    z_font_state *font = new z_font_state{(float)(height > 0 ? height : 16)};
+    return (int64_t)(std::intptr_t)font;
 }
-inline void zen_set_font(int64_t) {}
-inline void zen_free_font(int64_t) {}
-inline int64_t zen_font_width() { return 8; }
-inline int64_t zen_font_height() { return 16; }
-inline int64_t zen_string_width(const std::string &s) { return (int64_t)(s.size() * 8); }
-inline int64_t zen_string_height(const std::string &) { return 16; }
+inline void zen_set_font(int64_t font)
+{
+    if (font) z_font_size = ((z_font_state *)(std::intptr_t)font)->size;
+}
+inline void zen_free_font(int64_t font)
+{
+    delete (z_font_state *)(std::intptr_t)font;
+}
+inline int64_t zen_font_width() { return (int64_t)z_platform.batch().textWidth(z_font_size, "M"); }
+inline int64_t zen_font_height() { return (int64_t)z_font_size; }
+inline int64_t zen_string_width(const std::string &s)
+{
+    return (int64_t)z_platform.batch().textWidth(z_font_size, s.c_str());
+}
+inline int64_t zen_string_height(const std::string &) { return (int64_t)z_font_size; }
 
 /* Rand seed readback */
 inline int64_t zen_rand_seed() { return (int64_t)z_rand_seed_value; }
@@ -402,9 +431,27 @@ inline int64_t zen_rand_seed() { return (int64_t)z_rand_seed_value; }
 /* Clear collisions */
 inline void zen_clear_collisions() {}
 
-/* Images 2D (stubs) */
-inline int64_t zen_load_image(const std::string &) { return 0; }
-inline void zen_draw_image(int64_t, int64_t, int64_t, int64_t = 0) {}
+/* Images 2D */
+inline int64_t zen_load_image(const std::string &file)
+{
+    engine::Pixmap pixels;
+    if (!pixels.load(file.c_str())) return 0;
+    engine::Image *image = new engine::Image();
+    image->addFrame(std::move(pixels));
+    int64_t handle = ++z_next_image;
+    z_images[handle] = image;
+    return handle;
+}
+
+inline void zen_draw_image(int64_t image, int64_t x, int64_t y, int64_t frame = 0)
+{
+    engine::Image *img = z_image_of(image);
+    if (!img || !img->ensureUploaded(z_platform.device(), (int)frame)) return;
+    const engine::ImageFrame &f = img->frame((int)frame);
+    z_platform.batch().drawTexture(f.texture, (float)x - (float)img->handleX(),
+                                   (float)y - (float)img->handleY(),
+                                   (float)f.pixels.width, (float)f.pixels.height);
+}
 inline void zen_draw_image_rect(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t = 0) {}
 inline void zen_grab_image(int64_t, int64_t, int64_t, int64_t = 0) {}
 inline int64_t zen_load_anim_image(const std::string &, int64_t cellwidth, int64_t cellheight,
@@ -695,13 +742,32 @@ inline std::string zen_gfx_driver_name(int64_t driver)
 
 /* Images extras (stubs) */
 inline void zen_mask_image(int64_t, int64_t, int64_t, int64_t) {}
-inline void zen_mid_handle(int64_t) {}
+inline void zen_mid_handle(int64_t image)
+{
+    engine::Image *img = z_image_of(image);
+    if (img) img->setMidHandle();
+}
 inline void zen_auto_mid_handle(int64_t) {}
 inline int64_t zen_copy_image(int64_t) { return 0; }
 inline void zen_resize_image(int64_t, int64_t, int64_t) {}
 inline void zen_save_image(int64_t, const std::string &, int64_t = 0) {}
-inline void zen_handle_image(int64_t, int64_t, int64_t) {}
-inline void zen_draw_block(int64_t, int64_t, int64_t, int64_t = 0) {}
+inline void zen_handle_image(int64_t image, int64_t x, int64_t y)
+{
+    engine::Image *img = z_image_of(image);
+    if (img) img->setHandle((int)x, (int)y);
+}
+inline void zen_draw_block(int64_t image, int64_t x, int64_t y, int64_t frame = 0)
+{
+    /* DrawBlock is the opaque form: no blending while it lands. */
+    engine::Image *img = z_image_of(image);
+    if (!img || !img->ensureUploaded(z_platform.device(), (int)frame)) return;
+    const engine::ImageFrame &f = img->frame((int)frame);
+    z_platform.batch().setBlend(false);
+    z_platform.batch().drawTexture(f.texture, (float)x - (float)img->handleX(),
+                                   (float)y - (float)img->handleY(),
+                                   (float)f.pixels.width, (float)f.pixels.height);
+    z_platform.batch().setBlend(true);
+}
 inline void zen_draw_block_rect(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t = 0) {}
 inline void zen_tile_block(int64_t, int64_t = 0, int64_t = 0, int64_t = 0) {}
 inline void zen_write_pixel_fast(int64_t, int64_t, int64_t, int64_t = 0) {}
@@ -740,7 +806,7 @@ inline int64_t zen_create_image(int64_t width, int64_t height, int64_t frames = 
 
 inline int64_t zen_image_buffer(int64_t image, int64_t frame = 0)
 {
-    engine::Image *img = z_image(image);
+    engine::Image *img = z_image_of(image);
     return img && frame >= 0 && frame < img->frameCount() ? z_buffer_handle(image, (int)frame, 0) : 0;
 }
 
