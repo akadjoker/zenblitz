@@ -28,6 +28,11 @@
 #include "engine/Sprite.h"
 #include "engine/Terrain.h"
 #include "engine/FilePath.h"
+
+/* The core commands (Input, AppTitle, the DirectInput switch) live in the base
+   SDK, which a 2D program is generated with; this header is only added on top
+   of it for 3D programs. */
+#include "zenblitzsdk.h"
 #include "engine/Pixmap.h"
 #include "engine/Image.h"
 #include "engine/Collision.h"
@@ -520,10 +525,6 @@ inline int64_t zen_wait_mouse()
     return 0;
 }
 
-/* AppTitle (the close prompt is accepted and ignored: the engine's window
-   always closes without asking) */
-inline void zen_app_title(const std::string &, const std::string & = "") {}
-
 /* Viewport */
 inline void zen_viewport(int64_t x, int64_t y, int64_t w, int64_t h)
 {
@@ -933,11 +934,6 @@ inline void zen_align_to_vector(int64_t entity, double vx, double vy, double vz,
     const engine::Vector cp = axisVec.cross(tv).normalized();
     e->setWorldRotation(engine::Quat(cosf(an), cp * sinf(an)) * q);
 }
-
-/* Input */
-inline std::string zen_input(const std::string & = "") { return ""; }
-inline void zen_enable_direct_input(int64_t) {}
-inline int64_t zen_direct_input_enabled() { return 0; }
 
 /* Mouse extras */
 /* bbinput.cpp kept one previous value per axis and returned the difference, so

@@ -10,6 +10,16 @@
 
 #include <SDL2/SDL_rwops.h>
 
+/* Commands that belong to Blitz3D's core rather than to the 3D engine, and so
+   have to be here rather than in zen_engine_sdk.h: a console or 2D program is
+   generated without that header, and Input/AppTitle are exactly what such a
+   program uses. runtime3d implements Input by reading a line and AppTitle by
+   doing nothing at all (the window always closes without asking). */
+inline std::string zen_input(const std::string & = "") { return ""; }
+inline void zen_app_title(const std::string &, const std::string & = "") {}
+inline void zen_enable_direct_input(int64_t) {}
+inline int64_t zen_direct_input_enabled() { return 0; }
+
 /* Filesystem ops (stat, mkdir, opendir) are not in SDL2, but
 ** Emscripten implements POSIX through its virtual FS, and desktop
 ** has them natively, so these work on every target. */

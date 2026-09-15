@@ -295,8 +295,11 @@ namespace bb
         if (expression && expression->impure() && !in_condition_)
         {
             std::string var = temporary("t");
-            line(emit_type(expression->sem_type) + " " + var + " = " +
-                 emit_expression(expression) + ";");
+            /* Declared and then assigned: a gosub's return label can sit in
+               this block, and the dispatch jumping back to it would cross an
+               initialization written as one statement (ill-formed in C++). */
+            line(emit_type(expression->sem_type) + " " + var + ";");
+            line(var + " = " + emit_expression(expression) + ";");
             return var;
         }
         return emit_expression(expression);
@@ -815,8 +818,11 @@ namespace bb
             line(variable + " = " + emit_expression(loop->fromExpr) + ";");
             line("for (;;) {");
             ++indent_;
-            line(emit_type(loop->var->sem_type) + " " + to_var + " = " +
-                 emit_expression(loop->toExpr) + ";");
+            /* The limit is declared and then assigned, so a gosub return
+               label inside this loop body is not jumped to across an
+               initialization - see emit_expression_ordered. */
+            line(emit_type(loop->var->sem_type) + " " + to_var + ";");
+            line(to_var + " = " + emit_expression(loop->toExpr) + ";");
             line("if (" + step + " >= 0 ? " + variable + " > " + to_var +
                  " : " + variable + " < " + to_var + ") break;");
             emit_statements(loop->stmts);
