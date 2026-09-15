@@ -26,6 +26,7 @@
 #include "engine/Animator.h"
 #include "engine/Pixmap.h"
 #include "engine/Image.h"
+#include "engine/Collision.h"
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
@@ -69,6 +70,12 @@ static int64_t z_canvas_buffer = 1;
    unit as that code. */
 struct z_font_state { float size; };
 static float z_font_size = 16.0f;
+
+/* TFormPoint/Vector/Normal leave their answer here for TFormedX/Y/Z to read,
+   one global rather than per-VM state, exactly as runtime3d keeps g_tformed.
+   The pick CameraPick fills is here for the same reason (pick_for's result). */
+static engine::Vector z_tformed;
+static engine::ObjCollision z_pick;
 static unsigned z_draw_color = 0xff000000u;
 static int z_origin_x = 0, z_origin_y = 0;
 static int z_viewport_x = 0, z_viewport_y = 0, z_viewport_width = 0, z_viewport_height = 0;
@@ -154,6 +161,21 @@ static inline engine::ImageFrame *z_buffer_frame(int64_t handle)
 /* The frame the 2D commands are painting into; null means the screen, which
    goes through the batch renderer instead of a pixmap. */
 static inline engine::ImageFrame *z_canvas_target() { return z_buffer_frame(z_canvas_buffer); }
+
+/* The mesh behind a handle, and the inverse of z_entities: runtime3d keeps a
+   second map for that (g_handles), scanning is enough here. */
+static inline engine::MeshModel *z_mesh_of(int64_t handle)
+{
+    engine::Entity *e = z_entity(handle);
+    return (e && e->getModel()) ? e->getModel()->getMeshModel() : nullptr;
+}
+
+static inline int64_t z_handle_of(engine::Entity *e)
+{
+    for (auto &entry : z_entities)
+        if (entry.second == e) return entry.first;
+    return 0;
+}
 
 static constexpr float kDegToRad = 0.0174532925199432957692369076848861f;
 
@@ -429,7 +451,7 @@ inline int64_t zen_string_height(const std::string &) { return (int64_t)z_font_s
 inline int64_t zen_rand_seed() { return (int64_t)z_rand_seed_value; }
 
 /* Clear collisions */
-inline void zen_clear_collisions() {}
+inline void zen_clear_collisions() { z_world.clearCollisions(); }
 
 /* Images 2D */
 inline int64_t zen_load_image(const std::string &file)
@@ -540,7 +562,16 @@ inline int64_t zen_get_entity_type(int64_t entity)
     engine::Entity *e = z_entity(entity);
     return (e && e->getObject()) ? e->getObject()->getCollisionType() : 0;
 }
-inline void zen_entity_pick_mode(int64_t, int64_t, int64_t = 1) {}
+inline void zen_entity_pick_mode(int64_t entity, int64_t mode, int64_t obscurer = 1)
+{
+    engine::Entity *e = z_entity(entity);
+    engine::Object *o = e ? e->getObject() : nullptr;
+    if (o)
+    {
+        o->setPickGeometry((int)mode);
+        o->setObscurer(obscurer != 0);
+    }
+}
 inline int64_t zen_copy_entity(int64_t entity, int64_t parent = 0)
 {
     /* Object::copy() clones the whole subtree - children, geometry and
@@ -563,7 +594,11 @@ inline void zen_scale_mesh(int64_t mesh, double xs, double ys, double zs)
     engine::MeshModel *m = (e && e->getModel()) ? e->getModel()->getMeshModel() : nullptr;
     if (m) engine::MeshUtil::scaleMesh(m, engine::Vector((float)xs, (float)ys, (float)zs));
 }
-inline void zen_flip_mesh(int64_t) {}
+inline void zen_flip_mesh(int64_t mesh)
+{
+    engine::MeshModel *m = z_mesh_of(mesh);
+    if (m) m->flipTriangles();
+}
 
 /* Sprites */
 inline void zen_scale_sprite(int64_t, double, double) {}
@@ -575,7 +610,7 @@ inline void zen_enable_direct_input(int64_t) {}
 inline int64_t zen_direct_input_enabled() { return 0; }
 
 /* Mouse extras */
-inline void zen_move_mouse(int64_t x, int64_t y) { (void)x; (void)y; }
+inline void zen_move_mouse(int64_t x, int64_t y) { z_platform.moveMouse((int)x, (int)y); }
 
 /* Sound (stubs) */
 inline int64_t zen_load_sound(const std::string &) { return 0; }
@@ -675,19 +710,41 @@ inline void zen_camera_proj_mode(int64_t cam, int64_t mode)
     engine::Entity *e = z_entity(cam);
     if (e && e->getCamera()) e->getCamera()->setProjMode((int)mode);
 }
-inline int64_t zen_camera_pick(int64_t, double, double) { return 0; }
+inline int64_t zen_camera_pick(int64_t camera, double x, double y);
 
 /* Entity extras */
-inline void zen_entity_radius(int64_t, double, double = 0) {}
-inline void zen_entity_autofade(int64_t, double, double) {}
+inline void zen_entity_radius(int64_t entity, double x_radius, double y_radius = 0)
+{
+    /* bbEntityRadius: a zero y_radius means "use x_radius", and radii.z
+       mirrors x because collision is an ellipsoid of revolution around Y. */
+    engine::Object *o = z_entity(entity) ? z_entity(entity)->getObject() : nullptr;
+    if (!o) return;
+    const float rx = (float)x_radius;
+    const float ry = (float)(y_radius != 0.0 ? y_radius : x_radius);
+    o->setCollisionRadii(engine::Vector(rx, ry, rx));
+}
+inline void zen_entity_autofade(int64_t entity, double near, double far)
+{
+    engine::Entity *e = z_entity(entity);
+    engine::Model *m = e ? e->getModel() : nullptr;
+    if (m) m->setAutoFade((float)near, (float)far);
+}
 inline void zen_entity_parent(int64_t entity, int64_t parent, int64_t = 1)
 {
     engine::Entity *e = z_entity(entity);
     engine::Entity *p = z_entity(parent);
     if (e) e->setParent(p);
 }
-inline void zen_name_entity(int64_t, const std::string &) {}
-inline std::string zen_entity_name(int64_t) { return ""; }
+inline void zen_name_entity(int64_t entity, const std::string &name)
+{
+    engine::Entity *e = z_entity(entity);
+    if (e) e->setName(name.c_str());
+}
+inline std::string zen_entity_name(int64_t entity)
+{
+    engine::Entity *e = z_entity(entity);
+    return e ? std::string(e->getName().c_str()) : std::string();
+}
 inline std::string zen_entity_class(int64_t h)
 {
     engine::Entity *e = z_entity(h);
@@ -695,8 +752,13 @@ inline std::string zen_entity_class(int64_t h)
     return e->getCamera() ? "Camera" : e->getLight() ? "Light" :
            e->getModel() ? "Mesh" : e->getSprite() ? "Sprite" : "Pivot";
 }
-inline void zen_paint_mesh(int64_t, int64_t) {}
-inline void zen_paint_entity(int64_t, int64_t) {}
+inline void zen_paint_entity(int64_t entity, int64_t brush)
+{
+    engine::Entity *e = z_entity(entity);
+    engine::Model *m = e ? e->getModel() : nullptr;
+    engine::Brush *b = z_brush(brush);
+    if (m && b) m->setBrush(*b);
+}
 
 /* Animation — mirrors c_Animate / c_AddAnimSeq / c_SetAnimKey. */
 inline void zen_animate(int64_t entity, int64_t mode = 1, double speed = 1.0, int64_t sequence = 0,
@@ -818,8 +880,22 @@ inline void zen_free_image(int64_t image)
     z_images.erase(it);
 }
 
-/* Mesh extras (stubs) */
-inline void zen_fit_mesh(int64_t, double, double, double, double, double, double, int64_t = 0) {}
+/* Mesh extras */
+inline void zen_fit_mesh(int64_t mesh, double x, double y, double z, double w, double h, double d,
+                         int64_t uniform = 0)
+{
+    engine::MeshModel *m = z_mesh_of(mesh);
+    if (m) engine::MeshUtil::fitMesh(m, engine::Vector((float)x, (float)y, (float)z),
+                                     engine::Vector((float)w, (float)h, (float)d), uniform != 0);
+}
+inline void zen_paint_mesh(int64_t mesh, int64_t brush)
+{
+    /* PaintMesh and PaintEntity differ in where the brush lands: the mesh's
+       own surfaces, or every model in the entity's tree. */
+    engine::MeshModel *m = z_mesh_of(mesh);
+    engine::Brush *b = z_brush(brush);
+    if (m && b) m->paint(*b);
+}
 inline int64_t zen_create_surface(int64_t mesh, int64_t brush = 0)
 {
     /* The handle is the engine::Surface pointer, as in c_CreateSurface. */
@@ -830,8 +906,11 @@ inline int64_t zen_create_surface(int64_t mesh, int64_t brush = 0)
     return (int64_t)(std::intptr_t)m->createSurface(b ? *b : engine::Brush());
 }
 
-/* Collisions (stub) */
-inline void zen_collisions(int64_t, int64_t, int64_t, int64_t) {}
+/* Collisions */
+inline void zen_collisions(int64_t src_type, int64_t dst_type, int64_t method, int64_t response)
+{
+    z_world.addCollision((int)src_type, (int)dst_type, (int)method, (int)response);
+}
 
 inline int64_t zen_engine_millisecs() { return (int64_t)z_platform.milliSecs(); }
 
@@ -1124,6 +1203,115 @@ inline void zen_capture_world()
 {
     z_world_ensure();
     z_world.capture();
+}
+
+/* ================= Transform queries ================= */
+
+/* runtime3d keeps one global g_tformed that TFormedX/Y/Z read back. A point
+   goes through both transforms, a vector ignores translation, and a normal
+   uses the cofactor (inverse-transpose) matrix so it stays perpendicular to
+   the surface under non-uniform scaling - then it is renormalised. */
+inline void zen_tform_point(double x, double y, double z, int64_t src = 0, int64_t dest = 0)
+{
+    engine::Entity *from = z_entity(src);
+    engine::Entity *to = z_entity(dest);
+    z_tformed = engine::Vector((float)x, (float)y, (float)z);
+    if (from) z_tformed = from->getWorldTform() * z_tformed;
+    if (to) z_tformed = -to->getWorldTform() * z_tformed;
+}
+inline void zen_tform_vector(double x, double y, double z, int64_t src = 0, int64_t dest = 0)
+{
+    engine::Entity *from = z_entity(src);
+    engine::Entity *to = z_entity(dest);
+    z_tformed = engine::Vector((float)x, (float)y, (float)z);
+    if (from) z_tformed = from->getWorldTform().m * z_tformed;
+    if (to) z_tformed = (-to->getWorldTform()).m * z_tformed;
+}
+inline void zen_tform_normal(double x, double y, double z, int64_t src = 0, int64_t dest = 0)
+{
+    engine::Entity *from = z_entity(src);
+    engine::Entity *to = z_entity(dest);
+    z_tformed = engine::Vector((float)x, (float)y, (float)z);
+    if (from) z_tformed = from->getWorldTform().m.cofactor() * z_tformed;
+    if (to) z_tformed = (-to->getWorldTform()).m.cofactor() * z_tformed;
+    const float length = z_tformed.length();
+    if (length > blitz::EPSILON) z_tformed = z_tformed / length;
+}
+inline double zen_tformed_x() { return z_tformed.x; }
+inline double zen_tformed_y() { return z_tformed.y; }
+inline double zen_tformed_z() { return z_tformed.z; }
+
+inline void zen_translate_entity(int64_t entity, double x, double y, double z, int64_t global = 0)
+{
+    engine::Entity *e = z_entity(entity);
+    if (!e) return;
+    engine::Vector v((float)x, (float)y, (float)z);
+    global ? e->setWorldPosition(e->getWorldPosition() + v)
+           : e->setLocalPosition(e->getLocalPosition() + v);
+}
+inline double zen_entity_distance(int64_t entity, int64_t other)
+{
+    engine::Entity *a = z_entity(entity);
+    engine::Entity *b = z_entity(other);
+    return a && b ? a->getWorldPosition().distance(b->getWorldPosition()) : 0.0f;
+}
+inline void zen_reset_entity(int64_t entity)
+{
+    engine::Entity *e = z_entity(entity);
+    if (e && e->getObject()) e->getObject()->reset();
+}
+
+/* ================= Animator queries ================= */
+
+static inline engine::Animator *z_animator_of(int64_t handle)
+{
+    engine::Entity *e = z_entity(handle);
+    engine::Object *o = e ? e->getObject() : nullptr;
+    return o ? o->getAnimator() : nullptr;
+}
+inline int64_t zen_anim_length(int64_t entity)
+{
+    engine::Animator *a = z_animator_of(entity);
+    return a ? a->animLen() : -1;
+}
+inline double zen_anim_time(int64_t entity)
+{
+    engine::Animator *a = z_animator_of(entity);
+    return a ? a->animTime() : -1.0;
+}
+
+/* ================= Picking ================= */
+
+inline int64_t zen_camera_pick(int64_t camera, double x, double y)
+{
+    engine::Entity *e = z_entity(camera);
+    engine::Camera *cam = e ? e->getCamera() : nullptr;
+    if (!cam) return 0;
+    int vpX = 0, vpY = 0, vpW = 0, vpH = 0;
+    cam->getViewport(&vpX, &vpY, &vpW, &vpH);
+    if (vpW <= 0 || vpH <= 0) return 0;
+    const float nearRange = cam->getFrustumNear();
+    const float farRange = cam->getFrustumFar();
+    const float px = (((float)x / (float)vpW) - 0.5f) * cam->getFrustumWidth();
+    const float py = (0.5f - ((float)y / (float)vpH)) * cam->getFrustumHeight();
+    engine::Line line;
+    if (cam->getProjMode() == engine::Camera::ProjOrtho)
+        line = cam->getWorldTform() * engine::Line(engine::Vector(px, py, 0),
+                                                  engine::Vector(0, 0, farRange));
+    else
+        line = cam->getWorldTform() * engine::Line(engine::Vector(),
+                                                  engine::Vector(px * farRange / nearRange,
+                                                                 py * farRange / nearRange, farRange));
+    /* The state the Picked* queries read, cleared exactly as doPick does. */
+    z_pick.with = nullptr;
+    z_pick.coords.clear();
+    z_pick.collision.time = 1.0f;
+    z_pick.collision.normal.clear();
+    z_pick.collision.surface = nullptr;
+    z_pick.collision.index = (unsigned short)~0;
+    engine::Object *hit = z_world.traceRay(line, 0.0f, &z_pick);
+    z_pick.with = hit;
+    return hit ? z_handle_of(hit) : 0;
 }
 
 /* ================= Textures ================= */
