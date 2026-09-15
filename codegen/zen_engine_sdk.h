@@ -854,7 +854,21 @@ inline void zen_enable_direct_input(int64_t) {}
 inline int64_t zen_direct_input_enabled() { return 0; }
 
 /* Mouse extras */
-inline void zen_move_mouse(int64_t x, int64_t y) { z_platform.moveMouse((int)x, (int)y); }
+/* bbinput.cpp kept one previous value per axis and returned the difference, so
+   the first call after a jump reports the whole move - and MoveMouse updates the
+   reference, so warping the pointer does not read back as a huge MouseXSpeed.
+   One set of state shared by the speed queries and MoveMouse, as runtime3d has. */
+static int z_mouse_last_x = 0, z_mouse_last_y = 0, z_mouse_last_z = 0;
+
+inline void zen_move_mouse(int64_t x, int64_t y)
+{
+    /* Only when the pointer actually moved, as runtime3d's c_MoveMouse does. */
+    if (z_platform.moveMouse((int)x, (int)y))
+    {
+        z_mouse_last_x = (int)x;
+        z_mouse_last_y = (int)y;
+    }
+}
 
 /* Sound (stubs) */
 inline int64_t zen_load_sound(const std::string &) { return 0; }
@@ -1245,6 +1259,63 @@ inline int64_t zen_mouse_y() { return z_platform.mouseY(); }
 inline int64_t zen_mouse_down(int64_t b) { return z_platform.mouseDown((int)b) ? 1 : 0; }
 inline int64_t zen_mouse_hit(int64_t b) { return z_platform.mouseHit((int)b); }
 inline int64_t zen_mouse_z() { return z_platform.mouseZ(); }
+
+/* Mouse speed, GetMouse, FlushMouse and MouseWait, mirroring runtime3d's own;
+   the speed is the difference against z_mouse_last_*, updated here. */
+inline int64_t zen_mouse_x_speed()
+{
+    const int x = z_platform.mouseX();
+    const int delta = x - z_mouse_last_x;
+    z_mouse_last_x = x;
+    return delta;
+}
+inline int64_t zen_mouse_y_speed()
+{
+    const int y = z_platform.mouseY();
+    const int delta = y - z_mouse_last_y;
+    z_mouse_last_y = y;
+    return delta;
+}
+inline int64_t zen_mouse_z_speed()
+{
+    const int z = z_platform.mouseZ();
+    const int delta = z - z_mouse_last_z;
+    z_mouse_last_z = z;
+    return delta;
+}
+/* GetMouse pops one entry off the device queue, as bbGetMouse did. */
+inline int64_t zen_get_mouse() { return z_platform.popMouseButton(); }
+inline void zen_flush_mouse() { z_platform.flushMouseHits(); }
+inline int64_t zen_mouse_wait()
+{
+    /* bbWaitMouse returned which button was pressed, pumping events until one
+       arrives - but only while the window is open, so a headless run returns
+       straight away instead of spinning. */
+    bool wasDown[4] = {false, false, false, false};
+    for (int b = 1; b <= 3; ++b) wasDown[b] = z_platform.mouseDown(b);
+    int pressed = 0;
+    for (;;)
+    {
+        z_platform.pumpEvents();
+        if (!z_platform.isOpen()) break;
+        for (int b = 1; b <= 3; ++b)
+        {
+            const bool down = z_platform.mouseDown(b);
+            if (down && !wasDown[b]) pressed = b;
+            wasDown[b] = down;
+        }
+        if (pressed) break;
+        SDL_Delay(1);   /* poll at ~1 kHz, not a busy spin */
+    }
+    return pressed;
+}
+/* No joystick is ever opened, so every query answers the way Blitz3D answered
+   for a port with nothing plugged into it - the constants runtime3d uses.
+   Defaults cover the commands that take a port, a button or neither. */
+inline int64_t zen_joy_zero(int64_t = 0, int64_t = 0) { return 0; }
+inline double zen_joy_zero_float(int64_t = 0) { return 0.0; }
+inline void zen_flush_joy() {}
+inline int64_t zen_joy_wait(int64_t = 0) { return 0; }
 
 inline int64_t zen_graphics_width() { return z_platform.width(); }
 inline int64_t zen_graphics_height() { return z_platform.height(); }
