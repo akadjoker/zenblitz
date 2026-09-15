@@ -439,6 +439,35 @@ static void install_window_declarations(bb::BBRuntime *runtime)
         p->insertDecl("obscurer", bb::Type::int_type, bb::DECL_PARAM, new bb::ConstType(1LL));
         decl_void("entitypickmode", p);
     }
+
+    /* Picking: the line queries and the result the Picked* reads back. */
+    {
+        auto *p = new bb::DeclSeq();
+        p->insertDecl("x", bb::Type::float_type, bb::DECL_PARAM);
+        p->insertDecl("y", bb::Type::float_type, bb::DECL_PARAM);
+        p->insertDecl("z", bb::Type::float_type, bb::DECL_PARAM);
+        p->insertDecl("dx", bb::Type::float_type, bb::DECL_PARAM);
+        p->insertDecl("dy", bb::Type::float_type, bb::DECL_PARAM);
+        p->insertDecl("dz", bb::Type::float_type, bb::DECL_PARAM);
+        p->insertDecl("radius", bb::Type::float_type, bb::DECL_PARAM, new bb::ConstType(0.0));
+        decl_int("linepick", p);
+    }
+    {
+        auto *p = new bb::DeclSeq();
+        p->insertDecl("entity", bb::Type::int_type, bb::DECL_PARAM);
+        p->insertDecl("range", bb::Type::float_type, bb::DECL_PARAM);
+        decl_int("entitypick", p);
+    }
+    {
+        auto *p = new bb::DeclSeq();
+        const char *float_queries[] = {"pickedx", "pickedy", "pickedz", "pickednx", "pickedny",
+                                       "pickednz", "pickedtime"};
+        for (size_t i = 0; i < sizeof(float_queries) / sizeof(float_queries[0]); ++i)
+            decls->insertDecl(float_queries[i], new bb::FuncType(bb::Type::float_type, new bb::DeclSeq(*p), false, false), bb::DECL_FUNC);
+    }
+    decl_int("pickedentity", new bb::DeclSeq());
+    decl_int("pickedsurface", new bb::DeclSeq());
+    decl_int("pickedtriangle", new bb::DeclSeq());
     decl_int("copyentity", [&]() { auto *p = new bb::DeclSeq(); p->insertDecl("entity", bb::Type::int_type, bb::DECL_PARAM); p->insertDecl("parent", bb::Type::int_type, bb::DECL_PARAM, new bb::ConstType(0LL)); return p; }());
 
     /* Light */
@@ -1171,6 +1200,18 @@ static void register_builtin_wrappers(bb::BBRuntime *runtime, bb::CGen &gen)
     reg("entitytype", "zen_entity_type", true);
     reg("getentitytype", "zen_get_entity_type", true);
     reg("entitypickmode", "zen_entity_pick_mode", true);
+    reg("linepick", "zen_line_pick", true);
+    reg("entitypick", "zen_entity_pick", true);
+    reg("pickedx", "zen_picked_x", true);
+    reg("pickedy", "zen_picked_y", true);
+    reg("pickedz", "zen_picked_z", true);
+    reg("pickednx", "zen_picked_nx", true);
+    reg("pickedny", "zen_picked_ny", true);
+    reg("pickednz", "zen_picked_nz", true);
+    reg("pickedtime", "zen_picked_time", true);
+    reg("pickedentity", "zen_picked_entity", true);
+    reg("pickedsurface", "zen_picked_surface", true);
+    reg("pickedtriangle", "zen_picked_triangle", true);
     reg("copyentity", "zen_copy_entity", true);
     /* Light */
     reg("lightcolor", "zen_light_color", true);

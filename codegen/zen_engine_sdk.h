@@ -177,6 +177,33 @@ static inline int64_t z_handle_of(engine::Entity *e)
     return 0;
 }
 
+/* Teardown. The GPU has to be wound down before the driver starts its own:
+   every GL object here is released through the device, and if they are still
+   alive when Mesa tears the context down the driver faults - the same crash
+   runtime3d avoids by calling shutdown_graphics before returning. Registering
+   it with atexit at open time covers every exit a script has: End,
+   RuntimeError, the window being closed, or falling off the end of main. */
+static void z_shutdown_graphics()
+{
+    if (!z_graphics_open) return;
+    /* GPU buffers first: a destructor cannot release them, it has no device,
+       so the whole tree is swept before anything is deleted. */
+    for (engine::Entity *root = engine::Entity::orphans(); root; root = root->successor())
+        root->freeGpuTree(z_platform.device());
+    for (auto &entry : z_images) delete entry.second;
+    z_images.clear();
+    for (auto &entry : z_textures) engine::Texture::release(entry.second);
+    z_textures.clear();
+    /* ~Entity deletes its children, so deleting the orphan roots walks the
+       whole scene. */
+    while (engine::Entity *root = engine::Entity::orphans()) delete root;
+    z_entities.clear();
+    if (z_world_init) { z_world.shutdown(); z_world_init = false; }
+    z_platform.close();
+    z_graphics_open = false;
+    engine::AudioSystem::get().shutdown();
+}
+
 static constexpr float kDegToRad = 0.0174532925199432957692369076848861f;
 
 inline void zen_graphics_open(int width, int height, int64_t depth = 0, int64_t mode = 0)
@@ -190,6 +217,9 @@ inline void zen_graphics_open(int width, int height, int64_t depth = 0, int64_t 
     {
         z_graphics_open = true;
         z_platform.beginFrame();
+        /* See z_shutdown_graphics: without this the GL objects outlive the
+           context and the driver takes the process down on exit. */
+        std::atexit(z_shutdown_graphics);
     }
 }
 
@@ -218,12 +248,7 @@ inline void zen_flip(int64_t vwait = 1)
 
 inline void zen_graphics_close()
 {
-    if (!z_graphics_open) return;
-    if (z_world_init) { z_world.shutdown(); z_world_init = false; }
-    z_platform.close();
-    z_graphics_open = false;
-    z_platform.flushKeyHits();
-    engine::AudioSystem::get().shutdown();
+    z_shutdown_graphics();
 }
 
 inline void zen_cls()
@@ -1282,6 +1307,21 @@ inline double zen_anim_time(int64_t entity)
 
 /* ================= Picking ================= */
 
+/* Clears the pick state the Picked* queries read and traces the line - the
+   whole of runtime3d's doPick. */
+static inline int64_t z_do_pick(const engine::Line &line, float radius)
+{
+    z_pick.with = nullptr;
+    z_pick.coords.clear();
+    z_pick.collision.time = 1.0f;
+    z_pick.collision.normal.clear();
+    z_pick.collision.surface = nullptr;
+    z_pick.collision.index = (unsigned short)~0;
+    engine::Object *hit = z_world.traceRay(line, radius, &z_pick);
+    z_pick.with = hit;
+    return hit ? z_handle_of(hit) : 0;
+}
+
 inline int64_t zen_camera_pick(int64_t camera, double x, double y)
 {
     engine::Entity *e = z_entity(camera);
@@ -1302,17 +1342,40 @@ inline int64_t zen_camera_pick(int64_t camera, double x, double y)
         line = cam->getWorldTform() * engine::Line(engine::Vector(),
                                                   engine::Vector(px * farRange / nearRange,
                                                                  py * farRange / nearRange, farRange));
-    /* The state the Picked* queries read, cleared exactly as doPick does. */
-    z_pick.with = nullptr;
-    z_pick.coords.clear();
-    z_pick.collision.time = 1.0f;
-    z_pick.collision.normal.clear();
-    z_pick.collision.surface = nullptr;
-    z_pick.collision.index = (unsigned short)~0;
-    engine::Object *hit = z_world.traceRay(line, 0.0f, &z_pick);
-    z_pick.with = hit;
-    return hit ? z_handle_of(hit) : 0;
+    return z_do_pick(line, 0.0f);
 }
+
+inline int64_t zen_line_pick(double x, double y, double z, double dx, double dy, double dz,
+                             double radius = 0.0)
+{
+    return z_do_pick(engine::Line(engine::Vector((float)x, (float)y, (float)z),
+                                  engine::Vector((float)dx, (float)dy, (float)dz)),
+                     (float)radius);
+}
+
+inline int64_t zen_entity_pick(int64_t entity, double range)
+{
+    engine::Entity *e = z_entity(entity);
+    engine::Object *o = e ? e->getObject() : nullptr;
+    if (!o) return 0;
+    return z_do_pick(engine::Line(o->getWorldPosition(), o->getWorldTform().m.k * (float)range), 0.0f);
+}
+
+/* The Picked* queries: whatever the last pick landed on, or the cleared
+   state (0 / -1 components, no entity) when it hit nothing. */
+inline double zen_picked_x() { return z_pick.coords.x; }
+inline double zen_picked_y() { return z_pick.coords.y; }
+inline double zen_picked_z() { return z_pick.coords.z; }
+inline double zen_picked_nx() { return z_pick.collision.normal.x; }
+inline double zen_picked_ny() { return z_pick.collision.normal.y; }
+inline double zen_picked_nz() { return z_pick.collision.normal.z; }
+inline double zen_picked_time() { return z_pick.collision.time; }
+inline int64_t zen_picked_entity() { return z_handle_of(z_pick.with); }
+inline int64_t zen_picked_surface()
+{
+    return (int64_t)(std::intptr_t)z_pick.collision.surface;
+}
+inline int64_t zen_picked_triangle() { return (int64_t)z_pick.collision.index; }
 
 /* ================= Textures ================= */
 
