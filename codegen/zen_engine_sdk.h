@@ -24,6 +24,7 @@
 #include "engine/Mirror.h"
 #include "engine/Surface.h"
 #include "engine/Animator.h"
+#include "engine/VoxelSprite.h"
 #include "engine/Pixmap.h"
 #include "engine/Image.h"
 #include "engine/Collision.h"
@@ -69,6 +70,19 @@ static std::map<int64_t, engine::Image *> z_image_list;
 static std::map<int64_t, engine::Texture *> z_texture_list;
 static int64_t z_next_image = 0;
 static int64_t z_canvas_buffer = 1;
+
+/* Voxel materials: LoadMaterial keeps its own registry, exactly as runtime3d
+   does with g_voxel_materials, because a VoxelSprite is handed the whole
+   atlas description rather than just a texture handle. Declared up here
+   because the teardown below has to release what it owns. */
+struct z_voxel_material
+{
+    engine::Texture *texture = nullptr;
+    int columns = 1, rows = 1;
+    int firstFrame = 0, frameCount = 1;
+};
+static std::map<int64_t, z_voxel_material *> z_voxel_materials;
+static int64_t z_next_voxel_material = 0;
 
 /* The size text is drawn at: LoadFont makes one of these and SetFont picks
    it, the point size being all this runtime's single bitmap font needs.
@@ -254,6 +268,12 @@ static void z_shutdown_graphics()
         root->freeGpuTree(z_platform.device());
     for (auto &entry : z_image_list) delete entry.second;
     z_image_list.clear();
+    for (auto &entry : z_voxel_materials)
+    {
+        engine::Texture::release(entry.second->texture);
+        delete entry.second;
+    }
+    z_voxel_materials.clear();
     for (auto &entry : z_texture_list) engine::Texture::release(entry.second);
     z_texture_list.clear();
     /* ~Entity deletes its children, so deleting the orphan roots walks the
@@ -576,7 +596,11 @@ inline int64_t zen_load_anim_image(const std::string &, int64_t cellwidth, int64
 /* Gfx drivers */
 static inline void z_collect_gfx_modes()
 {
-    if (!z_gfx_modes.empty()) return;
+    /* Cleared and refilled on every call, as runtime3d's collectGfxModes does:
+       the list changes when Graphics3D sets a display mode, and only the two
+       commands that call this (CountGfxModes3D, GfxMode3DExists) may see the
+       new one. GfxMode3D and GfxModeWidth/Height/Depth only read the cache. */
+    z_gfx_modes.clear();
     /* SDL_GetNumDisplayModes needs the video subsystem up, and a script may
        not have triggered it yet: CountGfxModes3D and Windowed3D have to be
        callable before the first Graphics - start.bb, the shared menu every
@@ -594,9 +618,9 @@ static inline void z_collect_gfx_modes()
 
 inline int64_t zen_count_gfx_drivers() { return SDL_GetNumVideoDisplays(); }
 inline int64_t zen_count_gfx_modes() { z_collect_gfx_modes(); return (int64_t)z_gfx_modes.size(); }
-inline int64_t zen_gfx_mode_width(int64_t mode) { z_collect_gfx_modes(); return mode > 0 && (size_t)mode <= z_gfx_modes.size() ? z_gfx_modes[(size_t)mode - 1].width : 0; }
-inline int64_t zen_gfx_mode_height(int64_t mode) { z_collect_gfx_modes(); return mode > 0 && (size_t)mode <= z_gfx_modes.size() ? z_gfx_modes[(size_t)mode - 1].height : 0; }
-inline int64_t zen_gfx_mode_depth(int64_t mode) { z_collect_gfx_modes(); return mode > 0 && (size_t)mode <= z_gfx_modes.size() ? z_gfx_modes[(size_t)mode - 1].depth : 0; }
+inline int64_t zen_gfx_mode_width(int64_t mode) { return mode > 0 && (size_t)mode <= z_gfx_modes.size() ? z_gfx_modes[(size_t)mode - 1].width : 0; }
+inline int64_t zen_gfx_mode_height(int64_t mode) { return mode > 0 && (size_t)mode <= z_gfx_modes.size() ? z_gfx_modes[(size_t)mode - 1].height : 0; }
+inline int64_t zen_gfx_mode_depth(int64_t mode) { return mode > 0 && (size_t)mode <= z_gfx_modes.size() ? z_gfx_modes[(size_t)mode - 1].depth : 0; }
 inline int64_t zen_gfx_mode3d_exists(int64_t width, int64_t height, int64_t depth)
 {
     z_collect_gfx_modes();
@@ -636,6 +660,74 @@ inline int64_t zen_save_buffer(int64_t buffer, const std::string &bmpfile)
                            (engine::u8)((argb >> 8) & 0xff), (engine::u8)(argb & 0xff), 255);
         }
     return shot.save(bmpfile.c_str()) ? 1 : 0;
+}
+
+/* GraphicsBuffer/GraphicsDepth/GfxMode3D: the screen buffer is 1 and the
+   depth 32, both constants here as in runtime3d. */
+inline int64_t zen_graphics_buffer() { return kScreenBuffer; }
+inline int64_t zen_graphics_depth() { return 32; }
+inline int64_t zen_gfx_mode_3d(int64_t mode)
+{
+    /* GfxMode3D takes a mode *index*, 1..CountGfxModes3D(), not a size -
+       GfxMode3DExists is the size test, and it is the wrapper above. Only
+       reads the cache: runtime3d's c_GfxMode3D does not collect either, so a
+       script that never asked for the count sees no modes. */
+    return mode >= 1 && (size_t)mode <= z_gfx_modes.size() ? 1 : 0;
+}
+/* LoadBuffer: scale the image about to be read into the target buffer, one
+   pixel at a time, and drop the colour-mask cache the same way runtime3d
+   does. Only an image or texture buffer can be filled. */
+inline int64_t zen_load_buffer(int64_t buffer, const std::string &file)
+{
+    engine::ImageFrame *f = z_buffer_frame(buffer);
+    if (!f)
+    {
+        z_warn_screen_write("LoadBuffer");
+        return 0;
+    }
+    engine::Pixmap loaded;
+    if (!loaded.load(file.c_str())) return 0;
+
+    const int w = f->pixels.width, h = f->pixels.height;
+    for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x)
+        {
+            const int sx = loaded.width > 0 ? (x * loaded.width) / w : 0;
+            const int sy = loaded.height > 0 ? (y * loaded.height) / h : 0;
+            const engine::Color c = loaded.get_pixel_color((engine::u32)sx, (engine::u32)sy);
+            f->pixels.set_pixel((engine::u32)x, (engine::u32)y, c.r(), c.g(), c.b(), c.a());
+        }
+    f->dirty = true;
+    f->cmMask.clear();
+    f->cmPitch = 0;
+    return 1;
+}
+/* CopyRect: copied through a temporary so a rectangle overlapping itself
+   inside one buffer still reads the original pixels. */
+inline void zen_copy_rect(int64_t sx, int64_t sy, int64_t w, int64_t h, int64_t dx, int64_t dy,
+                          int64_t src, int64_t dst)
+{
+    const int64_t source = z_buffer_arg(src), target = z_buffer_arg(dst);
+    if (w <= 0 || h <= 0) return;
+    if (!z_buffer_frame(target))
+    {
+        z_warn_screen_write("CopyRect");
+        return;
+    }
+    int sw = 0, sh = 0;
+    z_buffer_size(source, sw, sh);
+    if (sx + w > sw) w = sw - sx;
+    if (sy + h > sh) h = sh - sy;
+    if (w <= 0 || h <= 0) return;
+
+    std::vector<unsigned> tmp((size_t)w * (size_t)h, 0u);
+    for (int64_t y = 0; y < h; ++y)
+        for (int64_t x = 0; x < w; ++x)
+            tmp[(size_t)y * (size_t)w + (size_t)x] = z_read_pixel(source, (int)(sx + x), (int)(sy + y));
+
+    for (int64_t y = 0; y < h; ++y)
+        for (int64_t x = 0; x < w; ++x)
+            z_write_pixel(target, (int)(dx + x), (int)(dy + y), tmp[(size_t)y * (size_t)w + (size_t)x]);
 }
 
 /* Entity extras */
@@ -1646,6 +1738,103 @@ inline void zen_rotate_texture(int64_t texture, double angle)
     if (t) t->setRotation(-(float)angle * kDegToRad);
 }
 inline void zen_clear_texture_filters() { engine::Texture::clearFilters(); }
+
+/* Texture filters and animated textures, mirroring runtime3d's TextureFilter
+   and LoadAnimTexture. */
+inline void zen_texture_filter(const std::string &filter, int64_t flags)
+{
+    engine::Texture::addFilter(filter, (int)flags);
+}
+inline int64_t zen_load_anim_texture(const std::string &file, int64_t flags = 1, int64_t frameWidth = 0,
+                                     int64_t frameHeight = 0, int64_t firstFrame = 0,
+                                     int64_t frameCount = 1)
+{
+    z_world_ensure();
+    engine::Texture *t = engine::Texture::loadAnim(file.c_str(), (int)flags, (int)frameWidth,
+                                                   (int)frameHeight, (int)firstFrame, (int)frameCount);
+    if (!t) return 0;
+    int64_t handle = ++z_next_texture;
+    z_texture_list[handle] = t;
+    return handle;
+}
+
+/* Voxel materials: LoadMaterial fills the registry declared with the state,
+   and a VoxelSprite is handed the whole atlas description, not a texture. */
+
+inline int64_t zen_load_material(const std::string &file, int64_t flags = 1, int64_t frameWidth = 0,
+                                 int64_t frameHeight = 0, int64_t firstFrame = 0, int64_t frameCount = 1)
+{
+    engine::Texture *texture = engine::Texture::load(file.c_str(), (int)flags);
+    if (!texture) return 0;
+
+    if (frameWidth < 1) frameWidth = texture->width();
+    if (frameHeight < 1) frameHeight = texture->height();
+    const int columns = frameWidth > 0 ? texture->width() / (int)frameWidth : 0;
+    const int rows = frameHeight > 0 ? texture->height() / (int)frameHeight : 0;
+    if (columns < 1 || rows < 1)
+    {
+        engine::Texture::release(texture);
+        return 0;
+    }
+    const int total = columns * rows;
+    int first = (int)firstFrame;
+    if (first < 0) first = 0;
+    if (first >= total) first = total - 1;
+    int count = (int)frameCount;
+    if (count < 1 || count > total - first) count = total - first;
+
+    z_voxel_material *material = new z_voxel_material;
+    material->texture = texture;
+    material->columns = columns;
+    material->rows = rows;
+    material->firstFrame = first;
+    material->frameCount = count;
+    const int64_t handle = ++z_next_voxel_material;
+    z_voxel_materials[handle] = material;
+    return handle;
+}
+inline void zen_free_material(int64_t material)
+{
+    auto it = z_voxel_materials.find(material);
+    if (it == z_voxel_materials.end()) return;
+    engine::Texture::release(it->second->texture);
+    delete it->second;
+    z_voxel_materials.erase(it);
+}
+/* The voxel model behind an entity handle, the dynamic_cast runtime3d does
+   before either of the two VoxelSprite commands touches anything. */
+static inline engine::VoxelSprite *z_voxel_of(int64_t entity)
+{
+    engine::Entity *e = z_entity(entity);
+    auto *model = e ? e->getModel() : nullptr;
+    return model ? dynamic_cast<engine::VoxelSprite *>(model) : nullptr;
+}
+inline void zen_voxel_sprite_material(int64_t entity, int64_t material)
+{
+    engine::VoxelSprite *voxel = z_voxel_of(entity);
+    auto it = z_voxel_materials.find(material);
+    if (!voxel || it == z_voxel_materials.end()) return;
+    z_voxel_material *m = it->second;
+    voxel->setTexture(0, engine::BrushTexture::fromTexture(z_platform.device(), m->texture, 0));
+    voxel->setAtlas(m->columns, m->rows, m->firstFrame, m->frameCount);
+}
+inline void zen_voxel_sprite_texture(int64_t entity, int64_t texture, int64_t frameWidth = 0,
+                                     int64_t frameHeight = 0, int64_t firstFrame = 0,
+                                     int64_t frameCount = 1)
+{
+    engine::VoxelSprite *voxel = z_voxel_of(entity);
+    engine::Texture *t = z_texture_of(texture);
+    if (!voxel || !t) return;
+
+    if (frameWidth < 1) frameWidth = t->width();
+    if (frameHeight < 1) frameHeight = t->height();
+    int columns = frameWidth > 0 ? t->width() / (int)frameWidth : 1;
+    int rows = frameHeight > 0 ? t->height() / (int)frameHeight : 1;
+    if (columns < 1) columns = 1;
+    if (rows < 1) rows = 1;
+    voxel->setTexture(0, engine::BrushTexture::fromTexture(z_platform.device(), t, 0));
+    voxel->setAtlas(columns, rows, (int)firstFrame, (int)frameCount);
+}
 inline void zen_light_mesh(int64_t mesh, double r, double g, double b, double range = 0, double x = 0,
                            double y = 0, double z = 0)
 {
