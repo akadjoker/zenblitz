@@ -577,6 +577,12 @@ static void install_window_declarations(bb::BBRuntime *runtime)
     decl_void("vertexnormal", [&]() { auto *q = new bb::DeclSeq(); q->insertDecl("surface", bb::Type::int_type, bb::DECL_PARAM); q->insertDecl("index", bb::Type::int_type, bb::DECL_PARAM); q->insertDecl("nx", bb::Type::float_type, bb::DECL_PARAM); q->insertDecl("ny", bb::Type::float_type, bb::DECL_PARAM); q->insertDecl("nz", bb::Type::float_type, bb::DECL_PARAM); return q; }());
     decl_void("vertextexcoords", [&]() { auto *q = new bb::DeclSeq(); q->insertDecl("surface", bb::Type::int_type, bb::DECL_PARAM); q->insertDecl("index", bb::Type::int_type, bb::DECL_PARAM); q->insertDecl("u", bb::Type::float_type, bb::DECL_PARAM); q->insertDecl("v", bb::Type::float_type, bb::DECL_PARAM); q->insertDecl("w", bb::Type::float_type, bb::DECL_PARAM, new bb::ConstType(1.0)); q->insertDecl("coord_set", bb::Type::int_type, bb::DECL_PARAM, new bb::ConstType(0LL)); return q; }());
     decl_void("clearsurface", [&]() { auto *q = new bb::DeclSeq(); q->insertDecl("surface", bb::Type::int_type, bb::DECL_PARAM); q->insertDecl("clear_vertices", bb::Type::int_type, bb::DECL_PARAM, new bb::ConstType(1LL)); q->insertDecl("clear_triangles", bb::Type::int_type, bb::DECL_PARAM, new bb::ConstType(1LL)); return q; }());
+    decl_int("openmovie", [&]() { auto *q = new bb::DeclSeq(); q->insertDecl("file", bb::Type::string_type, bb::DECL_PARAM); return q; }());
+    decl_int("drawmovie", [&]() { auto *q = new bb::DeclSeq(); q->insertDecl("movie", bb::Type::int_type, bb::DECL_PARAM); q->insertDecl("x", bb::Type::int_type, bb::DECL_PARAM, new bb::ConstType(0LL)); q->insertDecl("y", bb::Type::int_type, bb::DECL_PARAM, new bb::ConstType(0LL)); q->insertDecl("w", bb::Type::int_type, bb::DECL_PARAM, new bb::ConstType(-1LL)); q->insertDecl("h", bb::Type::int_type, bb::DECL_PARAM, new bb::ConstType(-1LL)); return q; }());
+    decl_int("moviewidth", [&]() { auto *q = new bb::DeclSeq(); q->insertDecl("movie", bb::Type::int_type, bb::DECL_PARAM); return q; }());
+    decl_int("movieheight", [&]() { auto *q = new bb::DeclSeq(); q->insertDecl("movie", bb::Type::int_type, bb::DECL_PARAM); return q; }());
+    decl_int("movieplaying", [&]() { auto *q = new bb::DeclSeq(); q->insertDecl("movie", bb::Type::int_type, bb::DECL_PARAM); return q; }());
+    decl_void("closemovie", [&]() { auto *q = new bb::DeclSeq(); q->insertDecl("movie", bb::Type::int_type, bb::DECL_PARAM); return q; }());
     decl_void("tileimage", [&]() { auto *q = new bb::DeclSeq(); q->insertDecl("image", bb::Type::int_type, bb::DECL_PARAM); q->insertDecl("x", bb::Type::int_type, bb::DECL_PARAM, new bb::ConstType(0LL)); q->insertDecl("y", bb::Type::int_type, bb::DECL_PARAM, new bb::ConstType(0LL)); q->insertDecl("frame", bb::Type::int_type, bb::DECL_PARAM, new bb::ConstType(0LL)); return q; }());
     decl_void("scaleimage", [&]() { auto *q = new bb::DeclSeq(); q->insertDecl("image", bb::Type::int_type, bb::DECL_PARAM); q->insertDecl("xscale", bb::Type::float_type, bb::DECL_PARAM); q->insertDecl("yscale", bb::Type::float_type, bb::DECL_PARAM); return q; }());
     decl_void("rotateimage", [&]() { auto *q = new bb::DeclSeq(); q->insertDecl("image", bb::Type::int_type, bb::DECL_PARAM); q->insertDecl("angle", bb::Type::float_type, bb::DECL_PARAM); return q; }());
@@ -1364,6 +1370,12 @@ static void register_builtin_wrappers(bb::BBRuntime *runtime, bb::CGen &gen)
     reg("vertexnormal", "zen_vertex_normal", true);
     reg("vertextexcoords", "zen_vertex_tex_coords", true);
     reg("clearsurface", "zen_clear_surface", true);
+    reg("openmovie", "zen_open_movie", true);
+    reg("drawmovie", "zen_movie_zero", true);
+    reg("moviewidth", "zen_movie_zero", true);
+    reg("movieheight", "zen_movie_zero", true);
+    reg("movieplaying", "zen_movie_zero", true);
+    reg("closemovie", "zen_close_movie", true);
     reg("tileimage", "zen_tile_image", true);
     reg("scaleimage", "zen_scale_image", true);
     reg("rotateimage", "zen_rotate_image", true);

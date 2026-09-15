@@ -1551,6 +1551,16 @@ inline void zen_draw_block_rect(int64_t image, int64_t x, int64_t y, int64_t rec
 /* ================= Odds and ends ================= */
 
 inline int64_t zen_scan_line() { return 0; }   /* no raster line to report */
+/* Movies. runtime3d has no video playback and says so once, on stderr, when a
+   script opens one; the rest of the family answers 0 or does nothing, which is
+   exactly what the VM's commands do. */
+inline int64_t zen_open_movie(const std::string &)
+{
+    std::fprintf(stderr, "OpenMovie: video playback is not supported\n");
+    return 0;
+}
+inline int64_t zen_movie_zero(int64_t = 0, int64_t = 0, int64_t = 0, int64_t = 0, int64_t = 0) { return 0; }
+inline void zen_close_movie(int64_t = 0) {}
 inline void zen_camera_cls_mode(int64_t camera, int64_t clsColor, int64_t clsZBuffer)
 {
     engine::Entity *e = z_entity(camera);
