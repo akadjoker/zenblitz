@@ -226,6 +226,12 @@ static inline unsigned z_read_pixel(int64_t handle, int x, int y)
         const engine::Color c = f->pixels.get_pixel_color((engine::u32)x, (engine::u32)y);
         return ((unsigned)c.a() << 24) | ((unsigned)c.r() << 16) | ((unsigned)c.g() << 8) | c.b();
     }
+    /* Reading the screen mid-frame answers 0 while a pass is still open on it:
+       the GPU cannot sample a texture it is writing. runtime3d's own read goes
+       straight through, so a script reading between drawing and Flip sees
+       nothing here and the clear colour there. Closing the pass to read it was
+       tried and reopens it over the frame, losing the 3D layer, so the plain
+       read stays. */
     return z_platform.readScreenPixel(x, y);
 }
 
@@ -301,7 +307,11 @@ inline void zen_graphics_open(int width, int height, int64_t depth = 0, int64_t 
     if (z_platform.open(width, height, "zenblitz", false, visible))
     {
         z_graphics_open = true;
-        z_platform.beginFrame();
+        /* No beginFrame here: runtime3d's c_Graphics only opens the platform,
+           and the frame's first Cls is what opens (and clears) the screen
+           pass. Opening one here made that Cls a no-op - beginFrame returns
+           false while a pass is already open - so the ClsColor never reached
+           the first frame and 2D drawn before RenderWorld survived it. */
         /* See z_shutdown_graphics: without this the GL objects outlive the
            context and the driver takes the process down on exit. */
         std::atexit(z_shutdown_graphics);
