@@ -773,7 +773,7 @@ static void install_window_declarations(bb::BBRuntime *runtime)
     decl_int("copyimage", param_int("image"));
     decl_void("resizeimage", [&]() { auto *p = new bb::DeclSeq(); p->insertDecl("image", bb::Type::int_type, bb::DECL_PARAM); p->insertDecl("width", bb::Type::int_type, bb::DECL_PARAM); p->insertDecl("height", bb::Type::int_type, bb::DECL_PARAM); return p; }());
     decl_void("freeimage", param_int("image"));
-    decl_void("saveimage", [&]() { auto *p = new bb::DeclSeq(); p->insertDecl("image", bb::Type::int_type, bb::DECL_PARAM); p->insertDecl("bmpfile", bb::Type::string_type, bb::DECL_PARAM); p->insertDecl("frame", bb::Type::int_type, bb::DECL_PARAM, new bb::ConstType(0LL)); return p; }());
+    decl_int("saveimage", [&]() { auto *p = new bb::DeclSeq(); p->insertDecl("image", bb::Type::int_type, bb::DECL_PARAM); p->insertDecl("bmpfile", bb::Type::string_type, bb::DECL_PARAM); p->insertDecl("frame", bb::Type::int_type, bb::DECL_PARAM, new bb::ConstType(0LL)); return p; }());
     decl_int("savebuffer", [&]() { auto *p = new bb::DeclSeq(); p->insertDecl("buffer", bb::Type::int_type, bb::DECL_PARAM); p->insertDecl("bmpfile", bb::Type::string_type, bb::DECL_PARAM); return p; }());
     {
         auto *p = new bb::DeclSeq();

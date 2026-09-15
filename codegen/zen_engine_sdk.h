@@ -564,15 +564,25 @@ inline int64_t zen_rand_seed() { return (int64_t)z_rand_seed_value; }
 inline void zen_clear_collisions() { z_world.clearCollisions(); }
 
 /* Images 2D */
+/* AutoMidHandle: from here on every image stored is centred, and the flag is
+   read where the image is stored - runtime3d's store_image does the same. */
+static bool z_auto_mid_handle = false;
+
+static inline int64_t z_store_image(engine::Image *image)
+{
+    if (z_auto_mid_handle) image->setMidHandle();
+    const int64_t handle = ++z_next_image;
+    z_image_list[handle] = image;
+    return handle;
+}
+
 inline int64_t zen_load_image(const std::string &file)
 {
     engine::Pixmap pixels;
     if (!pixels.load(file.c_str())) return 0;
     engine::Image *image = new engine::Image();
     image->addFrame(std::move(pixels));
-    int64_t handle = ++z_next_image;
-    z_image_list[handle] = image;
-    return handle;
+    return z_store_image(image);
 }
 
 inline void zen_draw_image(int64_t image, int64_t x, int64_t y, int64_t frame = 0)
@@ -584,16 +594,66 @@ inline void zen_draw_image(int64_t image, int64_t x, int64_t y, int64_t frame = 
                                    (float)y - (float)img->handleY(),
                                    (float)f.pixels.width, (float)f.pixels.height);
 }
-inline void zen_draw_image_rect(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t = 0) {}
-inline void zen_grab_image(int64_t, int64_t, int64_t, int64_t = 0) {}
-inline int64_t zen_load_anim_image(const std::string &, int64_t cellwidth, int64_t cellheight,
+inline void zen_draw_image_rect(int64_t image, int64_t x, int64_t y, int64_t rectX, int64_t rectY,
+                                int64_t rectW, int64_t rectH, int64_t frame = 0)
+{
+    /* Blend, and draw the given sub-rectangle of the frame at x,y - the batch
+       renderer takes normalised source coordinates. */
+    engine::Image *img = z_image_of(image);
+    if (!img || !img->ensureUploaded(z_platform.device(), (int)frame)) return;
+    const engine::ImageFrame &f = img->frame((int)frame);
+    z_platform.batch().drawTexture(f.texture, (float)x - (float)img->handleX(),
+                                   (float)y - (float)img->handleY(), (float)rectW, (float)rectH,
+                                   (float)rectX / (float)f.pixels.width,
+                                   (float)rectY / (float)f.pixels.height,
+                                   (float)rectW / (float)f.pixels.width,
+                                   (float)rectH / (float)f.pixels.height);
+}
+inline void zen_grab_image(int64_t image, int64_t x, int64_t y, int64_t frame = 0)
+{
+    /* Read the current buffer back into the image, offset by the canvas origin
+       and centred on the image's handle - runtime3d's c_GrabImage. */
+    engine::Image *img = z_image_of(image);
+    const int n = (int)frame;
+    if (!img || n < 0 || n >= img->frameCount()) return;
+    engine::ImageFrame &f = img->frame(n);
+    const int x0 = (int)x + z_origin_x - img->handleX();
+    const int y0 = (int)y + z_origin_y - img->handleY();
+    const int w = f.pixels.width, h = f.pixels.height;
+    for (int py = 0; py < h; ++py)
+        for (int px = 0; px < w; ++px)
+        {
+            const unsigned argb = z_read_pixel(z_canvas_buffer, x0 + px, y0 + py);
+            f.pixels.set_pixel((engine::u32)px, (engine::u32)py, (engine::u8)((argb >> 16) & 0xff),
+                               (engine::u8)((argb >> 8) & 0xff), (engine::u8)(argb & 0xff), 255);
+        }
+    f.dirty = true;
+    f.cmMask.clear();
+    f.cmPitch = 0;
+}
+inline int64_t zen_load_anim_image(const std::string &file, int64_t cellwidth, int64_t cellheight,
                                    int64_t first, int64_t count)
 {
-    (void)cellwidth;
-    (void)cellheight;
-    (void)first;
-    (void)count;
-    return 0;
+    /* An animation image is a grid cut out of one bitmap: frames run across
+       each row, and the whole requested range has to fit - c_LoadAnimImage. */
+    const int cellW = (int)cellwidth, cellH = (int)cellheight;
+    const int firstFrame = (int)first, frameCount = (int)count;
+    if (frameCount < 1 || firstFrame < 0 || cellW <= 0 || cellH <= 0) return 0;
+    engine::Pixmap sheet;
+    if (!sheet.load(file.c_str())) return 0;
+    const int perRow = sheet.width / cellW;
+    const int total = perRow > 0 ? (sheet.height / cellH) * perRow : 0;
+    if (perRow <= 0 || firstFrame + frameCount > total) return 0;
+
+    engine::Image *img = new engine::Image();
+    for (int k = 0; k < frameCount; ++k)
+    {
+        const int idx = firstFrame + k;
+        engine::IntRect rect{(idx % perRow) * cellW, (idx / perRow) * cellH, cellW, cellH};
+        engine::Pixmap frame(sheet, rect);
+        img->addFrame(std::move(frame));
+    }
+    return z_store_image(img);
 }
 
 /* Gfx drivers. SetGfxDriver picks which display's modes CountGfxModes3D and
@@ -1182,17 +1242,43 @@ inline std::string zen_gfx_driver_name(int64_t driver)
     return name ? name : "";
 }
 
-/* Images extras (stubs) */
-inline void zen_mask_image(int64_t, int64_t, int64_t, int64_t) {}
+/* Images extras, each mirroring runtime3d's command of the same name. */
 inline void zen_mid_handle(int64_t image)
 {
     engine::Image *img = z_image_of(image);
     if (img) img->setMidHandle();
 }
-inline void zen_auto_mid_handle(int64_t) {}
-inline int64_t zen_copy_image(int64_t) { return 0; }
-inline void zen_resize_image(int64_t, int64_t, int64_t) {}
-inline void zen_save_image(int64_t, const std::string &, int64_t = 0) {}
+inline void zen_auto_mid_handle(int64_t enable) { z_auto_mid_handle = enable != 0; }
+inline int64_t zen_copy_image(int64_t image)
+{
+    engine::Image *src = z_image_of(image);
+    if (!src || src->frameCount() == 0) return 0;
+    engine::Image *img = new engine::Image();
+    for (int k = 0; k < src->frameCount(); ++k)
+    {
+        const engine::Pixmap &sp = src->frame(k).pixels;
+        engine::IntRect all{0, 0, sp.width, sp.height};
+        engine::Pixmap copy(sp, all);
+        img->addFrame(std::move(copy));
+    }
+    /* The copy carries the handle and the mask across, and AutoMidHandle must
+       not override an explicit handle - runtime3d disables the flag for the
+       store and restores it afterwards. */
+    const bool saved = z_auto_mid_handle;
+    z_auto_mid_handle = false;
+    const int64_t handle = z_store_image(img);
+    z_auto_mid_handle = saved;
+    img->setHandle(src->handleX(), src->handleY());
+    img->setMask(src->mask());
+    return handle;
+}
+inline int64_t zen_save_image(int64_t image, const std::string &bmpfile, int64_t frame = 0)
+{
+    engine::Image *img = z_image_of(image);
+    bool ok = false;
+    if (img && img->frameCount() > 0) ok = img->frame((int)frame).pixels.save(bmpfile.c_str());
+    return ok ? 1 : 0;
+}
 inline void zen_handle_image(int64_t image, int64_t x, int64_t y)
 {
     engine::Image *img = z_image_of(image);
@@ -1210,8 +1296,6 @@ inline void zen_draw_block(int64_t image, int64_t x, int64_t y, int64_t frame = 
                                    (float)f.pixels.width, (float)f.pixels.height);
     z_platform.batch().setBlend(true);
 }
-inline void zen_draw_block_rect(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t = 0) {}
-
 /* ================= Image tiling and transform ================= */
 
 /* The engine's draw_frame: upload the frame, then draw a sub-rectangle of it at
@@ -1408,6 +1492,56 @@ inline void zen_rotate_image(int64_t image, double angle)
 }
 inline void zen_tform_filter(int64_t enable) { z_tform_filter = enable != 0; }
 
+/* MaskImage and ResizeImage build on the transform above, and DrawBlockRect on
+   the frame blit, which is why they live here rather than with the other
+   image extras. */
+static inline void z_apply_mask_alpha(engine::Pixmap &p, unsigned char r, unsigned char g,
+                                      unsigned char b)
+{
+    z_ensure_rgba(p);
+    if (!p.is_valid() || p.components != 4) return;
+    for (int y = 0; y < p.height; ++y)
+        for (int x = 0; x < p.width; ++x)
+        {
+            const engine::Color c = p.get_pixel_color((engine::u32)x, (engine::u32)y);
+            const bool masked = c.r() == r && c.g() == g && c.b() == b;
+            p.set_pixel((engine::u32)x, (engine::u32)y, c.r(), c.g(), c.b(), masked ? 0 : 255);
+        }
+}
+inline void zen_mask_image(int64_t image, int64_t red, int64_t green, int64_t blue)
+{
+    /* Blitz3D masked at blit time through a colour key, so MaskImage could be
+       called again with a different colour and the original pixels were never
+       lost: the key is recorded and the alpha rebuilt from the untouched RGB
+       each time, exactly as runtime3d does it. */
+    engine::Image *img = z_image_of(image);
+    if (!img) return;
+    const unsigned char r = (unsigned char)red, g = (unsigned char)green, b = (unsigned char)blue;
+    img->setMask(((std::uint32_t)r << 16) | ((std::uint32_t)g << 8) | b);
+    for (int i = 0; i < img->frameCount(); ++i)
+    {
+        engine::ImageFrame &f = img->frame(i);
+        z_apply_mask_alpha(f.pixels, r, g, b);
+        f.dirty = true;
+    }
+}
+inline void zen_resize_image(int64_t image, double width, double height)
+{
+    engine::Image *img = z_image_of(image);
+    if (!img || img->width() <= 0 || img->height() <= 0) return;
+    const float sx = (float)width / (float)img->width();
+    const float sy = (float)height / (float)img->height();
+    zen_tform_image(image, sx, 0.0, 0.0, sy);
+}
+inline void zen_draw_block_rect(int64_t image, int64_t x, int64_t y, int64_t rectX, int64_t rectY,
+                                int64_t rectW, int64_t rectH, int64_t frame = 0)
+{
+    engine::Image *img = z_image_of(image);
+    if (!img) return;
+    z_draw_frame(img, (float)x, (float)y, (int)frame, (float)rectX, (float)rectY, (float)rectW,
+                 (float)rectH, true);
+}
+
 /* ================= Odds and ends ================= */
 
 inline int64_t zen_scan_line() { return 0; }   /* no raster line to report */
@@ -1575,9 +1709,7 @@ inline int64_t zen_create_image(int64_t width, int64_t height, int64_t frames = 
         pixels.clear();
         image->addFrame(std::move(pixels));
     }
-    int64_t handle = ++z_next_image;
-    z_image_list[handle] = image;
-    return handle;
+    return z_store_image(image);
 }
 
 inline int64_t zen_image_buffer(int64_t image, int64_t frame = 0)
