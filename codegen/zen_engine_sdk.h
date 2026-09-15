@@ -2175,6 +2175,107 @@ inline void zen_clear_surface(int64_t surface, int64_t clearVertices = 1, int64_
         s->clear(clearVertices != 0, clearTriangles != 0);
 }
 
+/* ================= Animation and image collision queries ================= */
+
+/* MD2 and animator state, each mirroring runtime3d's command of the same name;
+   an animator is reached the way animator_of reaches it, through the entity's
+   object. LoadAnimSeq loads a file as animation only, copies its sequences onto
+   the entity's animator and throws the mesh away. */
+inline double zen_md2_anim_time(int64_t md2)
+{
+    engine::MD2Model *m = z_md2_of(md2);
+    return m ? m->getMD2AnimTime() : 0.0;
+}
+inline int64_t zen_md2_anim_length(int64_t md2)
+{
+    engine::MD2Model *m = z_md2_of(md2);
+    return m ? m->getMD2AnimLength() : 0;
+}
+inline int64_t zen_md2_animating(int64_t md2)
+{
+    engine::MD2Model *m = z_md2_of(md2);
+    return (m && m->getMD2Animating()) ? 1 : 0;
+}
+inline int64_t zen_anim_seq(int64_t entity)
+{
+    engine::Animator *a = z_animator_of(entity);
+    return a ? a->animSeq() : -1;
+}
+inline int64_t zen_animating(int64_t entity)
+{
+    engine::Animator *a = z_animator_of(entity);
+    return (a && a->animating()) ? 1 : 0;
+}
+inline void zen_set_anim_time(int64_t entity, double time, int64_t seq = 0)
+{
+    engine::Animator *a = z_animator_of(entity);
+    if (a) a->setAnimTime((float)time, (int)seq);
+}
+inline int64_t zen_extract_anim_seq(int64_t entity, int64_t firstFrame, int64_t lastFrame,
+                                    int64_t seq = 0)
+{
+    engine::Animator *a = z_animator_of(entity);
+    if (!a) return -1;
+    a->extractSeq((int)firstFrame, (int)lastFrame, (int)seq);
+    return a->numSeqs() - 1;
+}
+inline int64_t zen_load_anim_seq(int64_t entity, const std::string &file)
+{
+    engine::Animator *a = z_animator_of(entity);
+    if (!a) return -1;
+    engine::LoaderB3D loader;
+    engine::MeshModel *loaded = loader.load(file, engine::Transform(), engine::MeshLoader::HintAnimOnly,
+                                            &z_platform.device());
+    if (loaded)
+    {
+        if (engine::Animator *source = loaded->getAnimator()) a->addSeqs(source);
+        delete loaded;
+    }
+    return a->numSeqs() - 1;
+}
+/* Image collision. The two "overlap" flavours test rectangles only, the two
+   "collide" ones test the pixels of one frame - the same split runtime3d makes
+   by passing the last argument of Image::collide. */
+inline int64_t zen_images_overlap(int64_t image1, int64_t x1, int64_t y1, int64_t image2, int64_t x2,
+                                  int64_t y2)
+{
+    engine::Image *a = z_image_of(image1);
+    engine::Image *b = z_image_of(image2);
+    const bool hit = a && b && a->collide((int)x1, (int)y1, 0, *b, (int)x2, (int)y2, 0, true);
+    return hit ? 1 : 0;
+}
+inline int64_t zen_images_collide(int64_t image1, int64_t x1, int64_t y1, int64_t frame1,
+                                  int64_t image2, int64_t x2, int64_t y2, int64_t frame2)
+{
+    engine::Image *a = z_image_of(image1);
+    engine::Image *b = z_image_of(image2);
+    const bool hit =
+        a && b && a->collide((int)x1, (int)y1, (int)frame1, *b, (int)x2, (int)y2, (int)frame2, false);
+    return hit ? 1 : 0;
+}
+inline int64_t zen_rects_overlap(int64_t x1, int64_t y1, int64_t w1, int64_t h1, int64_t x2,
+                                 int64_t y2, int64_t w2, int64_t h2)
+{
+    const bool hit = !(x1 + w1 <= x2 || x1 >= x2 + w2 || y1 + h1 <= y2 || y1 >= y2 + h2);
+    return hit ? 1 : 0;
+}
+inline int64_t zen_image_rect_overlap(int64_t image, int64_t x, int64_t y, int64_t rectX,
+                                      int64_t rectY, int64_t rectW, int64_t rectH)
+{
+    engine::Image *img = z_image_of(image);
+    const bool hit =
+        img && img->rectCollide((int)x, (int)y, 0, (int)rectX, (int)rectY, (int)rectW, (int)rectH, true);
+    return hit ? 1 : 0;
+}
+inline int64_t zen_image_rect_collide(int64_t image, int64_t x, int64_t y, int64_t frame,
+                                      int64_t rectX, int64_t rectY, int64_t rectW, int64_t rectH)
+{
+    engine::Image *img = z_image_of(image);
+    const bool hit = img && img->rectCollide((int)x, (int)y, (int)frame, (int)rectX, (int)rectY,
+                                             (int)rectW, (int)rectH, false);
+    return hit ? 1 : 0;
+}
+
 /* ================= Mesh loading ================= */
 
 inline int64_t zen_load_mesh(const std::string &file, int64_t parent = 0)
