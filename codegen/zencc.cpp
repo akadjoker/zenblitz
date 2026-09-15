@@ -754,7 +754,17 @@ static void install_window_declarations(bb::BBRuntime *runtime)
     decl_int("createplane", param_int("segments", 1, true));
     decl_int("createpivot", param_int("parent", 0, true));
     decl_int("createmesh", param_int("parent", 0, true));
-    decl_int("createbrush", no_params());
+    {
+        /* bbCreateBrush takes the colour in 0..255 floats, all three optional
+           ("%CreateBrush#red=255#green=255#blue=255" in runtime3d's table).
+           Declaring it with no parameters rejected CreateBrush(255,0,0) with
+           "too many parameters", which is how a script colours a brush. */
+        auto *p = new bb::DeclSeq();
+        p->insertDecl("red", bb::Type::float_type, bb::DECL_PARAM, new bb::ConstType(255.0));
+        p->insertDecl("green", bb::Type::float_type, bb::DECL_PARAM, new bb::ConstType(255.0));
+        p->insertDecl("blue", bb::Type::float_type, bb::DECL_PARAM, new bb::ConstType(255.0));
+        decl_int("createbrush", p);
+    }
     {
         auto *p = new bb::DeclSeq();
         p->insertDecl("brush", bb::Type::int_type, bb::DECL_PARAM);

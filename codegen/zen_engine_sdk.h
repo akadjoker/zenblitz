@@ -36,6 +36,13 @@
 #include <SDL2/SDL_timer.h>
 #include <SDL2/SDL_video.h>
 
+/* Every wrapper the generated C++ calls lives in this namespace, with a
+   using-directive at the bottom of the file so the unqualified calls the
+   emitter writes still resolve. Reason: a script variable named e.g. brush
+   arrives as a global z_brush_of, and a global declaration now simply hides the
+   SDK name instead of clashing with it. */
+namespace zen_sdk {
+
 /* ================= Engine-backed Blitz graphics =================
 ** Wraps engine::Platform (Device + Graphics + Batch) so generated
 ** C++ programs use the real engine for Graphics/Flip/Cls/Color/Line/
@@ -58,8 +65,8 @@ static int64_t __attribute__((unused)) z_draw_buffer = 1;
    the screen - kScreenBuffer is 1, the same value runtime3d uses - while an
    image or a texture canvas gets a negative handle that packs the resource
    and its frame. Same encoding as runtime3d's image_buffer() reads. */
-static std::map<int64_t, engine::Image *> z_images;
-static std::map<int64_t, engine::Texture *> z_textures;
+static std::map<int64_t, engine::Image *> z_image_list;
+static std::map<int64_t, engine::Texture *> z_texture_list;
 static int64_t z_next_image = 0;
 static int64_t z_canvas_buffer = 1;
 
@@ -74,8 +81,8 @@ static float z_font_size = 16.0f;
 /* TFormPoint/Vector/Normal leave their answer here for TFormedX/Y/Z to read,
    one global rather than per-VM state, exactly as runtime3d keeps g_tformed.
    The pick CameraPick fills is here for the same reason (pick_for's result). */
-static engine::Vector z_tformed;
-static engine::ObjCollision z_pick;
+static engine::Vector z_tformed_state;
+static engine::ObjCollision z_pick_state;
 static unsigned z_draw_color = 0xff000000u;
 static int z_origin_x = 0, z_origin_y = 0;
 static int z_viewport_x = 0, z_viewport_y = 0, z_viewport_width = 0, z_viewport_height = 0;
@@ -131,14 +138,14 @@ static inline int64_t z_buffer_handle(int64_t resource, int frame, int kind)
 
 static inline engine::Image *z_image_of(int64_t handle)
 {
-    auto it = z_images.find(handle);
-    return it != z_images.end() ? it->second : nullptr;
+    auto it = z_image_list.find(handle);
+    return it != z_image_list.end() ? it->second : nullptr;
 }
 
-static inline engine::Texture *z_texture(int64_t handle)
+static inline engine::Texture *z_texture_of(int64_t handle)
 {
-    auto it = z_textures.find(handle);
-    return it != z_textures.end() ? it->second : nullptr;
+    auto it = z_texture_list.find(handle);
+    return it != z_texture_list.end() ? it->second : nullptr;
 }
 
 static inline engine::ImageFrame *z_buffer_frame(int64_t handle)
@@ -154,7 +161,7 @@ static inline engine::ImageFrame *z_buffer_frame(int64_t handle)
         engine::Image *image = z_image_of(resource);
         return image && frame >= 0 && frame < image->frameCount() ? &image->frame(frame) : nullptr;
     }
-    engine::Texture *texture = z_texture(resource);
+    engine::Texture *texture = z_texture_of(resource);
     return texture ? texture->canvas(frame) : nullptr;
 }
 
@@ -245,10 +252,10 @@ static void z_shutdown_graphics()
        so the whole tree is swept before anything is deleted. */
     for (engine::Entity *root = engine::Entity::orphans(); root; root = root->successor())
         root->freeGpuTree(z_platform.device());
-    for (auto &entry : z_images) delete entry.second;
-    z_images.clear();
-    for (auto &entry : z_textures) engine::Texture::release(entry.second);
-    z_textures.clear();
+    for (auto &entry : z_image_list) delete entry.second;
+    z_image_list.clear();
+    for (auto &entry : z_texture_list) engine::Texture::release(entry.second);
+    z_texture_list.clear();
     /* ~Entity deletes its children, so deleting the orphan roots walks the
        whole scene. */
     while (engine::Entity *root = engine::Entity::orphans()) delete root;
@@ -541,7 +548,7 @@ inline int64_t zen_load_image(const std::string &file)
     engine::Image *image = new engine::Image();
     image->addFrame(std::move(pixels));
     int64_t handle = ++z_next_image;
-    z_images[handle] = image;
+    z_image_list[handle] = image;
     return handle;
 }
 
@@ -606,7 +613,7 @@ inline int64_t zen_texture_buffer(int64_t texture, int64_t frame = 0)
     /* The buffer a texture's own pixels live in: this is what a script hands
        to SetBuffer to paint art with the 2D commands (Tron draws its grid
        texture that way). */
-    engine::Texture *t = z_texture(texture);
+    engine::Texture *t = z_texture_of(texture);
     return t && t->canvas((int)frame) ? z_buffer_handle(texture, (int)frame, 1) : 0;
 }
 /* SaveBuffer: the image side is not ported yet (LoadImage and friends are
@@ -704,10 +711,10 @@ inline int64_t zen_load_md2(const std::string &, int64_t = 0) { return 0; }
    runtime3d hands the engine pointer itself across as the Blitz3D handle
    (c_CreateBrush, c_CreateSurface and c_VertexCoords all cast the argument
    instead of looking it up), so these wrappers do the same. */
-static inline engine::Brush *z_brush(int64_t handle) { return (engine::Brush *)(std::intptr_t)handle; }
-static inline engine::Surface *z_surface(int64_t handle) { return (engine::Surface *)(std::intptr_t)handle; }
+static inline engine::Brush *z_brush_of(int64_t handle) { return (engine::Brush *)(std::intptr_t)handle; }
+static inline engine::Surface *z_surface_of(int64_t handle) { return (engine::Surface *)(std::intptr_t)handle; }
 
-inline int64_t zen_create_brush(int64_t red = 255, int64_t green = 255, int64_t blue = 255)
+inline int64_t zen_create_brush(double red = 255.0, double green = 255.0, double blue = 255.0)
 {
     engine::Brush *brush = new engine::Brush();
     brush->setColor(engine::Vector((float)red / 255.0f, (float)green / 255.0f, (float)blue / 255.0f));
@@ -715,17 +722,17 @@ inline int64_t zen_create_brush(int64_t red = 255, int64_t green = 255, int64_t 
 }
 inline void zen_brush_color(int64_t brush, double red, double green, double blue)
 {
-    engine::Brush *b = z_brush(brush);
+    engine::Brush *b = z_brush_of(brush);
     if (b) b->setColor(engine::Vector((float)red / 255.0f, (float)green / 255.0f, (float)blue / 255.0f));
 }
 inline void zen_brush_blend(int64_t brush, int64_t blend)
 {
-    engine::Brush *b = z_brush(brush);
+    engine::Brush *b = z_brush_of(brush);
     if (b) b->setBlend((int)blend);
 }
 inline void zen_brush_fx(int64_t brush, int64_t fx)
 {
-    engine::Brush *b = z_brush(brush);
+    engine::Brush *b = z_brush_of(brush);
     if (b) b->setFX((int)fx);
 }
 
@@ -735,7 +742,7 @@ inline int64_t zen_add_vertex(int64_t surface, double x, double y, double z, dou
 {
     /* Mirrors c_AddVertex, which ignores w as well. */
     (void)w;
-    engine::Surface *s = z_surface(surface);
+    engine::Surface *s = z_surface_of(surface);
     if (!s) return 0;
     engine::Surface::Vertex vertex;
     vertex.coords = engine::Vector((float)x, (float)y, (float)z);
@@ -745,7 +752,7 @@ inline int64_t zen_add_vertex(int64_t surface, double x, double y, double z, dou
 }
 inline int64_t zen_add_triangle(int64_t surface, int64_t v0, int64_t v1, int64_t v2)
 {
-    engine::Surface *s = z_surface(surface);
+    engine::Surface *s = z_surface_of(surface);
     if (!s) return 0;
     engine::Surface::Triangle triangle{{(unsigned short)v0, (unsigned short)v1, (unsigned short)v2}};
     return s->addTriangle(triangle);
@@ -760,7 +767,7 @@ inline void zen_update_normals(int64_t mesh)
 }
 inline void zen_vertex_coords(int64_t surface, int64_t index, double x, double y, double z)
 {
-    engine::Surface *s = z_surface(surface);
+    engine::Surface *s = z_surface_of(surface);
     if (s) s->setCoords((int)index, engine::Vector((float)x, (float)y, (float)z));
 }
 
@@ -836,7 +843,7 @@ inline void zen_paint_entity(int64_t entity, int64_t brush)
 {
     engine::Entity *e = z_entity(entity);
     engine::Model *m = e ? e->getModel() : nullptr;
-    engine::Brush *b = z_brush(brush);
+    engine::Brush *b = z_brush_of(brush);
     if (m && b) m->setBrush(*b);
 }
 
@@ -997,7 +1004,7 @@ inline int64_t zen_create_image(int64_t width, int64_t height, int64_t frames = 
         image->addFrame(std::move(pixels));
     }
     int64_t handle = ++z_next_image;
-    z_images[handle] = image;
+    z_image_list[handle] = image;
     return handle;
 }
 
@@ -1009,10 +1016,10 @@ inline int64_t zen_image_buffer(int64_t image, int64_t frame = 0)
 
 inline void zen_free_image(int64_t image)
 {
-    auto it = z_images.find(image);
-    if (it == z_images.end()) return;
+    auto it = z_image_list.find(image);
+    if (it == z_image_list.end()) return;
     delete it->second;
-    z_images.erase(it);
+    z_image_list.erase(it);
 }
 
 /* Mesh extras */
@@ -1028,7 +1035,7 @@ inline void zen_paint_mesh(int64_t mesh, int64_t brush)
     /* PaintMesh and PaintEntity differ in where the brush lands: the mesh's
        own surfaces, or every model in the entity's tree. */
     engine::MeshModel *m = z_mesh_of(mesh);
-    engine::Brush *b = z_brush(brush);
+    engine::Brush *b = z_brush_of(brush);
     if (m && b) m->paint(*b);
 }
 inline int64_t zen_create_surface(int64_t mesh, int64_t brush = 0)
@@ -1037,7 +1044,7 @@ inline int64_t zen_create_surface(int64_t mesh, int64_t brush = 0)
     engine::Entity *e = z_entity(mesh);
     engine::MeshModel *m = (e && e->getModel()) ? e->getModel()->getMeshModel() : nullptr;
     if (!m) return 0;
-    engine::Brush *b = z_brush(brush);
+    engine::Brush *b = z_brush_of(brush);
     return (int64_t)(std::intptr_t)m->createSurface(b ? *b : engine::Brush());
 }
 
@@ -1413,31 +1420,31 @@ inline void zen_tform_point(double x, double y, double z, int64_t src = 0, int64
 {
     engine::Entity *from = z_entity(src);
     engine::Entity *to = z_entity(dest);
-    z_tformed = engine::Vector((float)x, (float)y, (float)z);
-    if (from) z_tformed = from->getWorldTform() * z_tformed;
-    if (to) z_tformed = -to->getWorldTform() * z_tformed;
+    z_tformed_state = engine::Vector((float)x, (float)y, (float)z);
+    if (from) z_tformed_state = from->getWorldTform() * z_tformed_state;
+    if (to) z_tformed_state = -to->getWorldTform() * z_tformed_state;
 }
 inline void zen_tform_vector(double x, double y, double z, int64_t src = 0, int64_t dest = 0)
 {
     engine::Entity *from = z_entity(src);
     engine::Entity *to = z_entity(dest);
-    z_tformed = engine::Vector((float)x, (float)y, (float)z);
-    if (from) z_tformed = from->getWorldTform().m * z_tformed;
-    if (to) z_tformed = (-to->getWorldTform()).m * z_tformed;
+    z_tformed_state = engine::Vector((float)x, (float)y, (float)z);
+    if (from) z_tformed_state = from->getWorldTform().m * z_tformed_state;
+    if (to) z_tformed_state = (-to->getWorldTform()).m * z_tformed_state;
 }
 inline void zen_tform_normal(double x, double y, double z, int64_t src = 0, int64_t dest = 0)
 {
     engine::Entity *from = z_entity(src);
     engine::Entity *to = z_entity(dest);
-    z_tformed = engine::Vector((float)x, (float)y, (float)z);
-    if (from) z_tformed = from->getWorldTform().m.cofactor() * z_tformed;
-    if (to) z_tformed = (-to->getWorldTform()).m.cofactor() * z_tformed;
-    const float length = z_tformed.length();
-    if (length > blitz::EPSILON) z_tformed = z_tformed / length;
+    z_tformed_state = engine::Vector((float)x, (float)y, (float)z);
+    if (from) z_tformed_state = from->getWorldTform().m.cofactor() * z_tformed_state;
+    if (to) z_tformed_state = (-to->getWorldTform()).m.cofactor() * z_tformed_state;
+    const float length = z_tformed_state.length();
+    if (length > blitz::EPSILON) z_tformed_state = z_tformed_state / length;
 }
-inline double zen_tformed_x() { return z_tformed.x; }
-inline double zen_tformed_y() { return z_tformed.y; }
-inline double zen_tformed_z() { return z_tformed.z; }
+inline double zen_tformed_x() { return z_tformed_state.x; }
+inline double zen_tformed_y() { return z_tformed_state.y; }
+inline double zen_tformed_z() { return z_tformed_state.z; }
 
 inline void zen_translate_entity(int64_t entity, double x, double y, double z, int64_t global = 0)
 {
@@ -1484,14 +1491,14 @@ inline double zen_anim_time(int64_t entity)
    whole of runtime3d's doPick. */
 static inline int64_t z_do_pick(const engine::Line &line, float radius)
 {
-    z_pick.with = nullptr;
-    z_pick.coords.clear();
-    z_pick.collision.time = 1.0f;
-    z_pick.collision.normal.clear();
-    z_pick.collision.surface = nullptr;
-    z_pick.collision.index = (unsigned short)~0;
-    engine::Object *hit = z_world.traceRay(line, radius, &z_pick);
-    z_pick.with = hit;
+    z_pick_state.with = nullptr;
+    z_pick_state.coords.clear();
+    z_pick_state.collision.time = 1.0f;
+    z_pick_state.collision.normal.clear();
+    z_pick_state.collision.surface = nullptr;
+    z_pick_state.collision.index = (unsigned short)~0;
+    engine::Object *hit = z_world.traceRay(line, radius, &z_pick_state);
+    z_pick_state.with = hit;
     return hit ? z_handle_of(hit) : 0;
 }
 
@@ -1536,19 +1543,19 @@ inline int64_t zen_entity_pick(int64_t entity, double range)
 
 /* The Picked* queries: whatever the last pick landed on, or the cleared
    state (0 / -1 components, no entity) when it hit nothing. */
-inline double zen_picked_x() { return z_pick.coords.x; }
-inline double zen_picked_y() { return z_pick.coords.y; }
-inline double zen_picked_z() { return z_pick.coords.z; }
-inline double zen_picked_nx() { return z_pick.collision.normal.x; }
-inline double zen_picked_ny() { return z_pick.collision.normal.y; }
-inline double zen_picked_nz() { return z_pick.collision.normal.z; }
-inline double zen_picked_time() { return z_pick.collision.time; }
-inline int64_t zen_picked_entity() { return z_handle_of(z_pick.with); }
+inline double zen_picked_x() { return z_pick_state.coords.x; }
+inline double zen_picked_y() { return z_pick_state.coords.y; }
+inline double zen_picked_z() { return z_pick_state.coords.z; }
+inline double zen_picked_nx() { return z_pick_state.collision.normal.x; }
+inline double zen_picked_ny() { return z_pick_state.collision.normal.y; }
+inline double zen_picked_nz() { return z_pick_state.collision.normal.z; }
+inline double zen_picked_time() { return z_pick_state.collision.time; }
+inline int64_t zen_picked_entity() { return z_handle_of(z_pick_state.with); }
 inline int64_t zen_picked_surface()
 {
-    return (int64_t)(std::intptr_t)z_pick.collision.surface;
+    return (int64_t)(std::intptr_t)z_pick_state.collision.surface;
 }
-inline int64_t zen_picked_triangle() { return (int64_t)z_pick.collision.index; }
+inline int64_t zen_picked_triangle() { return (int64_t)z_pick_state.collision.index; }
 
 /* ================= Textures ================= */
 
@@ -1560,7 +1567,7 @@ inline int64_t zen_load_texture(const std::string &file, int64_t flags = 1)
     engine::Texture *t = engine::Texture::load(file.c_str(), (int)flags);
     if (!t) return 0;
     int64_t h = ++z_next_texture;
-    z_textures[h] = t;
+    z_texture_list[h] = t;
     return h;
 }
 
@@ -1571,7 +1578,7 @@ inline int64_t zen_create_texture(int64_t w, int64_t h, int64_t flags = 1, int64
     engine::Texture *t = engine::Texture::create((int)w, (int)h, (int)flags, (int)frames);
     if (!t) return 0;
     int64_t handle = ++z_next_texture;
-    z_textures[handle] = t;
+    z_texture_list[handle] = t;
     return handle;
 }
 
@@ -1579,23 +1586,94 @@ inline void zen_scale_texture(int64_t texture, double u, double v)
 {
     /* runtime3d stores the reciprocal, so ScaleTexture 10,10 tiles ten
        times rather than shrinking to a tenth. */
-    engine::Texture *t = z_texture(texture);
+    engine::Texture *t = z_texture_of(texture);
     if (t && u != 0.0 && v != 0.0) t->setScale(1.0f / (float)u, 1.0f / (float)v);
+}
+
+/* Brushes and the rest of the texture controls, each mirroring the runtime3d
+   command of the same name. */
+inline void zen_brush_alpha(int64_t brush, double alpha)
+{
+    engine::Brush *b = z_brush_of(brush);
+    if (b) b->setAlpha((float)alpha);
+}
+inline void zen_brush_shininess(int64_t brush, double shininess)
+{
+    engine::Brush *b = z_brush_of(brush);
+    if (b) b->setShininess((float)shininess);
+}
+inline void zen_brush_texture(int64_t brush, int64_t texture, int64_t frame = 0, int64_t index = 0)
+{
+    engine::Brush *b = z_brush_of(brush);
+    engine::Texture *t = z_texture_of(texture);
+    if (b && t) b->setTexture((int)index, engine::BrushTexture::fromTexture(z_platform.device(), t, (int)frame));
+}
+inline void zen_free_brush(int64_t brush)
+{
+    /* Brushes travel as their own pointer, so freeing one is the delete. */
+    delete z_brush_of(brush);
+}
+inline int64_t zen_load_brush(const std::string &file, int64_t flags = 1, double u_scale = 1.0,
+                              double v_scale = 1.0)
+{
+    /* Blitz3D's LoadBrush: load the texture, optionally rescale its UVs, and
+       hand back a plain brush carrying it on slot 0. */
+    engine::Texture *t = engine::Texture::load(file.c_str(), (int)flags);
+    if (!t) return 0;
+    if (u_scale != 1.0 || v_scale != 1.0) t->setScale(1.0f / (float)u_scale, 1.0f / (float)v_scale);
+    engine::Brush *b = new engine::Brush();
+    b->setTexture(0, engine::BrushTexture::fromTexture(z_platform.device(), t, 0));
+    return (int64_t)(std::intptr_t)b;
+}
+inline void zen_texture_blend(int64_t texture, int64_t blend)
+{
+    engine::Texture *t = z_texture_of(texture);
+    if (t) t->setBlend((int)blend);
+}
+inline void zen_texture_coords(int64_t texture, int64_t coords)
+{
+    engine::Texture *t = z_texture_of(texture);
+    if (t) t->setFlags((int)coords);
+}
+inline void zen_position_texture(int64_t texture, double u, double v)
+{
+    engine::Texture *t = z_texture_of(texture);
+    if (t) t->setPosition(-(float)u, -(float)v);
+}
+inline void zen_rotate_texture(int64_t texture, double angle)
+{
+    engine::Texture *t = z_texture_of(texture);
+    if (t) t->setRotation(-(float)angle * kDegToRad);
+}
+inline void zen_clear_texture_filters() { engine::Texture::clearFilters(); }
+inline void zen_light_mesh(int64_t mesh, double r, double g, double b, double range = 0, double x = 0,
+                           double y = 0, double z = 0)
+{
+    engine::MeshModel *m = z_mesh_of(mesh);
+    if (m) engine::MeshUtil::lightMesh(m, engine::Vector((float)x, (float)y, (float)z),
+                                      engine::Vector((float)r / 255.0f, (float)g / 255.0f,
+                                                     (float)b / 255.0f), (float)range);
+}
+inline void zen_light_cone_angles(int64_t light, double inner, double outer)
+{
+    engine::Entity *e = z_entity(light);
+    engine::Light *l = e ? e->getLight() : nullptr;
+    if (l) l->setConeAngles((float)inner, (float)outer);
 }
 
 inline void zen_free_texture(int64_t h)
 {
-    auto it = z_textures.find(h);
-    if (it == z_textures.end()) return;
+    auto it = z_texture_list.find(h);
+    if (it == z_texture_list.end()) return;
     engine::Texture::release(it->second);
-    z_textures.erase(it);
+    z_texture_list.erase(it);
 }
 
 inline void zen_entity_texture(int64_t entity, int64_t texture, int64_t frame = 0, int64_t index = 0)
 {
     engine::Entity *e = z_entity(entity);
-    auto it = z_textures.find(texture);
-    if (!e || !e->getModel() || it == z_textures.end()) return;
+    auto it = z_texture_list.find(texture);
+    if (!e || !e->getModel() || it == z_texture_list.end()) return;
     e->getModel()->setTexture((int)index,
         engine::BrushTexture::fromTexture(z_platform.device(), it->second, (int)frame));
 }
@@ -1649,5 +1727,8 @@ inline int64_t zen_load_animmesh(const std::string &file, int64_t parent = 0)
 {
     return zen_load_mesh(file, parent);
 }
+
+}  // namespace zen_sdk
+using namespace zen_sdk;
 
 #endif
