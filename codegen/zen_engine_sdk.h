@@ -21,6 +21,11 @@
 #include "engine/LoaderGltf.h"
 #include "engine/LoaderFbx.h"
 #include "engine/MD2Model.h"
+#include "engine/Mirror.h"
+#include "engine/Surface.h"
+#include "engine/Animator.h"
+#include "engine/Pixmap.h"
+#include <cstdint>
 #include <cstdlib>
 #include <iostream>
 #include <map>
@@ -42,7 +47,10 @@ static bool z_graphics_open = false;
 static bool z_world_init = false;
 static std::map<int64_t, engine::Entity *> z_entities;
 static int64_t z_next_entity = 0;
-static int64_t z_draw_buffer = 1;
+/* Back/front buffer selection: the engine has no software double buffer, so
+   nothing reads this yet, but programs that never touch it must still compile
+   under -Wall -Wextra -Werror. */
+static int64_t __attribute__((unused)) z_draw_buffer = 1;
 static unsigned z_draw_color = 0xff000000u;
 static int z_origin_x = 0, z_origin_y = 0;
 static int z_viewport_x = 0, z_viewport_y = 0, z_viewport_width = 0, z_viewport_height = 0;
@@ -92,8 +100,10 @@ static inline int64_t z_store_entity(engine::Entity *e, engine::Entity *parent =
 
 static constexpr float kDegToRad = 0.0174532925199432957692369076848861f;
 
-inline void zen_graphics_open(int width, int height)
+inline void zen_graphics_open(int width, int height, int64_t depth = 0, int64_t mode = 0)
 {
+    (void)depth;
+    (void)mode;
     if (z_graphics_open) return;
     const char *hidden = getenv("ZENBLITZ_HIDDEN");
     bool visible = !(hidden && hidden[0] && hidden[0] != '0');
@@ -104,15 +114,20 @@ inline void zen_graphics_open(int width, int height)
     }
 }
 
-inline void zen_graphics3d_open(int width, int height)
+inline void zen_graphics3d_open(int width, int height, int64_t depth = 0, int64_t mode = 0)
 {
-    if (!z_graphics_open) zen_graphics_open(width, height);
+    if (!z_graphics_open) zen_graphics_open(width, height, depth, mode);
     if (z_graphics_open) z_world_ensure();
 }
 
-inline void zen_flip()
+inline void zen_flip(int64_t vwait = 1)
 {
     if (!z_graphics_open) return;
+    /* Flip's vwait is Blitz3D's vsync switch: "Flip 0" presents without
+       waiting for the vertical blank. runtime3d maps it straight onto the
+       swap interval and only touches it when it actually changes. */
+    const bool vsync = vwait != 0;
+    if (z_platform.isVSync() != vsync) z_platform.setVSync(vsync);
     z_platform.pumpEvents();
     if (!z_platform.isOpen()) { std::fflush(stdout); std::exit(0); }
     z_platform.endFrame();
@@ -209,8 +224,26 @@ inline int64_t zen_rand(int64_t from, int64_t to = 1)
 inline void zen_seed_rnd(int64_t seed) { z_rand_seed_value = (unsigned)seed; std::srand(z_rand_seed_value); }
 
 /* Timing */
-inline void zen_delay(int64_t ms) { if (z_graphics_open) z_platform.wait((float)ms); else SDL_Delay((Uint32)ms); }
-inline void zen_vwait() { if (z_graphics_open) z_platform.wait(16.0f); }
+/* One display refresh, which is what Blitz3D's VWait waited for. SDL has no
+   vblank wait without a swap, so sleep the period instead; runtime3d's
+   vblank_sleep does exactly this. */
+inline void z_vblank_sleep()
+{
+    SDL_DisplayMode mode;
+    const int hz = (SDL_GetCurrentDisplayMode(0, &mode) == 0 && mode.refresh_rate > 0) ? mode.refresh_rate : 60;
+    SDL_Delay((Uint32)((1000 + hz / 2) / hz));
+}
+inline void zen_delay(int64_t ms) { if (ms > 0) SDL_Delay((Uint32)ms); }
+inline void zen_vwait(int64_t frames = 1)
+{
+    if (!z_graphics_open) return;
+    z_platform.pumpEvents();
+    while (frames-- > 0 && z_platform.isOpen())
+    {
+        z_vblank_sleep();
+        z_platform.pumpEvents();
+    }
+}
 
 
 /* Graphics mode queries */
@@ -231,8 +264,9 @@ inline int64_t zen_wait_mouse()
     return 0;
 }
 
-/* AppTitle */
-inline void zen_app_title(const std::string &) {}
+/* AppTitle (the close prompt is accepted and ignored: the engine's window
+   always closes without asking) */
+inline void zen_app_title(const std::string &, const std::string & = "") {}
 
 /* Viewport */
 inline void zen_viewport(int64_t x, int64_t y, int64_t w, int64_t h)
@@ -248,7 +282,15 @@ inline void zen_viewport(int64_t x, int64_t y, int64_t w, int64_t h)
 }
 
 /* Fonts (stubs — engine has one embedded font) */
-inline int64_t zen_load_font(const std::string &, double size = 16) { (void)size; return 1; }
+inline int64_t zen_load_font(const std::string &, int64_t height = 12, int64_t bold = 0,
+                             int64_t italic = 0, int64_t underline = 0)
+{
+    (void)height;
+    (void)bold;
+    (void)italic;
+    (void)underline;
+    return 1;
+}
 inline void zen_set_font(int64_t) {}
 inline void zen_free_font(int64_t) {}
 inline int64_t zen_font_width() { return 8; }
@@ -267,12 +309,26 @@ inline int64_t zen_load_image(const std::string &) { return 0; }
 inline void zen_draw_image(int64_t, int64_t, int64_t, int64_t = 0) {}
 inline void zen_draw_image_rect(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t = 0) {}
 inline void zen_grab_image(int64_t, int64_t, int64_t, int64_t = 0) {}
-inline int64_t zen_load_anim_image(const std::string &) { return 0; }
+inline int64_t zen_load_anim_image(const std::string &, int64_t cellwidth, int64_t cellheight,
+                                   int64_t first, int64_t count)
+{
+    (void)cellwidth;
+    (void)cellheight;
+    (void)first;
+    (void)count;
+    return 0;
+}
 
 /* Gfx drivers */
 static inline void z_collect_gfx_modes()
 {
     if (!z_gfx_modes.empty()) return;
+    /* SDL_GetNumDisplayModes needs the video subsystem up, and a script may
+       not have triggered it yet: CountGfxModes3D and Windowed3D have to be
+       callable before the first Graphics - start.bb, the shared menu every
+       3D sample runs through, calls them exactly that way. runtime3d's own
+       collectGfxModes brings the subsystem up here too. */
+    if (!SDL_WasInit(SDL_INIT_VIDEO) && SDL_InitSubSystem(SDL_INIT_VIDEO) != 0) return;
     const int modeCount = SDL_GetNumDisplayModes(0);
     for (int index = 0; index < modeCount; ++index)
     {
@@ -299,6 +355,29 @@ inline int64_t zen_gfx_mode3d_exists(int64_t width, int64_t height, int64_t dept
 inline void zen_lock_buffer(int64_t = 0) {}
 inline void zen_unlock_buffer(int64_t = 0) {}
 inline int64_t zen_texture_buffer(int64_t, int64_t = 0) { return 1; }
+/* SaveBuffer: the image side is not ported yet (LoadImage and friends are
+   stubs), so a buffer handle cannot be resolved to pixels. The screen case is
+   implemented the way runtime3d's c_SaveBuffer does it, row by row. */
+inline int64_t zen_save_buffer(int64_t buffer, const std::string &bmpfile)
+{
+    if (buffer == 0 && z_graphics_open)
+    {
+        const int w = z_platform.width(), h = z_platform.height();
+        if (w > 0 && h > 0)
+        {
+            engine::Pixmap shot(w, h, 4);
+            for (int y = 0; y < h; ++y)
+                for (int x = 0; x < w; ++x)
+                {
+                    const unsigned argb = z_platform.readScreenPixel(x, y);
+                    shot.set_pixel((engine::u32)x, (engine::u32)y, (engine::u8)((argb >> 16) & 0xff),
+                                   (engine::u8)((argb >> 8) & 0xff), (engine::u8)(argb & 0xff), 255);
+                }
+            return shot.save(bmpfile.c_str()) ? 1 : 0;
+        }
+    }
+    return 0;
+}
 
 /* Entity extras */
 inline void zen_entity_type(int64_t entity, int64_t type, int64_t = 0)
@@ -317,8 +396,12 @@ inline int64_t zen_copy_entity(int64_t, int64_t = 0) { return 0; }
 /* Mesh extras */
 inline void zen_scale_mesh(int64_t mesh, double xs, double ys, double zs)
 {
+    /* ScaleMesh scales the mesh's own geometry, not the entity transform
+       (that is ScaleEntity). runtime3d's c_ScaleMesh calls MeshUtil::scaleMesh
+       the same way; engine::Model has no setMeshScale. */
     engine::Entity *e = z_entity(mesh);
-    if (e && e->getModel()) e->getModel()->setMeshScale(engine::Vector((float)xs, (float)ys, (float)zs));
+    engine::MeshModel *m = (e && e->getModel()) ? e->getModel()->getMeshModel() : nullptr;
+    if (m) engine::MeshUtil::scaleMesh(m, engine::Vector((float)xs, (float)ys, (float)zs));
 }
 inline void zen_flip_mesh(int64_t) {}
 
@@ -342,10 +425,66 @@ inline int64_t zen_load_3d_sound(const std::string &) { return 0; }
 inline int64_t zen_load_terrain(const std::string &, int64_t = 0) { return 0; }
 inline int64_t zen_load_md2(const std::string &, int64_t = 0) { return 0; }
 
+/* Brushes and surfaces.
+   runtime3d hands the engine pointer itself across as the Blitz3D handle
+   (c_CreateBrush, c_CreateSurface and c_VertexCoords all cast the argument
+   instead of looking it up), so these wrappers do the same. */
+static inline engine::Brush *z_brush(int64_t handle) { return (engine::Brush *)(std::intptr_t)handle; }
+static inline engine::Surface *z_surface(int64_t handle) { return (engine::Surface *)(std::intptr_t)handle; }
+
+inline int64_t zen_create_brush(int64_t red = 255, int64_t green = 255, int64_t blue = 255)
+{
+    engine::Brush *brush = new engine::Brush();
+    brush->setColor(engine::Vector((float)red / 255.0f, (float)green / 255.0f, (float)blue / 255.0f));
+    return (int64_t)(std::intptr_t)brush;
+}
+inline void zen_brush_color(int64_t brush, double red, double green, double blue)
+{
+    engine::Brush *b = z_brush(brush);
+    if (b) b->setColor(engine::Vector((float)red / 255.0f, (float)green / 255.0f, (float)blue / 255.0f));
+}
+inline void zen_brush_blend(int64_t brush, int64_t blend)
+{
+    engine::Brush *b = z_brush(brush);
+    if (b) b->setBlend((int)blend);
+}
+inline void zen_brush_fx(int64_t brush, int64_t fx)
+{
+    engine::Brush *b = z_brush(brush);
+    if (b) b->setFX((int)fx);
+}
+
 /* Vertex */
-inline int64_t zen_add_vertex(int64_t, double, double, double, double = 0, double = 0, double = 1) { return 0; }
-inline int64_t zen_add_triangle(int64_t, int64_t, int64_t, int64_t) { return 0; }
-inline void zen_update_normals(int64_t) {}
+inline int64_t zen_add_vertex(int64_t surface, double x, double y, double z, double u = 0, double v = 0,
+                              double w = 1)
+{
+    /* Mirrors c_AddVertex, which ignores w as well. */
+    (void)w;
+    engine::Surface *s = z_surface(surface);
+    if (!s) return 0;
+    engine::Surface::Vertex vertex;
+    vertex.coords = engine::Vector((float)x, (float)y, (float)z);
+    vertex.texCoords[0][0] = (float)u;
+    vertex.texCoords[0][1] = (float)v;
+    return s->addVertex(vertex);
+}
+inline int64_t zen_add_triangle(int64_t surface, int64_t v0, int64_t v1, int64_t v2)
+{
+    engine::Surface *s = z_surface(surface);
+    if (!s) return 0;
+    engine::Surface::Triangle triangle{{(unsigned short)v0, (unsigned short)v1, (unsigned short)v2}};
+    return s->addTriangle(triangle);
+}
+inline void zen_update_normals(int64_t surface)
+{
+    engine::Surface *s = z_surface(surface);
+    if (s) s->updateNormals();
+}
+inline void zen_vertex_coords(int64_t surface, int64_t index, double x, double y, double z)
+{
+    engine::Surface *s = z_surface(surface);
+    if (s) s->setCoords((int)index, engine::Vector((float)x, (float)y, (float)z));
+}
 
 /* Camera extras */
 inline void zen_camera_viewport(int64_t cam, int64_t x, int64_t y, int64_t w, int64_t h)
@@ -396,6 +535,39 @@ inline std::string zen_entity_class(int64_t h)
 inline void zen_paint_mesh(int64_t, int64_t) {}
 inline void zen_paint_entity(int64_t, int64_t) {}
 
+/* Animation — mirrors c_Animate / c_AddAnimSeq / c_SetAnimKey. */
+inline void zen_animate(int64_t entity, int64_t mode = 1, double speed = 1.0, int64_t sequence = 0,
+                        double transition = 0.0)
+{
+    engine::Entity *e = z_entity(entity);
+    engine::Object *object = e ? e->getObject() : nullptr;
+    if (object)
+        if (engine::Animator *animator = object->getAnimator())
+            animator->animate((int)mode, (float)speed, (int)sequence, (float)transition);
+}
+inline int64_t zen_add_anim_seq(int64_t entity, int64_t length)
+{
+    engine::Entity *e = z_entity(entity);
+    engine::Object *object = e ? e->getObject() : nullptr;
+    if (!object) return -1;
+    engine::Animator *animator = object->getAnimator();
+    if (animator) animator->addSeq((int)length);
+    else { animator = new engine::Animator(object, (int)length); object->setAnimator(animator); }
+    return animator->numSeqs() - 1;
+}
+inline void zen_set_anim_key(int64_t entity, int64_t frame, int64_t pos_key = 1, int64_t rot_key = 1,
+                             int64_t scale_key = 1)
+{
+    engine::Entity *e = z_entity(entity);
+    engine::Object *object = e ? e->getObject() : nullptr;
+    if (!object) return;
+    engine::Animation animation = object->getAnimation();
+    if (pos_key) animation.setPositionKey((int)frame, object->getLocalPosition());
+    if (rot_key) animation.setRotationKey((int)frame, object->getLocalRotation());
+    if (scale_key) animation.setScaleKey((int)frame, object->getLocalScale());
+    object->setAnimation(animation);
+}
+
 /* Gfx driver name */
 inline std::string zen_gfx_driver_name(int64_t driver)
 {
@@ -431,12 +603,31 @@ inline int64_t zen_graphics_width() { return z_platform.width(); }
 inline int64_t zen_graphics_height() { return z_platform.height(); }
 
 /* Sprites & images (stubs for now) */
-inline int64_t zen_load_sprite(const std::string &) { return 0; }
-inline int64_t zen_create_image(int64_t, int64_t = 0) { return 0; }
+inline int64_t zen_load_sprite(const std::string &, int64_t texture_flags = 1, int64_t parent = 0)
+{
+    (void)texture_flags;
+    (void)parent;
+    return 0;
+}
+inline int64_t zen_create_image(int64_t width, int64_t height, int64_t frames = 1)
+{
+    (void)width;
+    (void)height;
+    (void)frames;
+    return 0;
+}
 
 /* Mesh extras (stubs) */
-inline void zen_fit_mesh(int64_t) {}
-inline int64_t zen_create_surface(int64_t) { return 0; }
+inline void zen_fit_mesh(int64_t, double, double, double, double, double, double, int64_t = 0) {}
+inline int64_t zen_create_surface(int64_t mesh, int64_t brush = 0)
+{
+    /* The handle is the engine::Surface pointer, as in c_CreateSurface. */
+    engine::Entity *e = z_entity(mesh);
+    engine::MeshModel *m = (e && e->getModel()) ? e->getModel()->getMeshModel() : nullptr;
+    if (!m) return 0;
+    engine::Brush *b = z_brush(brush);
+    return (int64_t)(std::intptr_t)m->createSurface(b ? *b : engine::Brush());
+}
 
 /* Collisions (stub) */
 inline void zen_collisions(int64_t, int64_t, int64_t, int64_t) {}
@@ -517,6 +708,12 @@ inline int64_t zen_create_mesh(int64_t parent = 0)
 {
     z_world_ensure();
     return z_store_entity(new engine::MeshModel(), z_entity(parent));
+}
+
+inline int64_t zen_create_mirror(int64_t parent = 0)
+{
+    z_world_ensure();
+    return z_store_entity(new engine::Mirror(), z_entity(parent));
 }
 
 inline void zen_free_entity(int64_t h)
@@ -677,16 +874,6 @@ inline void zen_camera_range(int64_t cam, double near, double far)
 {
     engine::Entity *e = z_entity(cam);
     if (e && e->getCamera()) e->getCamera()->setRange((float)near, (float)far);
-}
-inline void zen_camera_proj_mode(int64_t cam, int64_t mode)
-{
-    engine::Entity *e = z_entity(cam);
-    if (e && e->getCamera()) e->getCamera()->setProjMode((int)mode);
-}
-inline void zen_camera_viewport(int64_t cam, int64_t x, int64_t y, int64_t w, int64_t h)
-{
-    engine::Entity *e = z_entity(cam);
-    if (e && e->getCamera()) e->getCamera()->setViewport((int)x, (int)y, (int)w, (int)h);
 }
 inline void zen_camera_zoom(int64_t cam, double zoom)
 {
