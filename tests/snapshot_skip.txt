@@ -22,3 +22,9 @@ struct_test.zen
 struct_native_binding.zen
 bench_fib.bb
 bench_loop.bb
+
+# Reason: needs the engine (Graphics/ImageBuffer/SaveBuffer/LoadBuffer).
+# The snapshot suite runs the plain 2D `zen` CLI, which has no engine at all,
+# so this file is a *native* codegen target: it belongs to the parity test in
+# codegen/CMakeLists.txt, not here. Kept in the tree on purpose.
+native_image_buffer.bb
