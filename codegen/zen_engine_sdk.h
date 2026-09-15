@@ -25,6 +25,7 @@
 #include "engine/Surface.h"
 #include "engine/Animator.h"
 #include "engine/VoxelSprite.h"
+#include "engine/Sprite.h"
 #include "engine/Pixmap.h"
 #include "engine/Image.h"
 #include "engine/Collision.h"
@@ -780,8 +781,70 @@ inline void zen_flip_mesh(int64_t mesh)
 }
 
 /* Sprites */
-inline void zen_scale_sprite(int64_t, double, double) {}
-inline void zen_sprite_view_mode(int64_t, int64_t) {}
+/* Sprites. The model behind the handle is an engine::Sprite, reached the way
+   runtime3d's sprite_of does, and CreateSprite makes a fullbright one because
+   a sprite has no lighting of its own. */
+static inline engine::Sprite *z_sprite_of(int64_t handle)
+{
+    engine::Entity *e = z_entity(handle);
+    return e ? e->getSprite() : nullptr;
+}
+inline int64_t zen_create_sprite(int64_t parent = 0)
+{
+    engine::Sprite *s = new engine::Sprite();
+    s->setFX(engine::FxFullbright);
+    return z_store_entity(s, z_entity(parent));
+}
+inline void zen_rotate_sprite(int64_t sprite, double angle)
+{
+    engine::Sprite *s = z_sprite_of(sprite);
+    if (s) s->setRotation((float)angle * blitz::PI / 180.0f);
+}
+inline void zen_scale_sprite(int64_t sprite, double x, double y)
+{
+    engine::Sprite *s = z_sprite_of(sprite);
+    if (s) s->setScale((float)x, (float)y);
+}
+inline void zen_handle_sprite(int64_t sprite, double x, double y)
+{
+    engine::Sprite *s = z_sprite_of(sprite);
+    if (s) s->setHandle((float)x, (float)y);
+}
+inline void zen_sprite_view_mode(int64_t sprite, int64_t mode)
+{
+    engine::Sprite *s = z_sprite_of(sprite);
+    if (s) s->setViewmode((int)mode);
+}
+/* AlignToVector: turn the entity's world rotation a fraction `rate` of the way
+   towards the requested axis, every step mirroring runtime3d's c_AlignToVector
+   including the antiparallel special case. */
+inline void zen_align_to_vector(int64_t entity, double vx, double vy, double vz, int64_t axis,
+                                double rate)
+{
+    engine::Entity *e = z_entity(entity);
+    if (!e) return;
+
+    engine::Vector axisVec((float)vx, (float)vy, (float)vz);
+    const float len = axisVec.length();
+    if (len <= blitz::EPSILON) return;
+    axisVec = axisVec / len;
+
+    engine::Quat q = e->getWorldRotation();
+    const engine::Vector tv = axis == 1 ? q.i() : axis == 2 ? q.j() : q.k();
+    const float dp = axisVec.dot(tv);
+    if (dp >= 1.0f - blitz::EPSILON) return;
+
+    if (dp <= -1.0f + blitz::EPSILON)
+    {
+        const float an = blitz::PI * (float)rate * 0.5f;
+        const engine::Vector cp = axis == 1 ? q.j() : axis == 2 ? q.k() : q.i();
+        e->setWorldRotation(engine::Quat(cosf(an), cp * sinf(an)) * q);
+        return;
+    }
+    const float an = acosf(dp) * (float)rate * 0.5f;
+    const engine::Vector cp = axisVec.cross(tv).normalized();
+    e->setWorldRotation(engine::Quat(cosf(an), cp * sinf(an)) * q);
+}
 
 /* Input */
 inline std::string zen_input(const std::string & = "") { return ""; }
