@@ -596,7 +596,10 @@ inline int64_t zen_load_anim_image(const std::string &, int64_t cellwidth, int64
     return 0;
 }
 
-/* Gfx drivers */
+/* Gfx drivers. SetGfxDriver picks which display's modes CountGfxModes3D and
+   GfxMode3DExists enumerate, which is what runtime3d keeps in g_driver. */
+static int64_t z_gfx_driver = 0;
+
 static inline void z_collect_gfx_modes()
 {
     /* Cleared and refilled on every call, as runtime3d's collectGfxModes does:
@@ -610,13 +613,26 @@ static inline void z_collect_gfx_modes()
        3D sample runs through, calls them exactly that way. runtime3d's own
        collectGfxModes brings the subsystem up here too. */
     if (!SDL_WasInit(SDL_INIT_VIDEO) && SDL_InitSubSystem(SDL_INIT_VIDEO) != 0) return;
-    const int modeCount = SDL_GetNumDisplayModes(0);
+    const int display = (int)z_gfx_driver;
+    const int modeCount = SDL_GetNumDisplayModes(display);
     for (int index = 0; index < modeCount; ++index)
     {
         SDL_DisplayMode mode;
-        if (SDL_GetDisplayMode(0, index, &mode) == 0)
+        if (SDL_GetDisplayMode(display, index, &mode) == 0)
             z_gfx_modes.push_back({mode.w, mode.h, (int)SDL_BITSPERPIXEL(mode.format)});
     }
+}
+inline void zen_set_gfx_driver(int64_t driver)
+{
+    const int n = (int)driver;
+    /* driver_count() in runtime3d is the same count. */
+    if (n < 1 || n > SDL_GetNumVideoDisplays())
+    {
+        zen_runtime_error("Illegal graphics driver index");
+        return;
+    }
+    z_gfx_driver = n - 1;
+    z_collect_gfx_modes();
 }
 
 inline int64_t zen_count_gfx_drivers() { return SDL_GetNumVideoDisplays(); }
@@ -1195,7 +1211,229 @@ inline void zen_draw_block(int64_t image, int64_t x, int64_t y, int64_t frame = 
     z_platform.batch().setBlend(true);
 }
 inline void zen_draw_block_rect(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t = 0) {}
-inline void zen_tile_block(int64_t, int64_t = 0, int64_t = 0, int64_t = 0) {}
+
+/* ================= Image tiling and transform ================= */
+
+/* The engine's draw_frame: upload the frame, then draw a sub-rectangle of it at
+   x,y - the batch renderer takes normalised source coordinates - centred on the
+   handle. Solid lands without blending, which is what DrawBlock and TileBlock
+   ask for. */
+static inline void z_draw_frame(engine::Image *img, float x, float y, int frame, float sx, float sy,
+                                float sw, float sh, bool solid)
+{
+    if (!img->ensureUploaded(z_platform.device(), frame)) return;
+    const engine::ImageFrame &f = img->frame(frame);
+    const float fw = (float)f.pixels.width, fh = (float)f.pixels.height;
+    if (fw <= 0.0f || fh <= 0.0f) return;
+
+    if (sw <= 0.0f || sh <= 0.0f) { sx = 0.0f; sy = 0.0f; sw = fw; sh = fh; }
+
+    engine::BatchRenderer &batch = z_platform.batch();
+    if (solid) batch.setBlend(false);
+    batch.setColor((unsigned char)255, (unsigned char)255, (unsigned char)255);
+    batch.drawTexture(f.texture, x - (float)img->handleX(), y - (float)img->handleY(), sw, sh,
+                      sx / fw, sy / fh, sw / fw, sh / fh);
+    if (solid) batch.setBlend(true);
+}
+/* The tiling both TileImage and TileBlock use: start one whole image up and to
+   the left of the target, stepping by the image size until the viewport is
+   covered, with the origin shifted so the pattern starts at the given point. */
+static inline void z_tile(engine::Image *img, int64_t x, int64_t y, int64_t frame, bool solid)
+{
+    if (!img) return;
+    const int w = img->width(), h = img->height();
+    if (w <= 0 || h <= 0) return;
+
+    const int vpW = z_platform.width(), vpH = z_platform.height();
+    int px = (int)x, py = (int)y;
+    int dx = img->handleX(), dy = img->handleY();
+    px -= dx;
+    py -= dy;
+    dx += (px >= 0 ? px % w : w - (-px % w));
+    dy += (py >= 0 ? py % h : h - (-py % h));
+
+    for (int ty = -h; ty < vpH; ty += h)
+        for (int tx = -w; tx < vpW; tx += w)
+            z_draw_frame(img, (float)(tx + dx + img->handleX()),
+                         (float)(ty + dy + img->handleY()), (int)frame, 0.0f, 0.0f, 0.0f, 0.0f,
+                         solid);
+}
+inline void zen_tile_image(int64_t image, int64_t x = 0, int64_t y = 0, int64_t frame = 0)
+{
+    z_tile(z_image_of(image), x, y, frame, false);
+}
+inline void zen_tile_block(int64_t image, int64_t x = 0, int64_t y = 0, int64_t frame = 0)
+{
+    z_tile(z_image_of(image), x, y, frame, true);
+}
+
+/* TFormImage and the two commands built on it. Each frame is resampled through
+   the inverse of the 2x2 matrix, bilinearly while TFormFilter is on (it starts
+   on, as runtime3d's g_tformFilter does) or by nearest pixel when it is off, and
+   the handle moves with the new bounding box. */
+static bool z_tform_filter = true;
+
+static inline engine::Color z_sample_filtered(const engine::Pixmap &p, float x, float y)
+{
+    x -= 0.5f;
+    y -= 0.5f;
+    const float fx0 = std::floor(x), fy0 = std::floor(y);
+    const int ix = (int)fx0, iy = (int)fy0;
+    const float fx = x - fx0, fy = y - fy0;
+
+    auto at = [&](int px, int py) {
+        if (px < 0) px = 0; else if (px >= p.width) px = p.width - 1;
+        if (py < 0) py = 0; else if (py >= p.height) py = p.height - 1;
+        return p.get_pixel_color((engine::u32)px, (engine::u32)py);
+    };
+    const engine::Color tl = at(ix, iy), tr = at(ix + 1, iy);
+    const engine::Color bl = at(ix, iy + 1), br = at(ix + 1, iy + 1);
+
+    const float w1 = (1 - fx) * (1 - fy), w2 = fx * (1 - fy);
+    const float w3 = (1 - fx) * fy, w4 = fx * fy;
+    auto mix = [&](int c1, int c2, int c3, int c4) {
+        return (unsigned char)(c1 * w1 + c2 * w2 + c3 * w3 + c4 * w4 + 0.5f);
+    };
+    return engine::Color(mix(tl.r(), tr.r(), bl.r(), br.r()), mix(tl.g(), tr.g(), bl.g(), br.g()),
+                         mix(tl.b(), tr.b(), bl.b(), br.b()), mix(tl.a(), tr.a(), bl.a(), br.a()));
+}
+static inline void z_ensure_rgba(engine::Pixmap &p)
+{
+    if (!p.is_valid() || p.components == 4) return;
+    engine::Pixmap *rgba = p.convert_to_rgba();
+    if (!rgba) return;
+    p = std::move(*rgba);
+    delete rgba;
+}
+static inline bool z_tform_frame(engine::Image *img, int k, const float m[2][2])
+{
+    engine::ImageFrame &f = img->frame(k);
+    engine::Pixmap &src = f.pixels;
+    if (!src.is_valid()) return false;
+
+    const float det = m[0][0] * m[1][1] - m[1][0] * m[0][1];
+    if (std::fabs(det) < 1e-8f) return false;
+    const float dt = 1.0f / det;
+    float inv[2][2];
+    inv[0][0] = dt * m[1][1];
+    inv[1][0] = -dt * m[1][0];
+    inv[0][1] = -dt * m[0][1];
+    inv[1][1] = dt * m[0][0];
+
+    /* Where the four corners land decides the size of the result. */
+    const float ox = (float)img->handleX(), oy = (float)img->handleY();
+    const float cx[4] = {-ox, (float)src.width - ox, (float)src.width - ox, -ox};
+    const float cy[4] = {-oy, -oy, (float)src.height - oy, (float)src.height - oy};
+    float minX = 0, minY = 0, maxX = 0, maxY = 0;
+    for (int i = 0; i < 4; ++i)
+    {
+        const float tx = m[0][0] * cx[i] + m[0][1] * cy[i];
+        const float ty = m[1][0] * cx[i] + m[1][1] * cy[i];
+        if (i == 0)
+        {
+            minX = maxX = tx;
+            minY = maxY = ty;
+        }
+        else
+        {
+            if (tx < minX) minX = tx;
+            if (tx > maxX) maxX = tx;
+            if (ty < minY) minY = ty;
+            if (ty > maxY) maxY = ty;
+        }
+    }
+    minX = std::floor(minX);
+    minY = std::floor(minY);
+    maxX = std::ceil(maxX);
+    maxY = std::ceil(maxY);
+    const int iw = (int)(maxX - minX), ih = (int)(maxY - minY);
+    if (iw <= 0 || ih <= 0) return false;
+
+    z_ensure_rgba(src);
+    engine::Pixmap out(iw, ih, 4);
+    for (int y = 0; y < ih; ++y)
+    {
+        const float vy = minY + (float)y + 0.5f;
+        for (int x = 0; x < iw; ++x)
+        {
+            const float vx = minX + (float)x + 0.5f;
+            const float qx = inv[0][0] * vx + inv[0][1] * vy;
+            const float qy = inv[1][0] * vx + inv[1][1] * vy;
+            engine::Color c;
+            if (z_tform_filter) c = z_sample_filtered(src, qx + ox, qy + oy);
+            else
+            {
+                const int sx = (int)std::floor(qx + ox), sy = (int)std::floor(qy + oy);
+                c = (sx >= 0 && sy >= 0 && sx < src.width && sy < src.height)
+                        ? src.get_pixel_color((engine::u32)sx, (engine::u32)sy)
+                        : engine::Color(0, 0, 0, 0);
+            }
+            out.set_pixel((engine::u32)x, (engine::u32)y, c.r(), c.g(), c.b(), c.a());
+        }
+    }
+    f.pixels = std::move(out);
+    f.dirty = true;
+    f.cmMask.clear();
+    f.cmPitch = 0;
+    img->setHandle((int)-minX, (int)-minY);
+    return true;
+}
+inline void zen_tform_image(int64_t image, double a, double b, double c, double d)
+{
+    engine::Image *img = z_image_of(image);
+    if (!img) return;
+    float m[2][2];
+    m[0][0] = (float)a;
+    m[1][0] = (float)b;
+    m[0][1] = (float)c;
+    m[1][1] = (float)d;
+    /* The handle moves with the first frame; every frame is the same size, so
+       they all land on the same new handle. */
+    const int hx = img->handleX(), hy = img->handleY();
+    for (int k = 0; k < img->frameCount(); ++k)
+    {
+        img->setHandle(hx, hy);
+        z_tform_frame(img, k, m);
+    }
+}
+inline void zen_scale_image(int64_t image, double xscale, double yscale)
+{
+    zen_tform_image(image, xscale, 0.0, 0.0, yscale);
+}
+inline void zen_rotate_image(int64_t image, double angle)
+{
+    /* Negated and converted to radians, as runtime3d's c_RotateImage does. */
+    const float d = -(float)angle * kDegToRad;
+    zen_tform_image(image, std::cos(d), -std::sin(d), std::sin(d), std::cos(d));
+}
+inline void zen_tform_filter(int64_t enable) { z_tform_filter = enable != 0; }
+
+/* ================= Odds and ends ================= */
+
+inline int64_t zen_scan_line() { return 0; }   /* no raster line to report */
+inline void zen_camera_cls_mode(int64_t camera, int64_t clsColor, int64_t clsZBuffer)
+{
+    engine::Entity *e = z_entity(camera);
+    if (e && e->getCamera()) e->getCamera()->setClsMode(clsColor != 0, clsZBuffer != 0);
+}
+inline int64_t zen_create_terrain(int64_t gridSize, int64_t parent = 0)
+{
+    /* The grid size has to be a power of two, as in runtime3d's c_CreateTerrain;
+       the world is only built when there is a device to build it with. */
+    const int size = (int)gridSize;
+    int shift = 0;
+    while ((1 << shift) < size) ++shift;
+    if (size < 2 || shift > 12 || (1 << shift) != size) return 0;
+    if (z_graphics_open) z_world_ensure();
+    engine::Terrain *terrain = new engine::Terrain(shift);
+    return z_store_entity(terrain, z_entity(parent));
+}
+inline int64_t zen_meshes_intersect(int64_t meshA, int64_t meshB)
+{
+    engine::MeshModel *a = z_mesh_of(meshA);
+    engine::MeshModel *b = z_mesh_of(meshB);
+    return (a && b && a->intersects(*b)) ? 1 : 0;
+}
 
 /* Pixels. The plain forms honour the canvas origin and viewport and the Fast
    ones do not, exactly as runtime3d splits them; a 0 buffer means the one
