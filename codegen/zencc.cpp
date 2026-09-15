@@ -553,6 +553,7 @@ static void install_window_declarations(bb::BBRuntime *runtime)
     decl_int("loadterrain", param_str("heightmap_file"));
     decl_int("loadmd2", param_str("file"));
     decls->insertDecl("terrainheight", new bb::FuncType(bb::Type::float_type, [&]() { auto *q = new bb::DeclSeq(); q->insertDecl("terrain", bb::Type::int_type, bb::DECL_PARAM); q->insertDecl("terrain_x", bb::Type::int_type, bb::DECL_PARAM); q->insertDecl("terrain_z", bb::Type::int_type, bb::DECL_PARAM); return q; }(), false, false), bb::DECL_FUNC);
+    decl_int("terrainsize", param_int("terrain"));
     for (const char *name : {"terrainx", "terrainy", "terrainz"})
         decls->insertDecl(name, new bb::FuncType(bb::Type::float_type, [&]() { auto *q = new bb::DeclSeq(); q->insertDecl("terrain", bb::Type::int_type, bb::DECL_PARAM); q->insertDecl("world_x", bb::Type::float_type, bb::DECL_PARAM); q->insertDecl("world_y", bb::Type::float_type, bb::DECL_PARAM); q->insertDecl("world_z", bb::Type::float_type, bb::DECL_PARAM); return q; }(), false, false), bb::DECL_FUNC);
     decl_void("modifyterrain", [&]() { auto *q = new bb::DeclSeq(); q->insertDecl("terrain", bb::Type::int_type, bb::DECL_PARAM); q->insertDecl("terrain_x", bb::Type::int_type, bb::DECL_PARAM); q->insertDecl("terrain_z", bb::Type::int_type, bb::DECL_PARAM); q->insertDecl("height", bb::Type::float_type, bb::DECL_PARAM); q->insertDecl("realtime", bb::Type::int_type, bb::DECL_PARAM, new bb::ConstType(0LL)); return q; }());
@@ -1265,6 +1266,7 @@ static void register_builtin_wrappers(bb::BBRuntime *runtime, bb::CGen &gen)
     /* Terrain/MD2 */
     reg("loadterrain", "zen_load_terrain", true);
     reg("terrainheight", "zen_terrain_height", true);
+    reg("terrainsize", "zen_terrain_size", true);
     reg("terrainx", "zen_terrain_x", true);
     reg("terrainy", "zen_terrain_y", true);
     reg("terrainz", "zen_terrain_z", true);

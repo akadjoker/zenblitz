@@ -26,6 +26,8 @@
 #include "engine/Animator.h"
 #include "engine/VoxelSprite.h"
 #include "engine/Sprite.h"
+#include "engine/Terrain.h"
+#include "engine/FilePath.h"
 #include "engine/Pixmap.h"
 #include "engine/Image.h"
 #include "engine/Collision.h"
@@ -858,9 +860,115 @@ inline void zen_move_mouse(int64_t x, int64_t y) { z_platform.moveMouse((int)x, 
 inline int64_t zen_load_sound(const std::string &) { return 0; }
 inline int64_t zen_load_3d_sound(const std::string &) { return 0; }
 
-/* Terrain/MD2 (stubs) */
-inline int64_t zen_load_terrain(const std::string &, int64_t = 0) { return 0; }
-inline int64_t zen_load_md2(const std::string &, int64_t = 0) { return 0; }
+/* Terrain and MD2. terrain_of/md2_of are the model casts runtime3d performs,
+   and LoadTerrain reads a square, power-of-two heightmap the same way. */
+static inline engine::Terrain *z_terrain_of(int64_t handle)
+{
+    engine::Entity *e = z_entity(handle);
+    auto *model = e ? e->getModel() : nullptr;
+    return model ? model->getTerrain() : nullptr;
+}
+static inline engine::MD2Model *z_md2_of(int64_t handle)
+{
+    engine::Entity *e = z_entity(handle);
+    auto *model = e ? e->getModel() : nullptr;
+    return model ? model->getMD2Model() : nullptr;
+}
+/* The world-space point on the terrain surface under x,z: bilinear between the
+   four heights around it, exactly as runtime3d's terrain_vector computes it. */
+static inline engine::Vector z_terrain_vector(engine::Terrain *terrain, float x, float y, float z)
+{
+    engine::Vector local = -terrain->getWorldTform() * engine::Vector(x, y, z);
+    const int ix = (int)floorf(local.x), iz = (int)floorf(local.z);
+    const float tx = local.x - (float)ix, tz = local.z - (float)iz;
+    const float h0 = terrain->getHeight(ix, iz), h1 = terrain->getHeight(ix + 1, iz);
+    const float h2 = terrain->getHeight(ix, iz + 1), h3 = terrain->getHeight(ix + 1, iz + 1);
+    const float ha = (h1 - h0) * tx + h0, hb = (h3 - h2) * tx + h2;
+    return terrain->getWorldTform() * engine::Vector(local.x, (hb - ha) * tz + ha, local.z);
+}
+inline double zen_terrain_x(int64_t terrain, double x, double y, double z)
+{
+    engine::Terrain *t = z_terrain_of(terrain);
+    return t ? z_terrain_vector(t, (float)x, (float)y, (float)z).x : 0.0;
+}
+inline double zen_terrain_y(int64_t terrain, double x, double y, double z)
+{
+    engine::Terrain *t = z_terrain_of(terrain);
+    return t ? z_terrain_vector(t, (float)x, (float)y, (float)z).y : 0.0;
+}
+inline double zen_terrain_z(int64_t terrain, double x, double y, double z)
+{
+    engine::Terrain *t = z_terrain_of(terrain);
+    return t ? z_terrain_vector(t, (float)x, (float)y, (float)z).z : 0.0;
+}
+inline double zen_terrain_height(int64_t terrain, int64_t x, int64_t y)
+{
+    engine::Terrain *t = z_terrain_of(terrain);
+    return t ? t->getHeight((int)x, (int)y) : 0.0;
+}
+inline int64_t zen_terrain_size(int64_t terrain)
+{
+    engine::Terrain *t = z_terrain_of(terrain);
+    return t ? t->getSize() : 0;
+}
+inline void zen_modify_terrain(int64_t terrain, int64_t x, int64_t y, double height, int64_t realtime)
+{
+    if (engine::Terrain *t = z_terrain_of(terrain))
+        t->setHeight((int)x, (int)y, (float)height, realtime != 0);
+}
+inline void zen_terrain_shading(int64_t terrain, int64_t enable)
+{
+    if (engine::Terrain *t = z_terrain_of(terrain)) t->setShading(enable != 0);
+}
+inline void zen_terrain_detail(int64_t terrain, int64_t detail, int64_t enable)
+{
+    if (engine::Terrain *t = z_terrain_of(terrain)) t->setDetail((int)detail, enable != 0);
+}
+inline void zen_animate_md2(int64_t md2, int64_t mode = 1, double speed = 1.0, int64_t firstFrame = 0,
+                            int64_t lastFrame = 9999, double transition = 0.0)
+{
+    /* runtime3d passes them to startMD2Anim as first, last, mode, speed and
+       transition - not in the order the command takes them. */
+    if (engine::MD2Model *m = z_md2_of(md2))
+        m->startMD2Anim((int)firstFrame, (int)lastFrame, (int)mode, (float)speed, (float)transition);
+}
+inline int64_t zen_load_terrain(const std::string &file, int64_t parent = 0)
+{
+    /* Blitz3D shipped on Windows, so scripts assume case-insensitive paths -
+       the same resolveCaseInsensitive step runtime3d's c_LoadTerrain takes. */
+    engine::Pixmap pixels;
+    if (!pixels.load(engine::resolveCaseInsensitive(file.c_str()).c_str()) ||
+        pixels.width != pixels.height || pixels.width < 2)
+        return 0;
+    int shift = 0;
+    while ((1 << shift) < pixels.width) ++shift;
+    if (shift > 12 || (1 << shift) != pixels.width) return 0;
+
+    /* Only when a device exists: runtime3d's c_LoadTerrain never touches the
+       world, and a script may legitimately load a heightmap before the first
+       Graphics3D, when there is no device to build the world's renderers
+       with. The terrain model uploads itself at the first render. */
+    if (z_graphics_open) z_world_ensure();
+    engine::Terrain *terrain = new engine::Terrain(shift);
+    for (int y = 0; y < pixels.height; ++y)
+        for (int x = 0; x < pixels.width; ++x)
+        {
+            const engine::Color color = pixels.get_pixel_color((engine::u32)x, (engine::u32)y);
+            int top = color.r() > color.g() ? color.r() : color.g();
+            if (color.b() > top) top = color.b();
+            terrain->setHeight(x, pixels.height - 1 - y, top / 255.0f, false);
+        }
+    return z_store_entity(terrain, z_entity(parent));
+}
+/* Defined with the rest of the loaders further down; LoadMD2 is LoadMesh for a
+   .md2, which is what engine::MD2Model is picked for by extension. */
+inline int64_t zen_load_mesh(const std::string &file, int64_t parent);
+inline int64_t zen_load_md2(const std::string &file, int64_t parent = 0)
+{
+    /* zen_load_mesh already routes .md2 to engine::MD2Model and warns on a
+       model that failed to validate. */
+    return zen_load_mesh(file, parent);
+}
 
 /* Brushes and surfaces.
    runtime3d hands the engine pointer itself across as the Blitz3D handle
