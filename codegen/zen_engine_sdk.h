@@ -177,6 +177,61 @@ static inline int64_t z_handle_of(engine::Entity *e)
     return 0;
 }
 
+/* Pixel access. Only an image or a texture buffer can be *written*; the
+   screen can only be read back, which is why runtime3d's write_pixel says so
+   out loud instead of silently doing nothing. */
+static inline int64_t z_buffer_arg(int64_t handle) { return handle ? handle : z_canvas_buffer; }
+
+static inline void z_buffer_size(int64_t handle, int &w, int &h)
+{
+    if (engine::ImageFrame *f = z_buffer_frame(handle))
+    {
+        w = f->pixels.width;
+        h = f->pixels.height;
+        return;
+    }
+    w = z_platform.width();
+    h = z_platform.height();
+}
+
+static inline unsigned z_read_pixel(int64_t handle, int x, int y)
+{
+    if (engine::ImageFrame *f = z_buffer_frame(handle))
+    {
+        if (x < 0 || y < 0 || x >= f->pixels.width || y >= f->pixels.height) return 0;
+        const engine::Color c = f->pixels.get_pixel_color((engine::u32)x, (engine::u32)y);
+        return ((unsigned)c.a() << 24) | ((unsigned)c.r() << 16) | ((unsigned)c.g() << 8) | c.b();
+    }
+    return z_platform.readScreenPixel(x, y);
+}
+
+static inline bool z_write_pixel(int64_t handle, int x, int y, unsigned argb)
+{
+    engine::ImageFrame *f = z_buffer_frame(handle);
+    if (!f) return false;
+    if (x < 0 || y < 0 || x >= f->pixels.width || y >= f->pixels.height) return true;
+    f->pixels.set_pixel((engine::u32)x, (engine::u32)y, (engine::u8)((argb >> 16) & 0xff),
+                        (engine::u8)((argb >> 8) & 0xff), (engine::u8)(argb & 0xff),
+                        (engine::u8)((argb >> 24) & 0xff));
+    f->dirty = true;
+    return true;
+}
+
+static inline void z_warn_screen_write(const char *command)
+{
+    std::fprintf(stderr, "%s: can only write to an image or texture buffer, not the screen\n", command);
+}
+
+static inline bool z_pixel_inside_viewport(int x, int y)
+{
+    /* The clip is the canvas region's, which starts as the whole buffer and
+       is only narrowed by Viewport; runtime3d keeps it per buffer too, reset
+       on SetBuffer. A zero size means "no clip set", not "clip everything". */
+    if (z_viewport_width <= 0 || z_viewport_height <= 0) return true;
+    return x >= z_viewport_x && x < z_viewport_x + z_viewport_width &&
+           y >= z_viewport_y && y < z_viewport_y + z_viewport_height;
+}
+
 /* Teardown. The GPU has to be wound down before the driver starts its own:
    every GL object here is released through the device, and if they are still
    alive when Mesa tears the context down the driver faults - the same crash
@@ -857,7 +912,62 @@ inline void zen_draw_block(int64_t image, int64_t x, int64_t y, int64_t frame = 
 }
 inline void zen_draw_block_rect(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t = 0) {}
 inline void zen_tile_block(int64_t, int64_t = 0, int64_t = 0, int64_t = 0) {}
-inline void zen_write_pixel_fast(int64_t, int64_t, int64_t, int64_t = 0) {}
+
+/* Pixels. The plain forms honour the canvas origin and viewport and the Fast
+   ones do not, exactly as runtime3d splits them; a 0 buffer means the one
+   SetBuffer selected. */
+inline void zen_write_pixel_fast(int64_t x, int64_t y, int64_t argb, int64_t buffer = 0)
+{
+    if (!z_write_pixel(z_buffer_arg(buffer), (int)x, (int)y, (unsigned)argb))
+        z_warn_screen_write("WritePixelFast");
+}
+inline void zen_write_pixel(int64_t x, int64_t y, int64_t argb, int64_t buffer = 0)
+{
+    const int px = (int)x + z_origin_x, py = (int)y + z_origin_y;
+    if (!z_pixel_inside_viewport(px, py)) return;
+    if (!z_write_pixel(z_buffer_arg(buffer), px, py, (unsigned)argb)) z_warn_screen_write("WritePixel");
+}
+inline int64_t zen_read_pixel(int64_t x, int64_t y, int64_t buffer = 0)
+{
+    const int px = (int)x + z_origin_x, py = (int)y + z_origin_y;
+    if (!z_pixel_inside_viewport(px, py)) return 0;
+    return (int64_t)(int)z_read_pixel(z_buffer_arg(buffer), px, py);
+}
+inline int64_t zen_read_pixel_fast(int64_t x, int64_t y, int64_t buffer = 0)
+{
+    return (int64_t)(int)z_read_pixel(z_buffer_arg(buffer), (int)x, (int)y);
+}
+inline void zen_get_color(int64_t x, int64_t y)
+{
+    /* GetColor reads the current buffer and makes that the drawing colour,
+       with the alpha forced opaque. */
+    const int px = (int)x + z_origin_x, py = (int)y + z_origin_y;
+    z_draw_color = z_read_pixel(z_canvas_buffer, px, py) | 0xff000000u;
+    z_platform.batch().setColor((unsigned char)((z_draw_color >> 16) & 0xff),
+                                (unsigned char)((z_draw_color >> 8) & 0xff),
+                                (unsigned char)(z_draw_color & 0xff));
+}
+inline int64_t zen_color_red() { return (int64_t)((z_draw_color >> 16) & 0xff); }inline int64_t zen_color_green() { return (int64_t)((z_draw_color >> 8) & 0xff); }
+inline int64_t zen_color_blue() { return (int64_t)(z_draw_color & 0xff); }
+inline void zen_buffer_dirty(int64_t buffer)
+{
+    /* BufferDirty told Blitz3D a locked surface had changed behind its back;
+       the frame's own flag is what schedules the upload here. */
+    engine::ImageFrame *f = z_buffer_frame(z_buffer_arg(buffer));
+    if (f) f->dirty = true;
+}
+inline void zen_copy_pixel(int64_t sx, int64_t sy, int64_t src_buffer, int64_t dx, int64_t dy,
+                           int64_t dst_buffer = 0)
+{
+    const unsigned argb = z_read_pixel(z_buffer_arg(src_buffer), (int)sx, (int)sy);
+    if (!z_write_pixel(z_buffer_arg(dst_buffer), (int)dx, (int)dy, argb)) z_warn_screen_write("CopyPixel");
+}
+inline void zen_copy_pixel_fast(int64_t sx, int64_t sy, int64_t src_buffer, int64_t dx, int64_t dy,
+                                int64_t dst_buffer = 0)
+{
+    /* CopyPixelFast is the same call in runtime3d too. */
+    zen_copy_pixel(sx, sy, src_buffer, dx, dy, dst_buffer);
+}
 inline void zen_wireframe(int64_t) {}
 
 inline int64_t zen_mouse_x() { return z_platform.mouseX(); }
@@ -935,6 +1045,69 @@ inline int64_t zen_create_surface(int64_t mesh, int64_t brush = 0)
 inline void zen_collisions(int64_t src_type, int64_t dst_type, int64_t method, int64_t response)
 {
     z_world.addCollision((int)src_type, (int)dst_type, (int)method, (int)response);
+}
+
+/* The collision list an entity carries after UpdateWorld, 1-based like
+   runtime3d's collisionAt, with the same 0/-1 fallbacks when there is no
+   such collision. */
+static inline const engine::ObjCollision *z_collision_at(int64_t entity, int64_t index)
+{
+    engine::Entity *e = z_entity(entity);
+    engine::Object *o = e ? e->getObject() : nullptr;
+    if (!o || index < 1 || (size_t)index > o->getCollisions().size()) return nullptr;
+    return o->getCollisions()[(size_t)index - 1];
+}
+inline int64_t zen_count_collisions(int64_t entity)
+{
+    engine::Entity *e = z_entity(entity);
+    engine::Object *o = e ? e->getObject() : nullptr;
+    return o ? (int64_t)o->getCollisions().size() : 0;
+}
+inline int64_t zen_collision_entity(int64_t entity, int64_t index)
+{
+    const engine::ObjCollision *c = z_collision_at(entity, index);
+    return c ? z_handle_of(c->with) : 0;
+}
+inline double zen_collision_x(int64_t entity, int64_t index)
+{
+    const engine::ObjCollision *c = z_collision_at(entity, index);
+    return c ? c->coords.x : 0.0;
+}
+inline double zen_collision_y(int64_t entity, int64_t index)
+{
+    const engine::ObjCollision *c = z_collision_at(entity, index);
+    return c ? c->coords.y : 0.0;
+}
+inline double zen_collision_z(int64_t entity, int64_t index)
+{
+    const engine::ObjCollision *c = z_collision_at(entity, index);
+    return c ? c->coords.z : 0.0;
+}
+inline double zen_collision_nx(int64_t entity, int64_t index)
+{
+    const engine::ObjCollision *c = z_collision_at(entity, index);
+    return c ? c->collision.normal.x : 0.0;
+}
+inline double zen_collision_ny(int64_t entity, int64_t index)
+{
+    const engine::ObjCollision *c = z_collision_at(entity, index);
+    return c ? c->collision.normal.y : 0.0;
+}
+inline double zen_collision_nz(int64_t entity, int64_t index)
+{
+    const engine::ObjCollision *c = z_collision_at(entity, index);
+    return c ? c->collision.normal.z : 0.0;
+}
+inline int64_t zen_entity_collided(int64_t entity, int64_t type)
+{
+    /* The first collision with an object of the given type, as c_EntityCollided
+       reports it. */
+    engine::Entity *e = z_entity(entity);
+    engine::Object *o = e ? e->getObject() : nullptr;
+    if (!o) return 0;
+    for (const engine::ObjCollision *c : o->getCollisions())
+        if (c && c->with && c->with->getCollisionType() == (int)type) return z_handle_of(c->with);
+    return 0;
 }
 
 inline int64_t zen_engine_millisecs() { return (int64_t)z_platform.milliSecs(); }
