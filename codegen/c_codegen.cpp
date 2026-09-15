@@ -924,13 +924,22 @@ namespace bb
             {
                 Decl *decl = program->sem_env->decls->decls[i];
                 if (!decl) continue;
+                /* The semantics registers the Type itself as a global named
+                   "type_<ident>", and the generator already emits z_type_<ident>
+                   for the struct, so that one global must be skipped: emitting
+                   it would declare a z_type_<ident> variable next to the
+                   z_type_<ident> type.
+                   Matching the bare ident as well is not safe: identifiers are
+                   case-insensitive and lowered, so a variable or array that
+                   shares the Type's name (Local vec[4] with Type Vec) matches
+                   too, is dropped from global_names_, and every use of it comes
+                   out undeclared. */
                 bool is_type_name = false;
                 if (program->structs)
                     for (size_t k = 0; k < program->structs->decls.size(); ++k)
                     {
                         StructDeclNode *structure = dynamic_cast<StructDeclNode *>(program->structs->decls[k]);
-                        if (structure && (structure->ident == decl->name ||
-                                          decl->name == "type_" + structure->ident))
+                        if (structure && decl->name == "type_" + structure->ident)
                         {
                             is_type_name = true;
                             break;
