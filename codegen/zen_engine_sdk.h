@@ -27,6 +27,8 @@
 #include "engine/VoxelSprite.h"
 #include "engine/Sprite.h"
 #include "engine/Terrain.h"
+#include "engine/Sound.h"
+#include "engine/Listener.h"
 #include "engine/FilePath.h"
 
 /* The core commands (Input, AppTitle, the DirectInput switch) live in the base
@@ -952,10 +954,6 @@ inline void zen_move_mouse(int64_t x, int64_t y)
     }
 }
 
-/* Sound (stubs) */
-inline int64_t zen_load_sound(const std::string &) { return 0; }
-inline int64_t zen_load_3d_sound(const std::string &) { return 0; }
-
 /* Terrain and MD2. terrain_of/md2_of are the model casts runtime3d performs,
    and LoadTerrain reads a square, power-of-two heightmap the same way. */
 static inline engine::Terrain *z_terrain_of(int64_t handle)
@@ -1547,6 +1545,103 @@ inline void zen_draw_block_rect(int64_t image, int64_t x, int64_t y, int64_t rec
     z_draw_frame(img, (float)x, (float)y, (int)frame, (float)rectX, (float)rectY, (float)rectW,
                  (float)rectH, true);
 }
+
+/* ================= Sound ================= */
+
+/* Thin shells over engine::AudioSystem, which is exactly what runtime3d's sound
+   commands call. A load that fails answers 0 and says so on stderr in the same
+   words the VM uses. */
+static inline void z_warn_load_failed(const char *command, const std::string &file)
+{
+    std::fprintf(stderr, "%s: could not load \"%s\"\n", command, file.c_str());
+}
+inline int64_t zen_load_sound(const std::string &file)
+{
+    const engine::AudioSystem::SoundId id = engine::AudioSystem::get().loadSound(file.c_str(), false);
+    if (!id) z_warn_load_failed("LoadSound", file);
+    return id;
+}
+inline int64_t zen_load_3d_sound(const std::string &file)
+{
+    const engine::AudioSystem::SoundId id = engine::AudioSystem::get().loadSound(file.c_str(), true);
+    if (!id) z_warn_load_failed("Load3DSound", file);
+    return id;
+}
+inline void zen_free_sound(int64_t sound)
+{
+    engine::AudioSystem::get().freeSound((engine::AudioSystem::SoundId)sound);
+}
+inline int64_t zen_play_sound(int64_t sound)
+{
+    return engine::AudioSystem::get().play((engine::AudioSystem::SoundId)sound);
+}
+inline void zen_loop_sound(int64_t sound)
+{
+    engine::AudioSystem::get().setSoundLoop((engine::AudioSystem::SoundId)sound, true);
+}
+inline int64_t zen_emit_sound(int64_t sound, int64_t entity)
+{
+    /* The emitter command needs something to follow: without an entity the VM
+       answers 0 rather than playing it. */
+    engine::Entity *e = z_entity(entity);
+    engine::Object *o = e ? e->getObject() : nullptr;
+    return o ? engine::AudioSystem::get().emit((engine::AudioSystem::SoundId)sound, o) : 0;
+}
+inline void zen_sound_pan(int64_t sound, double pan)
+{
+    engine::AudioSystem::get().setSoundPan((engine::AudioSystem::SoundId)sound, (float)pan);
+}
+inline void zen_sound_pitch(int64_t sound, int64_t pitch)
+{
+    engine::AudioSystem::get().setSoundPitchHz((engine::AudioSystem::SoundId)sound, (float)pitch);
+}
+inline void zen_sound_volume(int64_t sound, double volume)
+{
+    engine::AudioSystem::get().setSoundVolume((engine::AudioSystem::SoundId)sound, (float)volume);
+}
+inline void zen_channel_pan(int64_t channel, double pan)
+{
+    engine::AudioSystem::get().setChannelPan((engine::AudioSystem::ChannelId)channel, (float)pan);
+}
+inline void zen_channel_pitch(int64_t channel, int64_t pitch)
+{
+    engine::AudioSystem::get().setChannelPitchHz((engine::AudioSystem::ChannelId)channel, (float)pitch);
+}
+inline void zen_channel_volume(int64_t channel, double volume)
+{
+    engine::AudioSystem::get().setChannelVolume((engine::AudioSystem::ChannelId)channel, (float)volume);
+}
+inline int64_t zen_channel_playing(int64_t channel)
+{
+    return engine::AudioSystem::get().isChannelPlaying((engine::AudioSystem::ChannelId)channel) ? 1 : 0;
+}
+inline void zen_pause_channel(int64_t channel)
+{
+    engine::AudioSystem::get().setChannelPaused((engine::AudioSystem::ChannelId)channel, true);
+}
+inline void zen_resume_channel(int64_t channel)
+{
+    engine::AudioSystem::get().setChannelPaused((engine::AudioSystem::ChannelId)channel, false);
+}
+inline void zen_stop_channel(int64_t channel)
+{
+    engine::AudioSystem::get().stopChannel((engine::AudioSystem::ChannelId)channel);
+}
+inline int64_t zen_create_listener(int64_t parent, double rolloff = 1.0, double doppler = 1.0,
+                                   double distance = 1.0)
+{
+    engine::Listener *l = new engine::Listener((float)rolloff, (float)doppler, (float)distance);
+    return z_store_entity(l, z_entity(parent));
+}
+inline int64_t zen_play_music(const std::string &file)
+{
+    const engine::AudioSystem::ChannelId id = engine::AudioSystem::get().playFile(file.c_str(), false);
+    if (!id) z_warn_load_failed("PlayMusic", file);
+    return id;
+}
+/* PlayCDTrack: no CD drive to play from, so the command answers 0 - which is
+   what runtime3d does. */
+inline int64_t zen_play_cd_track(int64_t = 0, int64_t = 0) { return 0; }
 
 /* ================= Odds and ends ================= */
 
