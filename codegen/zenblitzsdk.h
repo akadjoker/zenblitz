@@ -35,34 +35,23 @@ inline int64_t zen_direct_input_enabled() { return 0; }
 #endif
 
 /* ================= File handles via SDL_RWops =================
-** Integer handles (1-based, 0 = invalid), matching the VM.
-** All file I/O goes through SDL_RWops so it works on desktop,
-** Web (Emscripten virtual FS) and mobile. */
+** Integer handles out of the same table the VM uses: the low 16 bits are the
+** slot index and the high 15 a generation counter, so the first handle is
+** 65536 and a closed slot comes back with a different number (see
+** libzen/src/bb_handles.h). A 1-based counter answered 1 here, which a
+** script that prints or stores the handle can tell apart. All file I/O goes
+** through SDL_RWops so it works on desktop, Web (Emscripten virtual FS) and
+** mobile. */
 
 struct ZenFileEntry { SDL_RWops *rw; };
 
-static std::vector<ZenFileEntry> z_file_table;
+static ZenHandles<SDL_RWops *> z_file_table;
 
-static inline int64_t z_file_add(SDL_RWops *rw)
-{
-    if (!rw) return 0;
-    for (size_t i = 0; i < z_file_table.size(); ++i)
-        if (!z_file_table[i].rw) { z_file_table[i].rw = rw; return (int64_t)(i + 1); }
-    z_file_table.push_back(ZenFileEntry{rw});
-    return (int64_t)z_file_table.size();
-}
+static inline int64_t z_file_add(SDL_RWops *rw) { return z_file_table.add(rw); }
 
-static inline SDL_RWops *z_file_get(int64_t h)
-{
-    if (h <= 0 || (size_t)h > z_file_table.size()) return 0;
-    return z_file_table[(size_t)h - 1].rw;
-}
+static inline SDL_RWops *z_file_get(int64_t h) { return z_file_table.get(h); }
 
-static inline void z_file_remove(int64_t h)
-{
-    if (h <= 0 || (size_t)h > z_file_table.size()) return;
-    z_file_table[(size_t)h - 1].rw = 0;
-}
+static inline void z_file_remove(int64_t h) { z_file_table.remove(h); }
 
 static inline int64_t z_file_size(SDL_RWops *rw)
 {
@@ -111,6 +100,33 @@ inline int64_t zen_Eof(int64_t h)
     SDL_RWops *rw = z_file_get(h);
     if (!rw) return -1;
     return SDL_RWtell(rw) >= z_file_size(rw) ? 1 : 0;
+}
+/* ReadAvail: how much is left to read, never negative - libzen's c_ReadAvail
+   computes exactly this from the stream size and its position. */
+inline int64_t zen_ReadAvail(int64_t h)
+{
+    SDL_RWops *rw = z_file_get(h);
+    if (!rw) return 0;
+    const int64_t left = z_file_size(rw) - (int64_t)SDL_RWtell(rw);
+    return left < 0 ? 0 : left;
+}
+/* CopyStream: pump src into dst in blocks of buffer_size (16384 by default,
+   which is the default the VM's table carries). The size window and the
+   "Illegal buffer size" abort are c_CopyStream's. */
+inline void zen_CopyStream(int64_t src, int64_t dst, int64_t buffer_size = 16384)
+{
+    if (buffer_size < 1 || buffer_size > 1024 * 1024) zen_runtime_error("Illegal buffer size");
+    SDL_RWops *in = z_file_get(src);
+    SDL_RWops *out = z_file_get(dst);
+    if (!in || !out) return;
+    std::vector<char> buffer((size_t)buffer_size, 0);
+    for (;;)
+    {
+        const int64_t n = (int64_t)SDL_RWread(in, buffer.data(), 1, (size_t)buffer_size);
+        if (n <= 0) break;
+        SDL_RWwrite(out, buffer.data(), 1, (size_t)n);
+        if (n < buffer_size) break;
+    }
 }
 
 inline int64_t zen_ReadByte(int64_t h)
@@ -244,22 +260,11 @@ struct ZenDirEntry
 #endif
 };
 
-static std::vector<ZenDirEntry*> z_dir_table;
+static ZenHandles<ZenDirEntry *> z_dir_table;
 
-static inline int64_t z_dir_add(ZenDirEntry *d)
-{
-    if (!d) return 0;
-    for (size_t i = 0; i < z_dir_table.size(); ++i)
-        if (!z_dir_table[i]) { z_dir_table[i] = d; return (int64_t)(i + 1); }
-    z_dir_table.push_back(d);
-    return (int64_t)z_dir_table.size();
-}
+static inline int64_t z_dir_add(ZenDirEntry *d) { return z_dir_table.add(d); }
 
-static inline ZenDirEntry *z_dir_get(int64_t h)
-{
-    if (h <= 0 || (size_t)h > z_dir_table.size()) return 0;
-    return z_dir_table[(size_t)h - 1];
-}
+static inline ZenDirEntry *z_dir_get(int64_t h) { return z_dir_table.get(h); }
 
 inline int64_t zen_ReadDir(const std::string &path)
 {
@@ -302,7 +307,7 @@ inline void zen_CloseDir(int64_t h)
     if (d->dp) closedir(d->dp);
 #endif
     delete d;
-    z_dir_table[(size_t)h - 1] = 0;
+    z_dir_table.remove(h);
 }
 
 inline void zen_CreateDir(const std::string &path)

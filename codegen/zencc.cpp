@@ -206,6 +206,46 @@ static void install_window_declarations(bb::BBRuntime *runtime)
     decl_int("waitmouse", no_params());
     decl_void("apptitle", param_str("title"));  // simplified: close_prompt optional
 
+    /* Core commands from libzen's table (bb_cmds.cpp) that the emitter did not
+       know - a script calling any of them could not be compiled natively at
+       all, and the samples use most of them (Stop 58 times, WaitTimer 30,
+       CreateTimer 25, Instr 14, DebugLog 12 ...). Every one of them answers
+       what the VM's c_ does, so see the wrappers for the arithmetic. */
+    auto param_float = [&](const char *name) {
+        auto *ds = new bb::DeclSeq();
+        ds->insertDecl(name, bb::Type::float_type, bb::DECL_PARAM);
+        return ds;
+    };
+    auto decl_float = [&](const char *name, bb::DeclSeq *params) {
+        decls->insertDecl(name, new bb::FuncType(bb::Type::float_type, params, false, false),
+                          bb::DECL_FUNC);
+    };
+    decl_float("asin", param_float("float"));
+    decl_float("acos", param_float("float"));
+    decl_float("atan", param_float("float"));
+    {
+        auto *p = new bb::DeclSeq();
+        p->insertDecl("floata", bb::Type::float_type, bb::DECL_PARAM);
+        p->insertDecl("floatb", bb::Type::float_type, bb::DECL_PARAM);
+        decl_float("atan2", p);
+    }
+    decl_int("rndseed", no_params());
+    decl_int("createtimer", param_int("hertz"));
+    decl_int("waittimer", param_int("timer"));
+    decl_void("freetimer", param_int("timer"));
+    decl_void("debuglog", param_str("text"));
+    decl_void("execfile", param_str("command"));
+    decl_str("commandline", no_params());
+    decl_void("locate", [&]() { auto *q = new bb::DeclSeq(); q->insertDecl("x", bb::Type::int_type, bb::DECL_PARAM); q->insertDecl("y", bb::Type::int_type, bb::DECL_PARAM); return q; }());
+    decl_str("currentdate", no_params());
+    decl_str("currenttime", no_params());
+    decl_void("copystream", [&]() { auto *q = new bb::DeclSeq(); q->insertDecl("src_stream", bb::Type::int_type, bb::DECL_PARAM); q->insertDecl("dest_stream", bb::Type::int_type, bb::DECL_PARAM); q->insertDecl("buffer_size", bb::Type::int_type, bb::DECL_PARAM, new bb::ConstType(16384LL)); return q; }());
+    decl_str("getenv", param_str("env_var"));
+    decl_int("readavail", param_int("stream"));
+    decl_void("setenv", [&]() { auto *q = new bb::DeclSeq(); q->insertDecl("env_var", bb::Type::string_type, bb::DECL_PARAM); q->insertDecl("value", bb::Type::string_type, bb::DECL_PARAM); return q; }());
+    decl_str("systemproperty", param_str("property"));
+    decl_void("stop", no_params());
+
     /* Textures — %CreateTexture%width%height%flags=1%frames=1 */
     {
         auto *p = new bb::DeclSeq();
@@ -1279,7 +1319,28 @@ static void register_builtin_wrappers(bb::BBRuntime *runtime, bb::CGen &gen)
     reg("rnd", "zen_rnd");
     reg("rand", "zen_rand");
     reg("seedrnd", "zen_seed_rnd");
-    reg("randseed", "zen_rand_seed");
+    /* %RndSeed reads the generator's state back; the VM does not publish a
+       RandSeed, so neither does this table. */
+    reg("rndseed", "zen_rnd_seed");
+    reg("asin", "zen_asin");
+    reg("acos", "zen_acos");
+    reg("atan", "zen_atan");
+    reg("atan2", "zen_atan2");
+    reg("createtimer", "zen_create_timer");
+    reg("waittimer", "zen_wait_timer");
+    reg("freetimer", "zen_free_timer");
+    reg("debuglog", "zen_debug_log");
+    reg("execfile", "zen_exec_file");
+    reg("commandline", "zen_command_line");
+    reg("locate", "zen_locate");
+    reg("currentdate", "zen_current_date");
+    reg("currenttime", "zen_current_time");
+    reg("copystream", "zen_CopyStream");
+    reg("getenv", "zen_get_env");
+    reg("readavail", "zen_ReadAvail");
+    reg("setenv", "zen_set_env");
+    reg("systemproperty", "zen_system_property");
+    reg("stop", "zen_stop");
     reg("delay", "zen_delay");
     reg("vwait", "zen_vwait", true);
     reg("waitmouse", "zen_wait_mouse", true);
@@ -1369,25 +1430,28 @@ static void register_builtin_wrappers(bb::BBRuntime *runtime, bb::CGen &gen)
     /* Mouse extras */
     reg("movemouse", "zen_move_mouse", true);
     /* Sound (stubs) */
-    reg("loadsound", "zen_load_sound");
-    reg("load3dsound", "zen_load_3d_sound");
-    reg("soundvolume", "zen_sound_volume");
-    reg("createlistener", "zen_create_listener");
-    reg("freesound", "zen_free_sound");
-    reg("loopsound", "zen_loop_sound");
-    reg("soundpitch", "zen_sound_pitch");
-    reg("soundpan", "zen_sound_pan");
-    reg("playsound", "zen_play_sound");
-    reg("playmusic", "zen_play_music");
-    reg("playcdtrack", "zen_play_cd_track");
-    reg("stopchannel", "zen_stop_channel");
-    reg("pausechannel", "zen_pause_channel");
-    reg("resumechannel", "zen_resume_channel");
-    reg("channelpitch", "zen_channel_pitch");
-    reg("channelvolume", "zen_channel_volume");
-    reg("channelpan", "zen_channel_pan");
-    reg("channelplaying", "zen_channel_playing");
-    reg("emitsound", "zen_emit_sound");
+    /* Audio: these are engine (AudioSystem) commands, so a 2D program that
+       plays a sound needs the engine header like a 3D one does - without the
+       flag the emitted 2D source had no definition for them at all. */
+    reg("loadsound", "zen_load_sound", true);
+    reg("load3dsound", "zen_load_3d_sound", true);
+    reg("soundvolume", "zen_sound_volume", true);
+    reg("createlistener", "zen_create_listener", true);
+    reg("freesound", "zen_free_sound", true);
+    reg("loopsound", "zen_loop_sound", true);
+    reg("soundpitch", "zen_sound_pitch", true);
+    reg("soundpan", "zen_sound_pan", true);
+    reg("playsound", "zen_play_sound", true);
+    reg("playmusic", "zen_play_music", true);
+    reg("playcdtrack", "zen_play_cd_track", true);
+    reg("stopchannel", "zen_stop_channel", true);
+    reg("pausechannel", "zen_pause_channel", true);
+    reg("resumechannel", "zen_resume_channel", true);
+    reg("channelpitch", "zen_channel_pitch", true);
+    reg("channelvolume", "zen_channel_volume", true);
+    reg("channelpan", "zen_channel_pan", true);
+    reg("channelplaying", "zen_channel_playing", true);
+    reg("emitsound", "zen_emit_sound", true);
     /* Terrain/MD2 */
     reg("loadterrain", "zen_load_terrain", true);
     reg("terrainheight", "zen_terrain_height", true);

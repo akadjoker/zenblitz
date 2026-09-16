@@ -112,7 +112,8 @@ static engine::ObjCollision z_pick_state;
 static unsigned z_draw_color = 0xff000000u;
 static int z_origin_x = 0, z_origin_y = 0;
 static int z_viewport_x = 0, z_viewport_y = 0, z_viewport_width = 0, z_viewport_height = 0;
-static unsigned z_rand_seed_value = 1;
+/* The random state (z_rand_seed_value) went with Rnd/Rand/RndSeed to
+   zen_codegen_support.hpp, which both flavours include. */
 struct z_gfx_mode { int width; int height; int depth; };
 static std::vector<z_gfx_mode> z_gfx_modes;
 
@@ -468,25 +469,35 @@ inline void zen_set_buffer(int64_t buffer)
     z_origin_x = 0;
     z_origin_y = 0;
 }
+/* LockBuffer/UnlockBuffer: Blitz3D locked a buffer so the Fast reads/writes
+   could skip the per-call lock, and an Image frame is plain CPU memory that is
+   already addressable - so these only have to exist and validate, which is
+   exactly what runtime3d's c_LockBuffer/c_UnlockBuffer do: a handle that is
+   neither the screen nor a resolvable image/texture buffer is a runtime error
+   with the command's own message. */
+static inline bool z_buffer_exists(int64_t buffer)
+{
+    return z_buffer_arg(buffer) == kScreenBuffer || z_buffer_frame(z_buffer_arg(buffer)) != nullptr;
+}
+inline void zen_lock_buffer(int64_t buffer)
+{
+    if (!z_buffer_exists(buffer)) zen_runtime_error("LockBuffer: buffer does not exist");
+}
+inline void zen_unlock_buffer(int64_t buffer)
+{
+    if (!z_buffer_exists(buffer)) zen_runtime_error("UnlockBuffer: buffer does not exist");
+}
+
 inline void zen_origin(int64_t x, int64_t y)
 {
     z_origin_x = (int)x;
     z_origin_y = (int)y;
 }
 
-/* Random — #Rnd#from#to=0, %Rand%from%to=1 */
-inline double zen_rnd(double from, double to = 0.0)
-{
-    double r = (double)std::rand() / (double)RAND_MAX;
-    if (to > from) return from + r * (to - from);
-    return r * from;
-}
-inline int64_t zen_rand(int64_t from, int64_t to = 1)
-{
-    if (to > from) return from + (int64_t)(std::rand() % (int)(to - from));
-    return (int64_t)(std::rand() % (int)(from > 0 ? from : 1));
-}
-inline void zen_seed_rnd(int64_t seed) { z_rand_seed_value = (unsigned)seed; std::srand(z_rand_seed_value); }
+/* Random - #Rnd#from#to=0, %Rand%from%to=1, %SeedRnd%seed, %RndSeed.
+   These live in zen_codegen_support.hpp because a 2D program has them too,
+   and they are Blitz's own LCG there (std::rand here produced different
+   sequences from the VM's). */
 
 /* Timing */
 /* One display refresh, which is what Blitz3D's VWait waited for. SDL has no
@@ -498,7 +509,8 @@ inline void z_vblank_sleep()
     const int hz = (SDL_GetCurrentDisplayMode(0, &mode) == 0 && mode.refresh_rate > 0) ? mode.refresh_rate : 60;
     SDL_Delay((Uint32)((1000 + hz / 2) / hz));
 }
-inline void zen_delay(int64_t ms) { if (ms > 0) SDL_Delay((Uint32)ms); }
+/* zen_delay is core (a 2D program has Delay too) and lives in
+   zen_codegen_support.hpp. */
 inline void zen_vwait(int64_t frames = 1)
 {
     if (!z_graphics_open) return;
@@ -573,7 +585,7 @@ inline int64_t zen_string_width(const std::string &s)
 inline int64_t zen_string_height(const std::string &) { return (int64_t)z_font_size; }
 
 /* Rand seed readback */
-inline int64_t zen_rand_seed() { return (int64_t)z_rand_seed_value; }
+inline int64_t zen_rand_seed() { return zen_rnd_seed(); }
 
 /* Clear collisions */
 inline void zen_clear_collisions() { z_world.clearCollisions(); }
@@ -723,9 +735,8 @@ inline int64_t zen_gfx_mode3d_exists(int64_t width, int64_t height, int64_t dept
     return 0;
 }
 
-/* Buffer lock (no-op) */
-inline void zen_lock_buffer(int64_t = 0) {}
-inline void zen_unlock_buffer(int64_t = 0) {}
+/* Buffer lock: see zen_lock_buffer next to zen_set_buffer - it validates the
+   handle like the VM does. */
 inline int64_t zen_texture_buffer(int64_t texture, int64_t frame = 0)
 {
     /* The buffer a texture's own pixels live in: this is what a script hands

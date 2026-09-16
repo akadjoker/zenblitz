@@ -7,9 +7,89 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <ctime>
 #include <iomanip>
 #include <sstream>
 #include <string>
+#include <thread>
+#include <vector>
+
+inline void zen_runtime_error(const std::string &msg);
+
+/* ================= handles =================
+   File, directory and timer handles come out of the VM's own table
+   (libzen/src/bb_handles.h): the low 16 bits are the slot index and the high
+   15 a generation counter, so the first handle is 65536 - slot 0, generation
+   1 - and a closed slot comes back, on reuse, carrying the next generation.
+   A Blitz program compares handles against small numbers and stores them
+   through PokeInt/WriteInt, so the native tables have to answer the same
+   numbers; a 1-based counter would print 1 where the VM prints 65536. */
+template <class T>
+struct ZenHandles
+{
+    enum { INDEX_BITS = 16, MAX_SLOTS = 1 << INDEX_BITS, GEN_MASK = 0x7FFF };
+
+    struct Slot
+    {
+        T value;
+        unsigned generation;
+    };
+
+    std::vector<Slot> slots;
+    std::vector<unsigned> free_slots;
+
+    int64_t add(T value)
+    {
+        if (!value) return 0;   /* a null object marks a free slot */
+        unsigned index;
+        if (!free_slots.empty())
+        {
+            index = free_slots.back();
+            free_slots.pop_back();
+            slots[index].value = value;
+        }
+        else
+        {
+            if (slots.size() >= (size_t)MAX_SLOTS) return 0;
+            index = (unsigned)slots.size();
+            Slot slot;
+            slot.value = value;
+            slot.generation = 1;
+            slots.push_back(slot);
+        }
+        return (int64_t)(((slots[index].generation & GEN_MASK) << INDEX_BITS) | index);
+    }
+
+    T get(int64_t handle) const
+    {
+        unsigned index;
+        return live(handle, &index) ? slots[index].value : T();
+    }
+
+    void remove(int64_t handle)
+    {
+        unsigned index;
+        if (!live(handle, &index)) return;
+        slots[index].value = T();
+        /* a new generation, so handles to the old occupant stop matching */
+        slots[index].generation = (slots[index].generation + 1) & GEN_MASK;
+        if (slots[index].generation == 0) slots[index].generation = 1;
+        free_slots.push_back(index);
+    }
+
+private:
+    bool live(int64_t handle, unsigned *out) const
+    {
+        if (handle <= 0) return false;
+        const unsigned index = (unsigned)handle & (MAX_SLOTS - 1);
+        const unsigned generation = ((unsigned)handle >> INDEX_BITS) & GEN_MASK;
+        if (index >= slots.size()) return false;
+        const Slot &slot = slots[index];
+        if (!slot.value || slot.generation != generation) return false;
+        *out = index;
+        return true;
+    }
+};
 
 inline std::string zen_str(int64_t value) { return std::to_string(value); }
 inline std::string zen_str(bool value) { return std::to_string(static_cast<int64_t>(value)); }
@@ -80,16 +160,22 @@ inline double zen_ceil(double value) { return std::ceil(value); }
 inline double zen_exp(double value) { return std::exp(value); }
 inline double zen_log(double value) { return std::log(value); }
 inline double zen_log10(double value) { return std::log10(value); }
-inline std::string zen_left(const std::string &s, int64_t n) { return n < 0 ? std::string() : s.substr(0, static_cast<size_t>(n)); }
+inline std::string zen_left(const std::string &s, int64_t n)
+{
+    /* "parameter must be positive", exactly where runtime3d's c_Left checks
+       it: the VM aborts on a negative count and so has to this. */
+    if (n < 0) zen_runtime_error("parameter must be positive");
+    return s.substr(0, static_cast<size_t>(n));
+}
 inline std::string zen_right(const std::string &s, int64_t n)
 {
-    if (n < 0) return {};
+    if (n < 0) zen_runtime_error("parameter must be positive");
     size_t count = static_cast<size_t>(n);
     return s.substr(count >= s.size() ? 0 : s.size() - count);
 }
 inline std::string zen_mid(const std::string &s, int64_t start, int64_t count)
 {
-    if (start <= 0) return {};
+    if (start <= 0) zen_runtime_error("parameter must be greater than 0");
     size_t pos = static_cast<size_t>(start - 1);
     if (pos > s.size()) pos = s.size();
     return count < 0 ? s.substr(pos) : s.substr(pos, static_cast<size_t>(count));
@@ -114,19 +200,19 @@ inline std::string zen_trim(const std::string &s)
 }
 inline std::string zen_lset(std::string s, int64_t size)
 {
-    if (size < 0) return {};
+    if (size < 0) zen_runtime_error("parameter must be positive");
     if (static_cast<int64_t>(s.size()) > size) return s.substr(0, static_cast<size_t>(size));
     return s + std::string(static_cast<size_t>(size - s.size()), ' ');
 }
 inline std::string zen_rset(std::string s, int64_t size)
 {
-    if (size < 0) return {};
+    if (size < 0) zen_runtime_error("parameter must be positive");
     if (static_cast<int64_t>(s.size()) > size) return s.substr(s.size() - static_cast<size_t>(size));
     return std::string(static_cast<size_t>(size - s.size()), ' ') + s;
 }
 inline int64_t zen_instr(const std::string &s, const std::string &find, int64_t from)
 {
-    if (from <= 0) return 0;
+    if (from <= 0) zen_runtime_error("parameter must be greater than 0");
     size_t pos = s.find(find, static_cast<size_t>(from - 1));
     return pos == std::string::npos ? 0 : static_cast<int64_t>(pos + 1);
 }
@@ -157,7 +243,6 @@ inline std::string zen_bin(int64_t n)
     return out;
 }
 inline int64_t zen_round_int(double value) { return (int64_t)std::nearbyint(value); }
-inline void zen_runtime_error(const std::string &msg);
 
 inline int64_t zen_div(int64_t a, int64_t b)
 {
@@ -236,6 +321,163 @@ inline int64_t zen_millisecs()
 {
     return static_cast<int64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now().time_since_epoch()).count());
+}
+
+/* ================= core commands (both flavours) =================
+   Everything from here on is what libzen's bb_cmds.cpp publishes as the core
+   command set: strings (above), random, trigonometry, date/time, the process
+   commands and the fixed-rate timers. They live in this header, not in
+   zen_engine_sdk.h, because a 2D program has every one of them. */
+
+/* Random: Blitz's own LCG, the same constants and the same float steps as
+   runtime3d's c_Rnd/c_Rand, so a seed produces the same sequence as the VM
+   and as the original Blitz3D. std::rand would not: the sequences differ, and
+   samples seed and reuse Rnd across frames. */
+static int z_rnd_state = 0x1234;
+static inline float z_rnd_next()
+{
+    const int rnd_a = 48271, rnd_m = 2147483647, rnd_q = 44488, rnd_r = 3399;
+    z_rnd_state = rnd_a * (z_rnd_state % rnd_q) - rnd_r * (z_rnd_state / rnd_q);
+    if (z_rnd_state < 0) z_rnd_state += rnd_m;
+    return (float)(z_rnd_state & 65535) / 65536.0f + (.5f / 65536.0f);
+}
+inline double zen_rnd(double from, double to = 0.0)
+{
+    const float a = (float)from, b = (float)to;
+    return (double)(z_rnd_next() * (b - a) + a);
+}
+inline int64_t zen_rand(int64_t from, int64_t to = 1)
+{
+    if (to < from) { const int64_t swap = from; from = to; to = swap; }
+    return (int64_t)(z_rnd_next() * (float)(to - from + 1)) + from;
+}
+inline void zen_seed_rnd(int64_t seed)
+{
+    const int s = (int)seed & 0x7fffffff;
+    z_rnd_state = s ? s : 1;
+}
+inline int64_t zen_rnd_seed() { return (int64_t)z_rnd_state; }
+
+/* Trigonometry in degrees, through the same constants as the VM's dtor/rtod. */
+inline double zen_asin(double value) { return std::asin(value) * 57.2957795130823208767981548141052; }
+inline double zen_acos(double value) { return std::acos(value) * 57.2957795130823208767981548141052; }
+inline double zen_atan(double value) { return std::atan(value) * 57.2957795130823208767981548141052; }
+inline double zen_atan2(double a, double b) { return std::atan2(a, b) * 57.2957795130823208767981548141052; }
+
+/* Date and time, formatted the way libzen's c_CurrentDate/c_CurrentTime do. */
+inline std::string zen_current_date()
+{
+    char buffer[256];
+    std::time_t now = std::time(0);
+    std::strftime(buffer, sizeof(buffer), "%d %b %Y", std::localtime(&now));
+    return buffer;
+}
+inline std::string zen_current_time()
+{
+    char buffer[256];
+    std::time_t now = std::time(0);
+    std::strftime(buffer, sizeof(buffer), "%H:%M:%S", std::localtime(&now));
+    return buffer;
+}
+
+/* The process commands. CommandLine$ answers what the CLI installed as the
+   script's arguments - the emitted program is started with none, so it is
+   empty, which is what the VM answers for a script run without arguments. */
+inline std::string zen_command_line() { return ""; }
+inline std::string zen_system_property(const std::string &name)
+{
+    if (name == "blitzversion") return "1.108";
+    if (name == "os")
+    {
+#if defined(_WIN32)
+        return "Windows";
+#elif defined(__APPLE__)
+        return "MacOS";
+#else
+        return "Linux";
+#endif
+    }
+    if (name == "cpu")
+    {
+#if defined(__x86_64__) || defined(_M_X64)
+        return "x86_64";
+#elif defined(__i386__) || defined(_M_IX86)
+        return "x86";
+#elif defined(__aarch64__)
+        return "ARM64";
+#elif defined(__arm__)
+        return "ARM";
+#else
+        return "Unknown";
+#endif
+    }
+    return "";
+}
+inline std::string zen_get_env(const std::string &name)
+{
+    const char *value = std::getenv(name.c_str());
+    return value ? value : "";
+}
+inline void zen_set_env(const std::string &name, const std::string &value)
+{
+#if defined(_WIN32)
+    std::string entry = name + "=" + value;
+    _putenv(entry.c_str());
+#else
+    setenv(name.c_str(), value.c_str(), 1);
+#endif
+}
+inline void zen_debug_log(const std::string &text) { zen_stderr_line(text); }
+inline void zen_exec_file(const std::string &command) { std::system(command.c_str()); }
+/* Locate and Stop are accepted and do nothing, which is all the VM does with
+   them (c_Locate and c_Stop are empty - a script that stops still has to be
+   compiled, it just does not stop). */
+inline void zen_locate(int64_t = 0, int64_t = 0) {}
+inline void zen_stop() {}
+
+/* Blocking sleep, the console path the VM takes when the host resumes Delay
+   and WaitTimer by waiting for the deadline. */
+inline void zen_sleep_ms(double ms)
+{
+    if (ms <= 0) return;
+    std::this_thread::sleep_for(std::chrono::microseconds((int64_t)(ms * 1000.0)));
+}
+inline void zen_delay(int64_t ms) { zen_sleep_ms((double)ms); }
+
+/* Fixed-rate timers on the millisecond clock, the same arithmetic as the VM's
+   BBTimer (period 1000/hz, WaitTimer counting every period the deadline
+   passed) and the same handle table (65536 and up). The VM suspends and lets
+   the host resume it at the deadline; a native program has no host, so it
+   sleeps to the deadline instead. */
+struct ZenTimer { double period; double next; };
+static ZenHandles<ZenTimer *> z_timers;
+inline int64_t zen_create_timer(int64_t hertz)
+{
+    if (hertz <= 0) hertz = 1;
+    ZenTimer *timer = new ZenTimer;
+    timer->period = 1000.0 / (double)hertz;
+    timer->next = (double)zen_millisecs() + timer->period;
+    return z_timers.add(timer);
+}
+inline int64_t zen_wait_timer(int64_t timer)
+{
+    ZenTimer *t = z_timers.get(timer);
+    if (!t) return 0;
+    double now = (double)zen_millisecs();
+    if (now < t->next)
+    {
+        zen_sleep_ms(t->next - now);
+        now = (double)zen_millisecs();
+    }
+    const double reached = now < t->next ? t->next : now;
+    int64_t ticks = 0;
+    while (t->next <= reached) { t->next += t->period; ++ticks; }
+    return ticks;
+}
+inline void zen_free_timer(int64_t timer)
+{
+    delete z_timers.get(timer);
+    z_timers.remove(timer);
 }
 inline void zen_end()
 {
