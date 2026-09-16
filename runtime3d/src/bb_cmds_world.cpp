@@ -1143,12 +1143,23 @@ namespace bb3d
 
     static int c_RenderWorld(VM *vm, Value *args, int nargs)
     {
-        (void)args; (void)nargs;
+        (void)nargs;
         engine::Platform *p = platform_for(vm);
         engine::World *w = world_for(vm);
 
         p->flushCanvasPass();
-        w->prepare(p->device(), 1.0f);
+        // RenderWorld's tween is the one World::prepare interpolates with:
+        // capture() stores the current transforms, and a tween under 1 blends
+        // the drawn ones from that capture towards where they are now, so the
+        // frame lands between the previous capture and this moment. The
+        // argument's own default is 1 (see the table below), so a call with no
+        // argument still draws the current state; the samples that pass one -
+        // castle.bb's "RenderWorld tween", the beginner examples' frameTween -
+        // get the smoother camera their authors wrote them for. This used to
+        // pass a literal 1.0f and ignore the argument while the native codegen
+        // forwarded the script's value, so the two runtimes drew different
+        // frames of the same scene (castle.bb's towers sat a frame apart).
+        w->prepare(p->device(), arg_float(args[0]));
         if (p->beginWorldRender())
         {
             w->draw(p->device());

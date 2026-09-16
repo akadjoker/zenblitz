@@ -884,7 +884,11 @@ namespace bb
 
         names_ = global_names_;
         std::string return_type = emit_type(function->sem_type->returnType);
-        out_ << "static " << return_type << " z_" << function->ident << "(";
+        // The VM is happy with a script function nothing calls, and real
+        // programs have them (an unused variant of a routine, a leftover
+        // helper), so the C++ is told the same: without this an emitted
+        // program fails to compile under -Werror=unused-function.
+        out_ << "static " << return_type << " __attribute__((unused)) z_" << function->ident << "(";
         for (size_t i = 0; i < function->sem_type->params->decls.size(); ++i)
         {
             Decl *decl = function->sem_type->params->decls[i];
@@ -905,11 +909,23 @@ namespace bb
             std::string initial = (decl->type == Type::string_type || decl->type->vectorType()) ? "{}" : "0";
             line(emit_type(decl->type) + " " + names_[decl] + " = " + initial + ";");
         }
+        // A label is only emitted where it stands when something jumps to it
+        // (an unreferenced one would be a -Wunused-label warning, and this
+        // code is built with -Werror), and the program-wide collect in
+        // compile() does not descend into function bodies - so fold this
+        // function's own jump targets into that set for the duration of its
+        // body, and take them out again afterwards (labels are per-function,
+        // and the same name in the next function may well be unused there).
+        // These labels used to be emitted at the top of the function
+        // instead, which made every goto to one of them jump *backwards*:
+        // castle.bb's UpdatePlayer called Goto skip, the label sat at the
+        // top, and the function never returned - a hang, not a warning.
+        const std::set<std::string> outer_labels = goto_labels_;
         std::set<std::string> function_labels;
         collect_goto_labels(function->stmts, function_labels);
-        for (std::set<std::string>::const_iterator it = function_labels.begin(); it != function_labels.end(); ++it)
-            if (it->compare(0, 3, "_20") == 0) line(sanitize_label(*it) + ":;");
+        goto_labels_.insert(function_labels.begin(), function_labels.end());
         emit_statements(function->stmts);
+        goto_labels_ = outer_labels;
         if (function->sem_type->returnType == Type::void_type)
             line("return;");
         else

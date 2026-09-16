@@ -329,10 +329,15 @@ inline void zen_DeleteDir(const std::string &path)
 inline void zen_ChangeDir(const std::string &path)
 {
 #if defined(_WIN32)
-    _chdir(path.c_str());
+    const int rc = _chdir(path.c_str());
 #else
-    chdir(path.c_str());
+    const int rc = chdir(path.c_str());
 #endif
+    // The VM's own ChangeDir ignores a failure (its backend call returns
+    // void and nothing looks at it), so this does too. Reading the result
+    // also keeps glibc's warn_unused_result quiet when the emitted program
+    // is compiled with -Werror.
+    (void)rc;
 }
 inline std::string zen_CurrentDir()
 {
