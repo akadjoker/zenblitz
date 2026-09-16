@@ -65,6 +65,11 @@ endif()
 
 target_sources(zenblitz-editor-tests PRIVATE Editor.cpp EditorSettings.cpp Toolbar.cpp FindBar.cpp
     SymbolPanel.cpp OutputPanel.cpp Runner.cpp FileIO.cpp ${ZEN_NATIVE_FILE_DIALOG_SRC})
+# The runner needs the engine and the GPU libraries it links; the tests target is
+# only generated when they are part of the configuration, otherwise the
+# $<TARGET_FILE:...> expressions below fail the generate step for the whole
+# project (a plain 2D build has no zenblitz_engine).
+if (TARGET zenblitz_engine AND TARGET gpu_sdl AND TARGET gpu AND TARGET gpu_common AND TARGET SDL2)
 target_compile_definitions(zenblitz-editor-tests PRIVATE
     ZEN_EDITOR_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
     ZEN_EDITOR_BUILD_DIR="${CMAKE_BINARY_DIR}"
@@ -75,3 +80,4 @@ target_compile_definitions(zenblitz-editor-tests PRIVATE
     ZEN_EDITOR_GPU_COMMON_LIBRARY="$<TARGET_FILE:gpu_common>"
     ZEN_EDITOR_SDL_LIBRARY="$<TARGET_FILE:SDL2>"
 )
+endif()
