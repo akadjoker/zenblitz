@@ -515,7 +515,8 @@ static void install_window_declarations(bb::BBRuntime *runtime)
     {
         auto *p = new bb::DeclSeq();
         const char *float_queries[] = {"pickedx", "pickedy", "pickedz", "pickednx", "pickedny",
-                                       "pickednz", "pickedtime"};
+                                       "pickednz", "pickedtime",
+                                       "projectedx", "projectedy", "projectedz"};
         for (size_t i = 0; i < sizeof(float_queries) / sizeof(float_queries[0]); ++i)
             decls->insertDecl(float_queries[i], new bb::FuncType(bb::Type::float_type, new bb::DeclSeq(*p), false, false), bb::DECL_FUNC);
     }
@@ -822,6 +823,14 @@ static void install_window_declarations(bb::BBRuntime *runtime)
         p->insertDecl("viewport_y", bb::Type::float_type, bb::DECL_PARAM);
         decls->insertDecl("camerapick", new bb::FuncType(bb::Type::int_type, p, false, false), bb::DECL_FUNC);
     }
+    {
+        auto *p = new bb::DeclSeq();
+        p->insertDecl("camera", bb::Type::int_type, bb::DECL_PARAM);
+        p->insertDecl("x", bb::Type::float_type, bb::DECL_PARAM);
+        p->insertDecl("y", bb::Type::float_type, bb::DECL_PARAM);
+        p->insertDecl("z", bb::Type::float_type, bb::DECL_PARAM);
+        decls->insertDecl("cameraproject", new bb::FuncType(bb::Type::int_type, p, false, false), bb::DECL_FUNC);
+    }
 
     /* Entity extras (radius, autofade, parent, name, class, paint) */
     {
@@ -1061,6 +1070,11 @@ static void install_window_declarations(bb::BBRuntime *runtime)
         p->insertDecl("blue", bb::Type::float_type, bb::DECL_PARAM);
         decl_void("ambientlight", p);
     }
+    {
+        auto *p = new bb::DeclSeq();
+        p->insertDecl("enable", bb::Type::int_type, bb::DECL_PARAM);
+        decl_int("hwmultitex", p);
+    }
 
     /* Camera */
     {
@@ -1249,6 +1263,7 @@ static void register_builtin_wrappers(bb::BBRuntime *runtime, bb::CGen &gen)
     reg("cameraclscolor", "zen_camera_cls_color", true);
     /* Light */
     reg("ambientlight", "zen_ambient_light", true);
+    reg("hwmultitex", "zen_hw_multi_tex", true);
     /* World */
     reg("updateworld", "zen_update_world", true);
     reg("renderworld", "zen_render_world", true);
@@ -1642,6 +1657,10 @@ static void register_builtin_wrappers(bb::BBRuntime *runtime, bb::CGen &gen)
     reg("camerafogrange", "zen_camera_fog_range", true);
     reg("cameraprojmode", "zen_camera_proj_mode", true);
     reg("camerapick", "zen_camera_pick", true);
+    reg("cameraproject", "zen_camera_project", true);
+    reg("projectedx", "zen_projected_x", true);
+    reg("projectedy", "zen_projected_y", true);
+    reg("projectedz", "zen_projected_z", true);
     /* Entity extras */
     reg("entityradius", "zen_entity_radius", true);
     reg("entityautofade", "zen_entity_autofade", true);

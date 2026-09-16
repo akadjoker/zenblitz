@@ -1170,6 +1170,7 @@ inline void zen_camera_proj_mode(int64_t cam, int64_t mode)
     if (e && e->getCamera()) e->getCamera()->setProjMode((int)mode);
 }
 inline int64_t zen_camera_pick(int64_t camera, double x, double y);
+inline int64_t zen_camera_project(int64_t camera, double x, double y, double z);
 
 /* Entity extras */
 inline void zen_entity_radius(int64_t entity, double x_radius, double y_radius = 0)
@@ -2501,6 +2502,25 @@ inline void zen_ambient_light(double r, double g, double b)
     z_world_ensure();
     z_world.setAmbient(engine::Vector((float)r/255.0f, (float)g/255.0f, (float)b/255.0f));
 }
+
+/* bbHWMultiTex toggled gxScene's texture stage count between the card's real
+   one and 1, for hardware whose multitexturing was broken or slow - a Direct3D
+   fixed-function concern with nothing behind it here, since this renderer
+   binds its texture units from the shader either way. Accepted and ignored
+   (with one warning, like the VM's), so a script that calls it runs instead of
+   dying on a missing command; 0 is what the original answered when asked to
+   turn multitexturing off. */
+inline int64_t zen_hw_multi_tex(int64_t /*enable*/)
+{
+    static bool warned = false;
+    if (!warned)
+    {
+        warned = true;
+        zen_stderr_line("HWMultiTex: accepted and ignored - this renderer always multitextures "
+                        "(the original toggled a Direct3D fixed-function stage count)");
+    }
+    return 0;
+}
 inline void zen_light_color(int64_t h, double r, double g, double b)
 {
     engine::Entity *e = z_entity(h);
@@ -2684,6 +2704,21 @@ inline int64_t zen_picked_surface()
     return (int64_t)(std::intptr_t)z_pick_state.collision.surface;
 }
 inline int64_t zen_picked_triangle() { return (int64_t)z_pick_state.collision.index; }
+
+/* CameraProject + the Projected* queries: Camera::project does the maths, the
+   vector it fills is the Blitz "last projected point" the queries read back. */
+static engine::Vector z_projected_state;
+
+inline int64_t zen_camera_project(int64_t camera, double x, double y, double z)
+{
+    engine::Entity *e = z_entity(camera);
+    engine::Camera *cam = e ? e->getCamera() : nullptr;
+    if (!cam) return 0;
+    return cam->project(engine::Vector((float)x, (float)y, (float)z), z_projected_state) ? 1 : 0;
+}
+inline double zen_projected_x() { return z_projected_state.x; }
+inline double zen_projected_y() { return z_projected_state.y; }
+inline double zen_projected_z() { return z_projected_state.z; }
 
 /* ================= Textures ================= */
 
