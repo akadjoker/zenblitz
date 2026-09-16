@@ -15,7 +15,30 @@
    generated without that header, and Input/AppTitle are exactly what such a
    program uses. runtime3d implements Input by reading a line and AppTitle by
    doing nothing at all (the window always closes without asking). */
-inline std::string zen_input(const std::string & = "") { return ""; }
+/* Input prints its prompt first - Blitz3D shows the question and waits on the
+   same line - then one stdin line. Same shape as the VM's c_Input over
+   sb_input: stdout is flushed around the prompt so a pipe (an editor's Output
+   panel) shows it while the program waits, the line's newline and a stray
+   carriage return are dropped, and end of input answers with an empty string
+   rather than failing. This used to ignore the prompt and return "" straight
+   away, which is why the samples that ask a question over the console (screen
+   savers, castle's "Number of dudes (1-50): ") stayed silent under the native
+   next to a VM printing the question. */
+inline std::string zen_input(const std::string &prompt = "")
+{
+    std::fflush(stdout);
+    if (!prompt.empty())
+    {
+        std::fwrite(prompt.data(), 1, prompt.size(), stdout);
+        std::fflush(stdout);
+    }
+    char line[4096];
+    if (!std::fgets(line, (int)sizeof(line), stdin)) return std::string();
+    size_t n = std::strlen(line);
+    if (n > 0 && line[n - 1] == '\n') --n;
+    if (n > 0 && line[n - 1] == '\r') --n;
+    return std::string(line, n);
+}
 inline void zen_app_title(const std::string &, const std::string & = "") {}
 inline void zen_enable_direct_input(int64_t) {}
 inline int64_t zen_direct_input_enabled() { return 0; }
