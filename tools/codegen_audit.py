@@ -78,6 +78,7 @@ def is_noop(body):
 COMMAND_LINE = re.compile(r'\{"((?:[^"\\]|\\.)+)"\s*,\s*(c_[A-Za-z0-9_]+)')
 
 vm_commands = {}    # lowercase command name -> VM implementation function
+vm_signatures = {}  # lowercase command name -> the signature string the VM publishes
 vm_sources = [read(path) for path in VM_SOURCES]
 for text in vm_sources:
     for line in text.splitlines():
@@ -86,6 +87,7 @@ for text in vm_sources:
             name = re.split(r'[%$#]', m.group(1).lstrip('%#$'), maxsplit=1)[0]
             if name:
                 vm_commands[name.lower()] = m.group(2)
+                vm_signatures.setdefault(name.lower(), m.group(1))
 
 vm_trivial = {}     # VM implementation -> does nothing?
 for func in set(vm_commands.values()):
@@ -180,6 +182,80 @@ for m in re.finditer(r'reg\("([^"]+)"\s*,\s*"([^"]+)"\s*(,\s*true)?\)', zencc):
 print('\nregistados como core mas definidos só no header 3D (%d):' % len(stranded))
 for cmd, wrapper in sorted(stranded):
     print('  %-20s %s' % (cmd, wrapper))
+
+# --- signatures: a call the VM accepts, the emitter has to accept too -------
+# The VM writes each command's signature as a string - the return marker, the
+# name, then one marker per parameter (%int, #float, $string), "=name" for the
+# ones with defaults - so "%LoadMesh$file%parent=0" documents two parameters.
+# zencc builds the same list in code: p->insertDecl(...) lines feeding
+# decl_*(name, p), or an inline lambda. Nothing compared the two until
+# scare.bb's LoadMesh("file", parent) came back "Too many parameters for
+# function 'loadmesh'" while the VM ran it happily - the declaration had only
+# the file. A signature can also be *shorter* in the emitter (a call that
+# passes every documented parameter is rejected) or longer (the callers'
+# defaults differ), so both directions are printed.
+def vm_param_count(signature):
+    text = re.sub(r'\\"', '', signature)     # defaults may carry escaped quotes
+    i = 1                                    # skip the return marker
+    while i < len(text) and text[i] not in '%#$':
+        i += 1
+    return sum(1 for c in text[i:] if c in '%#$')
+
+
+def zencc_param_count(text, at, args):
+    # One parameter per param_*(...) helper or insertDecl line, except that the
+    # list-of-names loop (`for (const char *n : {"a", "b", ...}) insertDecl(n,
+    # ...)`) is several parameters behind one call. The two commands whose
+    # parameter list comes from a shared builder lambda (buffer_copy_params)
+    # are not counted here at all: the scanner cannot see into it, and guessing
+    # produced false positives on every command sharing a block's DeclSeq.
+    count = len(re.findall(r'\bparam_(?:str|int|float)\(', args))
+    loops = re.findall(r'for \(const char \*\w+ : \{([^}]*)\}\)', args)
+    for names in loops:
+        count += len(re.findall(r'"', names)) // 2
+    count += len(re.findall(r'insertDecl\(', args)) - len(loops)
+    if count:
+        return count
+    if 'no_params()' in args:
+        return 0
+    if re.fullmatch(r'\s*\w+\s*', args):
+        block = text.rfind('{', 0, at)
+        return len(re.findall(r'insertDecl\(', text[block:at]))
+    return None   # an expression the scanner does not understand
+
+
+signature_gaps = []
+unverifiable = []
+decl_start = re.compile(r'\bdecl_(?:void|int|float|str)\("([^"]+)"\s*,')
+for m in decl_start.finditer(zencc):
+    name = m.group(1).lower()
+    if name not in vm_commands:
+        continue
+    # Walk to the matching close paren to get the whole argument list, since
+    # the lambda form spans lines and has parens of its own.
+    depth, i = 1, m.end()
+    while i < len(zencc) and depth:
+        if zencc[i] == '(':
+            depth += 1
+        elif zencc[i] == ')':
+            depth -= 1
+        i += 1
+    declared = zencc_param_count(zencc, m.start(), zencc[m.end():i])
+    signature = vm_signatures.get(name)
+    if signature is None:
+        continue
+    documented = vm_param_count(signature)
+    if declared is None:
+        unverifiable.append((name, documented, signature))
+    elif declared != documented:
+        signature_gaps.append((name, declared, documented, signature))
+
+print('\nASSINATURAS - o emitter aceita menos/m mais parametros do que a VM documenta (%d):'
+      % len(signature_gaps))
+for name, declared, documented, signature in sorted(signature_gaps):
+    print('  %-20s emitter: %d  VM: %d   %s' % (name, declared, documented, signature))
+print('  (nao verificaveis, o contador passa ao lado: %s)'
+      % ', '.join('%s VM:%d' % (n, d) for n, d, _ in sorted(unverifiable)))
 
 print('\nwrappers sem efeito nenhum (%d: %d de comando, %d de valor)'
       % (len(noop), len(noop_void), len(noop_value)))

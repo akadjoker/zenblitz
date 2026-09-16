@@ -41,6 +41,15 @@ static void install_window_declarations(bb::BBRuntime *runtime)
         return ds;
     };
     auto no_params = [&]() { return new bb::DeclSeq(); };
+    /* A file path plus the optional parent entity: the shape LoadMesh,
+       LoadAnimMesh, LoadMD2 and LoadTerrain share, and what the VM's own
+       signatures document (%LoadMesh$file%parent=0). */
+    auto file_parent_params = [&](const char *file_name) {
+        auto *p = new bb::DeclSeq();
+        p->insertDecl(file_name, bb::Type::string_type, bb::DECL_PARAM);
+        p->insertDecl("parent", bb::Type::int_type, bb::DECL_PARAM, new bb::ConstType(0LL));
+        return p;
+    };
 
     /* Graphics / Graphics3D */
     {
@@ -204,7 +213,12 @@ static void install_window_declarations(bb::BBRuntime *runtime)
         decl_void("vwait", p);
     }
     decl_int("waitmouse", no_params());
-    decl_void("apptitle", param_str("title"));  // simplified: close_prompt optional
+    decl_void("apptitle", [&]() {
+        auto *p = new bb::DeclSeq();
+        p->insertDecl("title", bb::Type::string_type, bb::DECL_PARAM);
+        p->insertDecl("close_prompt", bb::Type::string_type, bb::DECL_PARAM, new bb::ConstType(std::string()));
+        return p;
+    }());
 
     /* Core commands from libzen's table (bb_cmds.cpp) that the emitter did not
        know - a script calling any of them could not be compiled natively at
@@ -590,8 +604,8 @@ static void install_window_declarations(bb::BBRuntime *runtime)
         decl_int("emitsound", [&]() { auto *q = new bb::DeclSeq(); q->insertDecl("sound", bb::Type::int_type, bb::DECL_PARAM); q->insertDecl("entity", bb::Type::int_type, bb::DECL_PARAM); return q; }());
 
     /* Terrain/MD2 (stubs) */
-    decl_int("loadterrain", param_str("heightmap_file"));
-    decl_int("loadmd2", param_str("file"));
+    decl_int("loadterrain", file_parent_params("heightmap_file"));
+    decl_int("loadmd2", file_parent_params("file"));
     decls->insertDecl("terrainheight", new bb::FuncType(bb::Type::float_type, [&]() { auto *q = new bb::DeclSeq(); q->insertDecl("terrain", bb::Type::int_type, bb::DECL_PARAM); q->insertDecl("terrain_x", bb::Type::int_type, bb::DECL_PARAM); q->insertDecl("terrain_z", bb::Type::int_type, bb::DECL_PARAM); return q; }(), false, false), bb::DECL_FUNC);
     decl_int("terrainsize", param_int("terrain"));
     decl_int("imagewidth", [&]() { auto *q = new bb::DeclSeq(); q->insertDecl("image", bb::Type::int_type, bb::DECL_PARAM); return q; }());
@@ -912,12 +926,39 @@ static void install_window_declarations(bb::BBRuntime *runtime)
 
     /* ===== 3D entities ===== */
     decl_int("createcamera", param_int("parent", 0, true));
-    decl_int("createlight", param_int("type", 1, true));
+    decl_int("createlight", [&]() {
+        auto *q = new bb::DeclSeq();
+        q->insertDecl("type", bb::Type::int_type, bb::DECL_PARAM, new bb::ConstType(1LL));
+        q->insertDecl("parent", bb::Type::int_type, bb::DECL_PARAM, new bb::ConstType(0LL));
+        return q;
+    }());
     decl_int("createcube", param_int("parent", 0, true));
-    decl_int("createsphere", param_int("segments", 8, true));
-    decl_int("createcylinder", param_int("segments", 8, true));
-    decl_int("createcone", param_int("segments", 8, true));
-    decl_int("createplane", param_int("segments", 1, true));
+    decl_int("createsphere", [&]() {
+        auto *q = new bb::DeclSeq();
+        q->insertDecl("segments", bb::Type::int_type, bb::DECL_PARAM, new bb::ConstType(8LL));
+        q->insertDecl("parent", bb::Type::int_type, bb::DECL_PARAM, new bb::ConstType(0LL));
+        return q;
+    }());
+    decl_int("createcylinder", [&]() {
+        auto *q = new bb::DeclSeq();
+        q->insertDecl("segments", bb::Type::int_type, bb::DECL_PARAM, new bb::ConstType(8LL));
+        q->insertDecl("solid", bb::Type::int_type, bb::DECL_PARAM, new bb::ConstType(1LL));
+        q->insertDecl("parent", bb::Type::int_type, bb::DECL_PARAM, new bb::ConstType(0LL));
+        return q;
+    }());
+    decl_int("createcone", [&]() {
+        auto *q = new bb::DeclSeq();
+        q->insertDecl("segments", bb::Type::int_type, bb::DECL_PARAM, new bb::ConstType(8LL));
+        q->insertDecl("solid", bb::Type::int_type, bb::DECL_PARAM, new bb::ConstType(1LL));
+        q->insertDecl("parent", bb::Type::int_type, bb::DECL_PARAM, new bb::ConstType(0LL));
+        return q;
+    }());
+    decl_int("createplane", [&]() {
+        auto *q = new bb::DeclSeq();
+        q->insertDecl("segments", bb::Type::int_type, bb::DECL_PARAM, new bb::ConstType(1LL));
+        q->insertDecl("parent", bb::Type::int_type, bb::DECL_PARAM, new bb::ConstType(0LL));
+        return q;
+    }());
     decl_int("createpivot", param_int("parent", 0, true));
     decl_int("createmesh", param_int("parent", 0, true));
     {
@@ -1006,7 +1047,11 @@ static void install_window_declarations(bb::BBRuntime *runtime)
     }
 
     /* World */
-    decl_void("updateworld", no_params());
+    decl_void("updateworld", [&]() {
+        auto *p = new bb::DeclSeq();
+        p->insertDecl("elapsed_time", bb::Type::float_type, bb::DECL_PARAM, new bb::ConstType(1.0));
+        return p;
+    }());
     decl_void("renderworld", [&]() { auto *p = new bb::DeclSeq(); p->insertDecl("tween", bb::Type::float_type, bb::DECL_PARAM, new bb::ConstType(1.0)); return p; }());
     decl_void("captureworld", no_params());
     {
@@ -1099,8 +1144,8 @@ static void install_window_declarations(bb::BBRuntime *runtime)
     decl_void("paintentity", [&]() { auto *q = new bb::DeclSeq(); q->insertDecl("entity", bb::Type::int_type, bb::DECL_PARAM); q->insertDecl("brush", bb::Type::int_type, bb::DECL_PARAM); return q; }());
 
     /* Mesh loading */
-    decl_int("loadmesh", param_str("file"));
-    decl_int("loadanimmesh", param_str("file"));
+    decl_int("loadmesh", file_parent_params("file"));
+    decl_int("loadanimmesh", file_parent_params("file"));
 }
 
 /* After all declarations, map each builtin's Decl* to its native wrapper.
