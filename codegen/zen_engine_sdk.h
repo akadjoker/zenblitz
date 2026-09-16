@@ -29,6 +29,7 @@
 #include "engine/Terrain.h"
 #include "engine/Sound.h"
 #include "engine/CSG.h"
+#include "engine/ParticleEmitter.h"
 #include "engine/Listener.h"
 #include "engine/FilePath.h"
 
@@ -1643,6 +1644,104 @@ inline int64_t zen_play_music(const std::string &file)
 /* PlayCDTrack: no CD drive to play from, so the command answers 0 - which is
    what runtime3d does. */
 inline int64_t zen_play_cd_track(int64_t = 0, int64_t = 0) { return 0; }
+
+/* ================= Particles ================= */
+
+/* The model behind the handle is an engine::ParticleEmitter, reached the way
+   runtime3d's emitter_of reaches it. Every setter forwards to the emitter, and
+   the ones with a second value follow the VM's rule: a negative maximum means
+   "the same as the minimum". */
+static inline engine::ParticleEmitter *z_emitter_of(int64_t handle)
+{
+    engine::Entity *e = z_entity(handle);
+    auto *model = e ? e->getModel() : nullptr;
+    return model ? dynamic_cast<engine::ParticleEmitter *>(model) : nullptr;
+}
+inline int64_t zen_create_particle_emitter(int64_t maxParticles = 512, int64_t parent = 0)
+{
+    engine::ParticleEmitter *emitter = new engine::ParticleEmitter((int)maxParticles);
+    return z_store_entity(emitter, z_entity(parent));
+}
+inline void zen_emit_particles(int64_t emitter, int64_t count)
+{
+    if (engine::ParticleEmitter *e = z_emitter_of(emitter)) e->emit((int)count);
+}
+inline void zen_clear_particles(int64_t emitter)
+{
+    if (engine::ParticleEmitter *e = z_emitter_of(emitter)) e->clearParticles();
+}
+inline int64_t zen_count_particles(int64_t emitter)
+{
+    engine::ParticleEmitter *e = z_emitter_of(emitter);
+    return e ? e->particleCount() : 0;
+}
+inline void zen_emitter_rate(int64_t emitter, double particlesPerTick)
+{
+    if (engine::ParticleEmitter *e = z_emitter_of(emitter)) e->setRate((float)particlesPerTick);
+}
+inline void zen_emitter_vector(int64_t emitter, double x, double y, double z)
+{
+    if (engine::ParticleEmitter *e = z_emitter_of(emitter))
+        e->setVector(engine::Vector((float)x, (float)y, (float)z));
+}
+inline void zen_emitter_spread(int64_t emitter, double x, double y, double z)
+{
+    if (engine::ParticleEmitter *e = z_emitter_of(emitter))
+        e->setSpread(engine::Vector((float)x, (float)y, (float)z));
+}
+inline void zen_emitter_gravity(int64_t emitter, double x, double y, double z)
+{
+    if (engine::ParticleEmitter *e = z_emitter_of(emitter))
+        e->setGravity(engine::Vector((float)x, (float)y, (float)z));
+}
+inline void zen_emitter_life(int64_t emitter, double minimum, double maximum = -1.0)
+{
+    if (engine::ParticleEmitter *e = z_emitter_of(emitter))
+        e->setLife((float)minimum, maximum < 0.0 ? (float)minimum : (float)maximum);
+}
+inline void zen_emitter_speed(int64_t emitter, double minimum, double maximum = -1.0)
+{
+    if (engine::ParticleEmitter *e = z_emitter_of(emitter))
+        e->setSpeed((float)minimum, maximum < 0.0 ? (float)minimum : (float)maximum);
+}
+inline void zen_emitter_size(int64_t emitter, double start, double end = -1.0)
+{
+    if (engine::ParticleEmitter *e = z_emitter_of(emitter))
+        e->setSize((float)start, end < 0.0 ? (float)start : (float)end);
+}
+inline void zen_emitter_color(int64_t emitter, double startRed, double startGreen, double startBlue,
+                             double endRed, double endGreen, double endBlue)
+{
+    if (engine::ParticleEmitter *e = z_emitter_of(emitter))
+        e->setColor(engine::Vector((float)startRed / 255.0f, (float)startGreen / 255.0f,
+                                   (float)startBlue / 255.0f),
+                    engine::Vector((float)endRed / 255.0f, (float)endGreen / 255.0f,
+                                   (float)endBlue / 255.0f));
+}
+inline void zen_emitter_alpha(int64_t emitter, double start, double end)
+{
+    if (engine::ParticleEmitter *e = z_emitter_of(emitter)) e->setAlpha((float)start, (float)end);
+}
+inline void zen_emitter_blend(int64_t emitter, int64_t blend)
+{
+    if (engine::ParticleEmitter *e = z_emitter_of(emitter)) e->setBlend((int)blend);
+}
+inline void zen_emitter_texture(int64_t emitter, int64_t texture, int64_t frameWidth = 0,
+                                int64_t frameHeight = 0, int64_t firstFrame = 0,
+                                int64_t frameCount = 0)
+{
+    engine::ParticleEmitter *e = z_emitter_of(emitter);
+    engine::Texture *t = z_texture_of(texture);
+    if (!e || !t) return;
+    if (frameWidth < 1) frameWidth = t->width();
+    if (frameHeight < 1) frameHeight = t->height();
+    int columns = frameWidth > 0 ? t->width() / (int)frameWidth : 1;
+    int rows = frameHeight > 0 ? t->height() / (int)frameHeight : 1;
+    if (columns < 1) columns = 1;
+    if (rows < 1) rows = 1;
+    e->setTexture(0, engine::BrushTexture::fromTexture(z_platform.device(), t, 0));
+    e->setAtlas(columns, rows, (int)firstFrame, (int)frameCount);
+}
 
 /* ================= Mesh editing ================= */
 
