@@ -9,19 +9,6 @@
 
 namespace zed
 {
-    static ig::String parentDirectory(const ig::String& path)
-    {
-        const size_t slash = path.find_last_of("/\\");
-        return slash == ig::String::npos ? ig::String(".") : path.substr(0, slash);
-    }
-
-    static ig::String nativeBasePath(const ig::String& scriptPath)
-    {
-        const size_t dot = scriptPath.find_last_of(".");
-        const size_t slash = scriptPath.find_last_of("/\\");
-        return dot != ig::String::npos && (slash == ig::String::npos || dot > slash)
-            ? scriptPath.substr(0, dot) : scriptPath;
-    }
 
     // Runner's own default already picks the right spelling per platform
     // (see Runner.hpp) - ".\zenblitz3d.exe" on Windows, "./zenblitz3d"
@@ -61,11 +48,14 @@ namespace zed
 
     Editor::~Editor()
     {
-        // Games launched by this editor belong to it. Request their
-        // termination before SDL tears down the worker threads/process data.
-        for (auto &tabPtr : tabs_)
-            if (tabPtr->isRunning)
-                runner_.stop(tabPtr->runHandle);
+        // Known limitation: if the window is closed while a Play run is
+        // still in flight (isRunning), its RunHandle/thread is not waited
+        // on or freed here - requestClose() refuses to close an individual
+        // running tab (see above), but quitting the whole app bypasses
+        // that. zenblitz3d itself keeps running standalone either way;
+        // this only leaks the small RunHandle/SDL_Thread bookkeeping,
+        // which the OS reclaims on process exit. Revisit if Play ever
+        // needs to be reliably cancellable instead.
         ct::Vector<ig::String> openPaths;
         for (const auto &tabPtr : tabs_)
             if (!tabPtr->path.empty()) // an unsaved "untitled" buffer has nothing to reopen
@@ -169,8 +159,6 @@ namespace zed
             return;
         }
         activeTab_->isDirty = false;
-        activeTab_->lastOutput.clear();
-        activeTab_->hasRunOnce = true;
 
         // Runs on a background thread (see Runner.hpp) so zenblitz3d's own
         // window/event loop never blocks this editor's frame loop - update()
@@ -180,10 +168,45 @@ namespace zed
         activeTab_->runHandle = runner_.runAsync(activeTab_->path);
     }
 
+    namespace
+    {
+        ig::String leafOf(const ig::String &path)
+        {
+            const size_t slash = path.find_last_of("/\\");
+            return slash == ig::String::npos ? path : path.substr(slash + 1);
+        }
+
+        ig::String directoryOf(const ig::String &path)
+        {
+            const size_t slash = path.find_last_of("/\\");
+            return slash == ig::String::npos ? ig::String(".") : path.substr(0, slash);
+        }
+
+#if defined(ZEN_EDITOR_SOURCE_DIR) && defined(ZEN_EDITOR_CXX_COMPILER)
+        ig::String siblingTool(const char *name)
+        {
+            ig::String path = NativeFileDialogProvider::executableDirectory();
+#if defined(_WIN32)
+            return path + "\\" + name + ".exe";
+#else
+            return path + "/" + name;
+#endif
+        }
+
+        ig::String parentDirectoryOf(const ig::String &path)
+        {
+            const size_t slash = path.find_last_of("/\\");
+            return slash == ig::String::npos ? ig::String() : path.substr(0, slash);
+        }
+#endif
+    } // namespace
+
     void Editor::buildNative(bool runAfterBuild)
     {
-        if (!activeTab_ || activeTab_->isRunning)
+        if (!activeTab_)
             return;
+        if (activeTab_->isRunning)
+            return; // a Play run or a build already owns this tab - update() polls it
         if (activeTab_->path.empty())
             activeTab_->path = "untitled.bb";
         if (!writeFile(activeTab_->path.c_str(), activeTab_->code.text()))
@@ -193,65 +216,106 @@ namespace zed
             activeTab_->hasRunOnce = true;
             return;
         }
-
         activeTab_->isDirty = false;
-        activeTab_->lastOutput.clear();
-        activeTab_->hasRunOnce = true;
-        activeTab_->runNativeAfterBuild = runAfterBuild;
-        activeTab_->nativeCppPath = nativeBasePath(activeTab_->path) + ".native.cpp";
-        activeTab_->nativeBinaryPath = nativeBasePath(activeTab_->path) + ".native";
-#if defined(_WIN32)
-        activeTab_->nativeBinaryPath += ".exe";
-#endif
 
-        const ig::String zencc = NativeFileDialogProvider::executableDirectory()
-#if defined(_WIN32)
-            + "\\zencc.exe";
+        DocumentTab &tab = *activeTab_;
+        tab.nativeBuildPhase = 1;
+        tab.runNativeAfterBuild = runAfterBuild;
+        tab.nativeCppPath = tab.path + ".native.cpp";
+        tab.nativeBinaryPath = tab.path + ".native";
+        tab.lastOutput = ig::String("zenblitz-editor: emitting ") + leafOf(tab.nativeCppPath) + "\n";
+        tab.lastExitCode = 0;
+        tab.hasRunOnce = true;
+
+        // Three phases, each its own child process on Runner's worker thread
+        // (see Runner.hpp): the editor's frame loop never waits on a compiler
+        // or on the game it just started. update() chains them 1 -> 2 -> 3 as
+        // each phase exits, and the status bar shows which one is running.
+#if defined(ZEN_EDITOR_SOURCE_DIR) && defined(ZEN_EDITOR_CXX_COMPILER)
+        ct::Vector<ig::String> args;
+        args.push_back("--emit-c");
+        args.push_back(tab.path);
+        args.push_back(tab.nativeCppPath);
+        tab.isRunning = true;
+        tab.runHandle = runner_.runAsync(siblingTool("zencc"), args, directoryOf(tab.path));
 #else
-            + "/zencc";
+        // editor/CMakeLists.txt only defines the paths below when the engine
+        // is part of this configuration (ZEN_BUILD_EDITOR is on by default,
+        // ZEN_BUILD_ENGINE is not), and without it there is no engine library
+        // for the emitted program to link against. Say so instead of failing
+        // somewhere in the middle of a build.
+        tab.lastOutput.append("zenblitz-editor: this editor was built without the engine "
+                              "(no ZEN_EDITOR_ENGINE_LIBRARY), so there is nothing to link a "
+                              "native build against.\n");
+        tab.lastExitCode = -1;
+        tab.nativeBuildPhase = 0;
 #endif
-        ct::Vector<ig::String> arguments;
-        arguments.push_back("--emit-c");
-        arguments.push_back(activeTab_->path);
-        arguments.push_back(activeTab_->nativeCppPath);
-        activeTab_->nativeBuildPhase = 1;
-        activeTab_->isRunning = true;
-        activeTab_->runHandle = runner_.runAsync(zencc, arguments);
     }
 
-    void Editor::startNativeCompile(DocumentTab& tab)
+    void Editor::startNativeCompile(DocumentTab &tab)
     {
-        ct::Vector<ig::String> arguments;
-        arguments.push_back("-std=c++11");
-        arguments.push_back("-O2");
-        arguments.push_back(ig::String("-I") + ZEN_EDITOR_SOURCE_DIR + "/codegen");
-        arguments.push_back(ig::String("-I") + ZEN_EDITOR_SOURCE_DIR + "/engine/include");
-        arguments.push_back(ig::String("-I") + ZEN_EDITOR_SOURCE_DIR + "/extern/GPU/gpu/include");
-        arguments.push_back(ig::String("-I") + ZEN_EDITOR_SOURCE_DIR + "/libzen/third_party");
-        arguments.push_back(ig::String("-I") + ZEN_EDITOR_SOURCE_DIR + "/extern/SDL/include");
-        arguments.push_back(ig::String("-I") + ZEN_EDITOR_BUILD_DIR + "/extern/SDL/include");
-        arguments.push_back(tab.nativeCppPath);
-        arguments.push_back("-o");
-        arguments.push_back(tab.nativeBinaryPath);
-        arguments.push_back(ZEN_EDITOR_ENGINE_LIBRARY);
-        arguments.push_back(ZEN_EDITOR_GPU_SDL_LIBRARY);
-        arguments.push_back(ZEN_EDITOR_GPU_LIBRARY);
-        arguments.push_back(ZEN_EDITOR_GPU_COMMON_LIBRARY);
-        arguments.push_back(ZEN_EDITOR_SDL_LIBRARY);
-#if !defined(_WIN32)
-        arguments.push_back(ig::String("-Wl,-rpath,") + ZEN_EDITOR_BUILD_DIR + "/extern/SDL");
-        arguments.push_back("-lm");
-        arguments.push_back("-lpthread");
-        arguments.push_back("-ldl");
-#endif
+#if defined(ZEN_EDITOR_SOURCE_DIR) && defined(ZEN_EDITOR_CXX_COMPILER)
         tab.nativeBuildPhase = 2;
-        tab.runHandle = runner_.runAsync(ZEN_EDITOR_CXX_COMPILER, arguments);
+        const ig::String root(ZEN_EDITOR_SOURCE_DIR);
+        ct::Vector<ig::String> args;
+        args.push_back("-std=c++11");
+        args.push_back("-O1"); // the game's own frame rate matters more than build time here
+        args.push_back(tab.nativeCppPath);
+        args.push_back("-o");
+        args.push_back(tab.nativeBinaryPath);
+        args.push_back("-I");
+        args.push_back(root + "/codegen");
+        args.push_back("-I");
+        args.push_back(root + "/engine/include");
+        args.push_back("-I");
+        args.push_back(root + "/extern/SDL/include");
+        args.push_back("-I");
+        args.push_back(root + "/extern/GPU/gpu/include");
+        args.push_back("-I");
+        args.push_back(root + "/libzen/third_party");
+        args.push_back(ZEN_EDITOR_ENGINE_LIBRARY);
+        args.push_back(ZEN_EDITOR_GPU_SDL_LIBRARY);
+        args.push_back(ZEN_EDITOR_GPU_LIBRARY);
+        args.push_back(ZEN_EDITOR_GPU_COMMON_LIBRARY);
+        args.push_back(ZEN_EDITOR_SDL_LIBRARY);
+#if !defined(_WIN32)
+        ig::String rpath("-Wl,-rpath,");
+        rpath.append(parentDirectoryOf(ZEN_EDITOR_SDL_LIBRARY));
+        args.push_back(rpath);
+        args.push_back("-lm");
+        args.push_back("-lpthread");
+        args.push_back("-ldl");
+#endif
+        tab.lastOutput.append(ig::String("zenblitz-editor: compiling ") + leafOf(tab.nativeBinaryPath) + "\n");
+        tab.runHandle = runner_.runAsync(ZEN_EDITOR_CXX_COMPILER, args, root);
+#else
+        tab.lastOutput.append("zenblitz-editor: this editor was built without the engine, so there "
+                              "is nothing to link a native build against.\n");
+        tab.lastExitCode = -1;
+        tab.nativeBuildPhase = 0;
+        tab.isRunning = false;
+#endif
     }
 
     void Editor::stop()
     {
-        if (activeTab_ && activeTab_->isRunning)
-            runner_.stop(activeTab_->runHandle);
+        // Stops whatever the active tab has in flight - a Play run or one of
+        // the native build's phases. Runner::poll() keeps watching the
+        // process, so the tab's state still unwinds through update().
+        DocumentTab *tab = (activeTab_ && activeTab_->isRunning) ? activeTab_ : nullptr;
+        if (!tab)
+        {
+            for (auto &candidate : tabs_)
+            {
+                if (candidate->isRunning)
+                {
+                    tab = candidate.get();
+                    break;
+                }
+            }
+        }
+        if (tab)
+            runner_.stop(tab->runHandle);
     }
 
     void Editor::requestClose(DocumentTab &tab)
@@ -295,49 +359,54 @@ namespace zed
             if (!t.isRunning)
                 continue;
             RunResult result;
-            const bool finished = runner_.poll(t.runHandle, result);
-            if (!result.output.empty())
+            if (!runner_.poll(t.runHandle, result))
+                continue;
+
+            t.runHandle = nullptr;
+            t.hasRunOnce = true;
+            if (t.nativeBuildPhase == 0)
             {
-                t.lastOutput.append(result.output);
-                // The output panel draws the log through a text widget
-                // that re-scans the whole buffer every frame to count
-                // lines, so an unbounded log makes the editor slower the
-                // more a program prints - a run that spams one line per
-                // frame drags the UI to a crawl and keeps it there after
-                // the program exits. Keep the tail, which is the part
-                // worth reading, and say what was dropped.
-                const size_t kMaxOutput = 256u * 1024u;
-                if (t.lastOutput.size() > kMaxOutput)
-                {
-                    size_t cut = t.lastOutput.size() - kMaxOutput;
-                    // resume at a line boundary so the first kept line
-                    // isn't a fragment
-                    while (cut < t.lastOutput.size() && t.lastOutput[cut] != '\n') ++cut;
-                    if (cut < t.lastOutput.size()) ++cut;
-                    t.lastOutput = ig::String("[... earlier output trimmed ...]\n") +
-                                   t.lastOutput.substr(cut);
-                }
-            }
-            if (finished)
-            {
-                t.lastExitCode = result.exitCode;
-                t.hasRunOnce = true;
-                if (t.nativeBuildPhase == 1 && result.exitCode == 0)
-                {
-                    startNativeCompile(t);
-                    continue;
-                }
-                if (t.nativeBuildPhase == 2 && result.exitCode == 0 && t.runNativeAfterBuild)
-                {
-                    ct::Vector<ig::String> arguments;
-                    t.nativeBuildPhase = 3;
-                    t.runHandle = runner_.runAsync(t.nativeBinaryPath, arguments, parentDirectory(t.path));
-                    continue;
-                }
-                t.runHandle = nullptr;
+                // A plain Play run: its output replaces what the panel had.
                 t.isRunning = false;
+                t.lastOutput = result.output;
+                t.lastExitCode = result.exitCode;
+                continue;
+            }
+
+            // A native build: its phases share one log, so the panel reads as
+            // a single build transcript (phase 1 = zencc, 2 = c++, 3 = run).
+            t.lastOutput.append(result.output);
+            const int phase = t.nativeBuildPhase;
+            if (!result.ranAtAll || result.exitCode != 0)
+            {
+                const char *what = phase == 1 ? "zencc --emit-c"
+                                 : phase == 2 ? "the C++ compile" : "the program";
+                char failed[160];
+                std::snprintf(failed, sizeof(failed),
+                              "\nzenblitz-editor: %s failed (exit %d)\n", what, result.exitCode);
+                t.lastOutput.append(failed);
                 t.nativeBuildPhase = 0;
-                t.runNativeAfterBuild = false;
+                t.isRunning = false;
+                t.lastExitCode = result.exitCode;
+            }
+            else if (phase == 1)
+            {
+                startNativeCompile(t);
+            }
+            else if (phase == 2 && t.runNativeAfterBuild)
+            {
+                t.nativeBuildPhase = 3;
+                t.lastOutput.append(ig::String("zenblitz-editor: running ") + leafOf(t.nativeBinaryPath) + "\n");
+                ct::Vector<ig::String> noArguments;
+                t.runHandle = runner_.runAsync(t.nativeBinaryPath, noArguments, directoryOf(t.path));
+            }
+            else
+            {
+                if (phase == 2)
+                    t.lastOutput.append(ig::String("zenblitz-editor: built ") + t.nativeBinaryPath + "\n");
+                t.nativeBuildPhase = 0;
+                t.isRunning = false;
+                t.lastExitCode = 0;
             }
         }
 
@@ -352,6 +421,8 @@ namespace zed
             toolbarState.isDirty = activeTab_->isDirty;
             toolbarState.hasRunOnce = activeTab_->hasRunOnce;
             toolbarState.lastExitCode = activeTab_->lastExitCode;
+            // Drives the Run/Stop toggle in the toolbar and F5: without this
+            // the menu always offered "Run program" while a run was in flight.
             toolbarState.isRunning = activeTab_->isRunning;
         }
         for (const ig::String &recent : settings_.recentFiles())
@@ -651,11 +722,22 @@ namespace zed
         }
         ui.setCursor(ig::Vec2(origin.x, origin.y + bodyHeight));
         ui.separator();
+        const char *activity = "";
+        if (tab.isRunning)
+        {
+            // The same slot Play uses to say "Running..." doubles as the
+            // build's progress line, so a long compile never looks like a
+            // hung editor.
+            switch (tab.nativeBuildPhase)
+            {
+            case 1: activity = "  Building (zencc)..."; break;
+            case 2: activity = "  Compiling..."; break;
+            default: activity = "  Running..."; break;
+            }
+        }
         char status[128];
-        std::snprintf(status, sizeof(status), "Row:%d Col:%d%s%s | %d FPS", tab.code.cursorLine + 1,
-                      tab.code.cursorColumn, tab.isDirty ? "  Modified" : "",
-                      tab.isRunning ? "  Running..." : "",
-                      static_cast<int>(fps_ + 0.5f));
+        std::snprintf(status, sizeof(status), "Row:%d Col:%d%s%s", tab.code.cursorLine + 1,
+                      tab.code.cursorColumn, tab.isDirty ? "  Modified" : "", activity);
         ui.label(status);
         if (tab.isRunning)
         {
