@@ -105,7 +105,15 @@ namespace engine
         const Vector &getColor() const { return mColor; }
         float getAlpha() const { return mAlpha; }
         float getShininess() const { return mShininess; }
-        int getFX() const { return mFx; }
+        /* The original turned alpha test on for a brush whose first texture
+           is masked (Brush::getBlend's "alphatest" block), and that is what
+           cuts a masked texture out: the load gave it black-keyed binary
+           alpha, the shader discards the pixels below the threshold. */
+        int getFX() const
+        {
+            if (mMaxTex > 0 && (mTextures[0].flags & TexMask)) return mFx | FxAlphaTest;
+            return mFx;
+        }
         const BrushTexture &getTexture(int index) const { return mTextures[index]; }
         int getTextureCount() const { return mMaxTex; }
 

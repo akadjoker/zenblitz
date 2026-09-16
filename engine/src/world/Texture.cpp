@@ -30,6 +30,91 @@ namespace engine
             SDL_RWclose(f);
             return true;
         }
+
+        Pixmap toRgba(const Pixmap &src)
+        {
+            Pixmap out(src.width, src.height, 4);
+            for (int y = 0; y < src.height; ++y)
+                for (int x = 0; x < src.width; ++x)
+                {
+                    const Color c = src.get_pixel_color((u32)x, (u32)y);
+                    out.set_pixel((u32)x, (u32)y, c.r(), c.g(), c.b(), c.a());
+                }
+            return out;
+        }
+
+        /* Blitz3D ran the texture flags over the decoded pixels before the
+           texture was ever uploaded (gxruntime/ddutil.cpp: loadSurface,
+           buildMask, buildAlpha), and the samples are written against that:
+
+             - masked (4): black is the colour key. The original forced
+               RGB|ALPHA for these and then built the mask, so the texture
+               ends up with a binary alpha whatever the file carried, and
+               Brush::getFX() turns on alpha test to cut it out.
+             - alpha (2) on a file with no channel of its own: the alpha is
+               rebuilt from the colour - the pixel's RGB average - so a black
+               background disappears and the bright part of the image is what
+               shows through, with the colour whitened when the load did not
+               ask for colour (flags without 1), which turns a flare or spark
+               image into a white mask that EntityColor tints. The lens flares
+               of Samples/Blitz_3D/AGore/GrassDemo are exactly this: without
+               it a JPG loaded as an alpha texture is an opaque rectangle with
+               black corners.
+             - alpha (2) on a file that does carry a channel: nothing to do,
+               the file's own alpha is the one that blends.
+
+           Flags of 0 are what the engine's own model loaders (X, 3DS, FBX,
+           glTF) pass for a texture with no flags of its own; those formats
+           are authored with real alpha channels and never went through the
+           original's flag rules, so they keep whatever the file held. */
+        Pixmap applyLoadFlags(Pixmap pm, int flags)
+        {
+            const bool masked = (flags & TexMask) != 0;
+            const bool askedAlpha = (flags & TexAlpha) != 0;
+            if (!masked && !askedAlpha) return pm;
+
+            /* Both rules below decide a pixel's alpha, so the pixels need a
+               channel to keep it in: a colour-only JPG/BMP grows one here. */
+            const bool fileAlpha = pm.has_alpha();
+            if (pm.components != 4) pm = toRgba(pm);
+
+            if (masked)
+            {
+                for (int y = 0; y < pm.height; ++y)
+                    for (int x = 0; x < pm.width; ++x)
+                    {
+                        const Color c = pm.get_pixel_color((u32)x, (u32)y);
+                        const bool key = (c.r() | c.g() | c.b()) == 0;
+                        pm.set_pixel((u32)x, (u32)y, c.r(), c.g(), c.b(), key ? 0 : 255);
+                    }
+                return pm;
+            }
+
+            if (!fileAlpha)
+            {
+                const bool whiten = (flags & TexRgb) == 0;
+                for (int y = 0; y < pm.height; ++y)
+                    for (int x = 0; x < pm.width; ++x)
+                    {
+                        const Color c = pm.get_pixel_color((u32)x, (u32)y);
+                        const u8 a = (u8)((c.r() + c.g() + c.b()) / 3);
+                        pm.set_pixel((u32)x, (u32)y, whiten ? 255 : c.r(), whiten ? 255 : c.g(),
+                                     whiten ? 255 : c.b(), a);
+                    }
+            }
+            return pm;
+        }
+
+        /* The original marked a texture transparent from its flags and not
+           from what the file held: alpha without mask is what lets a brush
+           fall back to alpha blending (the same rule Brush::getBlend uses),
+           so `LoadTexture("x.jpg",2)` blends even though a JPG has no
+           channel. Flags of 0 stay with the file, as above. */
+        bool loadedTransparent(int flags, bool fileAlpha)
+        {
+            if (!flags) return fileAlpha;
+            return (flags & TexAlpha) != 0 && (flags & TexMask) == 0;
+        }
     }
 
     void setTexturePath(const ct::String &dir)
@@ -101,8 +186,8 @@ namespace engine
             delete t;
             return nullptr;
         }
-        t->mTransparent = p.has_alpha();
-        t->mImage.addFrame(std::move(p));
+        t->mTransparent = loadedTransparent(flags, p.has_alpha());
+        t->mImage.addFrame(applyLoadFlags(std::move(p), flags));
         return t;
     }
 
@@ -118,8 +203,8 @@ namespace engine
             delete t;
             return nullptr;
         }
-        t->mTransparent = p.has_alpha();
-        t->mImage.addFrame(std::move(p));
+        t->mTransparent = loadedTransparent(flags, p.has_alpha());
+        t->mImage.addFrame(applyLoadFlags(std::move(p), flags));
         return t;
     }
 
@@ -130,6 +215,11 @@ namespace engine
         Pixmap sheet;
         if (!sheet.load(resolveTexturePath(file).c_str())) return nullptr;
 
+        // The flags act on the whole sheet, exactly as the original built the
+        // mask/alpha on the source canvas before slicing the frames out.
+        const bool fileAlpha = sheet.has_alpha();
+        sheet = applyLoadFlags(std::move(sheet), flags);
+
         int fpr = sheet.width / w;
         int fpp = fpr > 0 ? (sheet.height / h) * fpr : 0;
         if (fpr <= 0 || first + count > fpp) return nullptr;
@@ -137,7 +227,7 @@ namespace engine
         Texture *t = new Texture();
         t->mName = file;
         t->mFlags = flags;
-        t->mTransparent = sheet.has_alpha();
+        t->mTransparent = loadedTransparent(flags, fileAlpha);
         for (int k = 0; k < count; ++k)
         {
             int idx = first + k;
