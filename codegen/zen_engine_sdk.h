@@ -28,6 +28,7 @@
 #include "engine/Sprite.h"
 #include "engine/Terrain.h"
 #include "engine/Sound.h"
+#include "engine/CSG.h"
 #include "engine/Listener.h"
 #include "engine/FilePath.h"
 
@@ -1643,7 +1644,78 @@ inline int64_t zen_play_music(const std::string &file)
    what runtime3d does. */
 inline int64_t zen_play_cd_track(int64_t = 0, int64_t = 0) { return 0; }
 
+/* ================= Mesh editing ================= */
+
+/* AddMesh merges the source into the destination in place, CopyMesh makes a new
+   entity from a copy of the model, MeshCullBox sets the model's bounding box,
+   and MeshCSG runs the engine's CSG and stores the result as its own entity -
+   each of them what runtime3d's command of the same name does. */
+inline void zen_add_mesh(int64_t sourceMesh, int64_t destMesh)
+{
+    engine::MeshModel *src = z_mesh_of(sourceMesh);
+    engine::MeshModel *dst = z_mesh_of(destMesh);
+    if (src && dst) dst->add(*src);
+}
+inline int64_t zen_copy_mesh(int64_t mesh, int64_t parent = 0)
+{
+    engine::MeshModel *source = z_mesh_of(mesh);
+    if (!source) return 0;
+    engine::MeshModel *copy = new engine::MeshModel(*source);
+    return z_store_entity(copy, z_entity(parent));
+}
+inline void zen_mesh_cull_box(int64_t mesh, double x, double y, double z, double width,
+                              double height, double depth)
+{
+    engine::MeshModel *m = z_mesh_of(mesh);
+    if (!m) return;
+    const engine::Vector a((float)x, (float)y, (float)z);
+    const engine::Vector b = a + engine::Vector((float)width, (float)height, (float)depth);
+    m->setCullBox(engine::Box(a, b));
+}
+inline int64_t zen_mesh_csg(int64_t meshA, int64_t meshB, int64_t method = 1)
+{
+    engine::MeshModel *a = z_mesh_of(meshA);
+    engine::MeshModel *b = z_mesh_of(meshB);
+    engine::MeshModel *result = (a && b) ? engine::CSG::meshCSG(*a, *b, (int)method) : nullptr;
+    return result ? z_store_entity(result) : 0;
+}
+
 /* ================= Odds and ends ================= */
+
+/* The handles an image is drawn around, the alpha of a vertex, and the four
+   queries that have a constant answer in this runtime: runtime3d reports no
+   video memory totals, no lost context and no joystick to wait for, and
+   GfxDriver3D only validates its index. */
+inline int64_t zen_image_x_handle(int64_t image)
+{
+    engine::Image *img = z_image_of(image);
+    return img ? img->handleX() : 0;
+}
+inline int64_t zen_image_y_handle(int64_t image)
+{
+    engine::Image *img = z_image_of(image);
+    return img ? img->handleY() : 0;
+}
+inline double zen_vertex_alpha(int64_t surface, int64_t index)
+{
+    engine::Surface *s = z_surface_of(surface);
+    const unsigned c = s ? s->getVertex((int)index).color : 0u;
+    return (double)((c & 0xff000000u) >> 24) / 255.0;
+}
+inline int64_t zen_avail_vid_mem() { return 0; }
+inline int64_t zen_total_vid_mem() { return 0; }
+inline int64_t zen_graphics_lost() { return 0; }
+inline int64_t zen_wait_joy(int64_t = 0) { return 0; }
+inline int64_t zen_gfx_driver_3d(int64_t driver)
+{
+    const int n = (int)driver;
+    if (n < 1 || n > SDL_GetNumVideoDisplays())
+    {
+        zen_runtime_error("Illegal graphics driver index");
+        return 0;
+    }
+    return 1;
+}
 
 inline int64_t zen_scan_line() { return 0; }   /* no raster line to report */
 /* Movies. runtime3d has no video playback and says so once, on stderr, when a
