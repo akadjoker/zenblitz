@@ -709,6 +709,33 @@ namespace bb3d
         return 0;
     }
 
+    /* bbHWMultiTex toggled gxScene's texture stage count between the card's
+       real one and 1, so a script could fall back to single-texturing on
+       hardware whose multitexturing was broken or slow. That is a Direct3D
+       fixed-function concern with nothing behind it here: the renderer binds
+       its texture units from the shader either way, and always has more than
+       one. Accepted and ignored - Blitz3D samples routinely call it right
+       after Graphics3D, and a missing command would stop the whole program
+       at the first frame. 0 is what the original answered when asked to turn
+       multitexturing off, so `old = HWMultiTex(1) ... HWMultiTex(old)` stays
+       harmless. */
+    static int c_HWMultiTex(VM *vm, Value *args, int nargs)
+    {
+        (void)nargs;
+        // Warn once rather than every call: a script that toggles this in its
+        // main loop would otherwise flood the console.
+        static bool warned = false;
+        if (!warned)
+        {
+            warned = true;
+            zen::backend_log(vm->backend(), zen::LOG_WARN,
+                             "HWMultiTex: accepted and ignored - this renderer always multitextures "
+                             "(the original toggled a Direct3D fixed-function stage count)");
+        }
+        args[0] = val_int(0);
+        return 1;
+    }
+
     static int c_CameraRange(VM *vm, Value *args, int nargs)
     {
         (void)vm; (void)nargs;
@@ -1196,6 +1223,25 @@ namespace bb3d
         return 1;
     }
 
+    /* Blitz3D's "last projected point", read back by ProjectedX/Y/Z. VM state,
+       like the last pick - the maths itself is Camera::project's. */
+    static engine::Vector g_projected;
+
+    static int c_CameraProject(VM *, Value *args, int)
+    {
+        engine::Entity *entity = entity_of(arg_int(args[0]));
+        engine::Camera *camera = entity ? entity->getCamera() : nullptr;
+        if (!camera) { args[0] = val_int(0); return 1; }
+        const bool visible = camera->project(
+            engine::Vector(arg_float(args[1]), arg_float(args[2]), arg_float(args[3])), g_projected);
+        args[0] = val_int(visible ? 1 : 0);
+        return 1;
+    }
+
+    static int c_ProjectedX(VM *, Value *args, int) { args[0] = val_float(g_projected.x); return 1; }
+    static int c_ProjectedY(VM *, Value *args, int) { args[0] = val_float(g_projected.y); return 1; }
+    static int c_ProjectedZ(VM *, Value *args, int) { args[0] = val_float(g_projected.z); return 1; }
+
     static int c_LinePick(VM *vm, Value *args, int)
     {
         engine::Line line(engine::Vector(arg_float(args[0]), arg_float(args[1]), arg_float(args[2])),
@@ -1293,6 +1339,7 @@ namespace bb3d
         {"$EntityClass%entity", c_EntityClass},
 
         {"AmbientLight#red#green#blue", c_AmbientLight},
+        {"HWMultiTex%enable", c_HWMultiTex},
         {"CameraRange%camera#near#far", c_CameraRange},
         {"CameraZoom%camera#zoom", c_CameraZoom},
         {"CameraViewport%camera%x%y%width%height", c_CameraViewport},
@@ -1329,6 +1376,10 @@ namespace bb3d
         {"RenderWorld#tween=1", c_RenderWorld},
         {"CaptureWorld", c_CaptureWorld},
         {"%CameraPick%camera#viewport_x#viewport_y", c_CameraPick},
+        {"%CameraProject%camera#x#y#z", c_CameraProject},
+        {"#ProjectedX", c_ProjectedX},
+        {"#ProjectedY", c_ProjectedY},
+        {"#ProjectedZ", c_ProjectedZ},
         {"%LinePick#x#y#z#dx#dy#dz#radius=0", c_LinePick},
         {"%EntityPick%entity#range", c_EntityPick},
         {"EntityPickMode%entity%pick_geometry%obscurer=1", c_EntityPickMode},
