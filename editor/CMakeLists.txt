@@ -31,8 +31,9 @@ target_link_libraries(zenblitz-editor PRIVATE igui_sdl2 igui)
 # $<TARGET_FILE:...> expressions only have a target to name when the engine is
 # part of this configuration. Unguarded, they failed the generate step for the
 # whole project (the same trap the tests target at the bottom of this file
-# hit). Nothing under editor/ reads these definitions yet; a 2D-only
-# configuration simply does without them.
+# hit). Editor::buildNative reads them: a 2D-only configuration compiles that
+# function's else branch instead, which reports in the output panel that this
+# editor has no engine library to link a native build against.
 if (TARGET zenblitz_engine AND TARGET gpu_sdl AND TARGET gpu AND TARGET gpu_common AND TARGET SDL2)
 target_compile_definitions(zenblitz-editor PRIVATE
     ZEN_EDITOR_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
@@ -44,15 +45,32 @@ target_compile_definitions(zenblitz-editor PRIVATE
     ZEN_EDITOR_GPU_COMMON_LIBRARY="$<TARGET_FILE:gpu_common>"
     ZEN_EDITOR_SDL_LIBRARY="$<TARGET_FILE:SDL2>"
 )
+else()
+    # Not a configure error: this editor still plays scripts through
+    # zenblitz3d (a sibling executable, not a linked library). Only Build
+    # native has nothing to work with, so say where to get an editor that
+    # does, at the point where the missing targets would have been listed.
+    message(STATUS "zenblitz-editor: built without the engine (ZEN_BUILD_ENGINE=OFF): "
+                   "Build native will report that there is no engine library to link "
+                   "against, and this configuration will not write bin/zenblitz-editor.")
 endif()
 if (WIN32)
     # SHGetKnownFolderPath needs Shell32 + Ole32 (CoTaskMemFree).
     target_link_libraries(zenblitz-editor PRIVATE Shell32 Ole32)
 endif()
 
-set_target_properties(zenblitz-editor PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/bin
-)
+# Only the configuration that has the engine writes bin/zenblitz-editor. Both
+# of them used to, so whichever was built last won - and a build-linux/ run
+# after a build/ run silently replaced the engine-capable editor with one
+# whose Build native says "this editor was built without the engine". A
+# configuration without zenblitz_engine cannot link anything natively (see
+# the guard above), so it has no business owning that path: its editor stays
+# in its own build tree, next to its CMakeCache.
+if (TARGET zenblitz_engine)
+    set_target_properties(zenblitz-editor PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/bin
+    )
+endif()
 
 # SDL2.dll beside bin/zenblitz-editor.exe on Windows; no-op on Linux/Mac
 # and against a system SDL2. (SDL2main itself comes from igui_sdl2, which

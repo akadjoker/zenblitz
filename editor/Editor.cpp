@@ -208,7 +208,10 @@ namespace zed
            is what editor/README.md documents (castle.bb -> castle.native). */
         ig::String baseOf(const ig::String &path)
         {
-            const size_t dot = path.find_last_of('.');
+            /* ig::String::find_last_of takes a set of characters (a C
+               string), not a single char - a '.' here does not convert, so
+               this must stay a string literal. */
+            const size_t dot = path.find_last_of(".");
             const size_t slash = path.find_last_of("/\\");
             return dot != ig::String::npos && (slash == ig::String::npos || dot > slash)
                        ? path.substr(0, dot) : path;
@@ -278,10 +281,19 @@ namespace zed
         // is part of this configuration (ZEN_BUILD_EDITOR is on by default,
         // ZEN_BUILD_ENGINE is not), and without it there is no engine library
         // for the emitted program to link against. Say so instead of failing
-        // somewhere in the middle of a build.
+        // somewhere in the middle of a build - and say which configuration
+        // does have one, because the running binary may well have come from
+        // a build tree the user was not thinking about: bin/zenblitz-editor
+        // is only ever written by a configuration that has the engine (see
+        // the RUNTIME_OUTPUT_DIRECTORY guard in editor/CMakeLists.txt), and
+        // one built before that guard existed is still just a copy of its
+        // engine-less build tree.
         tab.lastOutput.append("zenblitz-editor: this editor was built without the engine "
                               "(no ZEN_EDITOR_ENGINE_LIBRARY), so there is nothing to link a "
-                              "native build against.\n");
+                              "native build against.\n"
+                              "  Rebuild it from a configuration that has the engine, e.g.\n"
+                              "    cmake -B build-codegen -DZEN_BUILD_EDITOR=ON\n"
+                              "    cmake --build build-codegen --target zenblitz-editor\n");
         tab.lastExitCode = -1;
         tab.nativeBuildPhase = 0;
 #endif

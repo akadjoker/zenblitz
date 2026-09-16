@@ -12,6 +12,13 @@
 *.a
 *.so
 
+# The editor's "Build native" leaves these two beside the script it built from
+# (see editor/README.md). tutorials/GCUK_Tuts/animation.native.cpp is a
+# checked-in example of the emitted code and stays tracked - these patterns
+# only ever apply to untracked files.
+*.native
+*.native.cpp
+
 # ...except user libraries, which are shipped rather than built here
 !/userlibs/**
 
