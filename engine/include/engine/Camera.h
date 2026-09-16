@@ -33,6 +33,13 @@ namespace engine
         float getFrustumWidth() const { getFrustum(); return mFrustumW; }
         float getFrustumHeight() const { getFrustum(); return mFrustumH; }
         const Frustum &getFrustum() const;
+        /* Projects a world point into the viewport: x/y come out in pixels
+           with y running down, and z is the near plane - 1 with the default
+           CameraRange, and 0 whenever the point is not visible. That z is the
+           flag the classic lens-flare scripts read (EntityAlpha flare,
+           ProjectedZ()). Returns false, and zeroes out, for a point behind
+           the camera or past its far plane. */
+        bool project(const Vector &world, Vector &out) const;
         void getViewport(int *x, int *y, int *w, int *h) const { *x = mVpX; *y = mVpY; *w = mVpW; *h = mVpH; }
         int getProjMode() const { return mProjMode; }
         float getZoom() const { return mZoom; }
