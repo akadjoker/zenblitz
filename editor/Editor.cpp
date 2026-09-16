@@ -163,7 +163,13 @@ namespace zed
         // Runs on a background thread (see Runner.hpp) so zenblitz3d's own
         // window/event loop never blocks this editor's frame loop - update()
         // polls activeTab_->runHandle every frame and applies the result
-        // once Runner::poll() reports it done.
+        // once Runner::poll() reports it done. The panel is cleared and told
+        // what was started first: a run that dies instantly (a missing
+        // zenblitz3d beside the editor, say) then reads as a message rather
+        // than as nothing happening at all.
+        activeTab_->lastOutput = ig::String("zenblitz-editor: running ") + activeTab_->path +
+                                 " with ./zenblitz3d\n";
+        activeTab_->hasRunOnce = true;
         activeTab_->isRunning = true;
         activeTab_->runHandle = runner_.runAsync(activeTab_->path);
     }
@@ -176,10 +182,36 @@ namespace zed
             return slash == ig::String::npos ? path : path.substr(slash + 1);
         }
 
+        /* The output panel draws its log through a text widget that re-scans
+           the whole buffer every frame to count lines, so an unbounded log
+           makes the editor slower the more a program prints - a game that
+           spams a line per frame drags the UI to a crawl and keeps it there
+           after it exits. Keep the tail, which is the part worth reading. */
+        void trimOutput(ig::String &output)
+        {
+            const size_t kMaxOutput = 256u * 1024u;
+            if (output.size() <= kMaxOutput) return;
+            size_t cut = output.size() - kMaxOutput;
+            while (cut < output.size() && output[cut] != '\n') ++cut;
+            if (cut < output.size()) ++cut;
+            output = ig::String("[... earlier output trimmed ...]\n") + output.substr(cut);
+        }
+
         ig::String directoryOf(const ig::String &path)
         {
             const size_t slash = path.find_last_of("/\\");
             return slash == ig::String::npos ? ig::String(".") : path.substr(0, slash);
+        }
+
+        /* The script's path without its extension: the build artefacts go
+           beside the source as <script>.native.cpp and <script>.native, which
+           is what editor/README.md documents (castle.bb -> castle.native). */
+        ig::String baseOf(const ig::String &path)
+        {
+            const size_t dot = path.find_last_of('.');
+            const size_t slash = path.find_last_of("/\\");
+            return dot != ig::String::npos && (slash == ig::String::npos || dot > slash)
+                       ? path.substr(0, dot) : path;
         }
 
 #if defined(ZEN_EDITOR_SOURCE_DIR) && defined(ZEN_EDITOR_CXX_COMPILER)
@@ -221,8 +253,11 @@ namespace zed
         DocumentTab &tab = *activeTab_;
         tab.nativeBuildPhase = 1;
         tab.runNativeAfterBuild = runAfterBuild;
-        tab.nativeCppPath = tab.path + ".native.cpp";
-        tab.nativeBinaryPath = tab.path + ".native";
+        tab.nativeCppPath = baseOf(tab.path) + ".native.cpp";
+        tab.nativeBinaryPath = baseOf(tab.path) + ".native";
+#if defined(_WIN32)
+        tab.nativeBinaryPath += ".exe";
+#endif
         tab.lastOutput = ig::String("zenblitz-editor: emitting ") + leafOf(tab.nativeCppPath) + "\n";
         tab.lastExitCode = 0;
         tab.hasRunOnce = true;
@@ -358,6 +393,16 @@ namespace zed
             DocumentTab &t = *tabPtr;
             if (!t.isRunning)
                 continue;
+            // A flag left over from an earlier run/build with no handle to
+            // poll would otherwise wedge the tab: the toolbar would offer
+            // Stop, clicking Play would return early, and nothing would ever
+            // happen again.
+            if (!t.runHandle)
+            {
+                t.isRunning = false;
+                t.nativeBuildPhase = 0;
+                continue;
+            }
             RunResult result;
             if (!runner_.poll(t.runHandle, result))
                 continue;
@@ -369,6 +414,7 @@ namespace zed
                 // A plain Play run: its output replaces what the panel had.
                 t.isRunning = false;
                 t.lastOutput = result.output;
+                trimOutput(t.lastOutput);
                 t.lastExitCode = result.exitCode;
                 continue;
             }
@@ -404,6 +450,7 @@ namespace zed
             {
                 if (phase == 2)
                     t.lastOutput.append(ig::String("zenblitz-editor: built ") + t.nativeBinaryPath + "\n");
+                trimOutput(t.lastOutput);
                 t.nativeBuildPhase = 0;
                 t.isRunning = false;
                 t.lastExitCode = 0;
@@ -735,9 +782,10 @@ namespace zed
             default: activity = "  Running..."; break;
             }
         }
-        char status[128];
-        std::snprintf(status, sizeof(status), "Row:%d Col:%d%s%s", tab.code.cursorLine + 1,
-                      tab.code.cursorColumn, tab.isDirty ? "  Modified" : "", activity);
+        char status[160];
+        std::snprintf(status, sizeof(status), "Row:%d Col:%d%s%s | %d FPS", tab.code.cursorLine + 1,
+                      tab.code.cursorColumn, tab.isDirty ? "  Modified" : "", activity,
+                      static_cast<int>(fps_ + 0.5f));
         ui.label(status);
         if (tab.isRunning)
         {
