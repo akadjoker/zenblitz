@@ -73,10 +73,18 @@ namespace engine
         // no equivalent command to expose it through.
         int mBlockSize = 17;
         int mMaxLevel = 0;
-        // 1/meshQuality in Horde3D; derived from Blitz3D's own
-        // TerrainDetail detail_level (a triangle-count target, not a
-        // threshold) - see setDetail()'s comment for the mapping.
-        float mLodThreshold = 1.0f / 50.0f;
+        // LOD budget, in screen pixels (of a 600-pixel-tall viewport) of
+        // vertical error the drawn mesh may have against the heightfield the
+        // collision uses. setDetail() maps Blitz3D's TerrainDetail knob onto
+        // it; the rest of the test's inputs come from the entity's own scale
+        // and the camera's projection, both filled in by render().
+        float mLodPixels = 2.0f;
+        // 2*tan(fovY/2): the fraction of the screen height a world error of e
+        // covers at distance d is e/(2*tan(fov/2)*d).
+        float mProjTan = 1.0f;
+        // World units per unit of normalised height and per cell of local
+        // distance, i.e. the terrain entity's Y and XZ scales.
+        float mErrorScale = 1.0f, mDistScale = 1.0f;
         int mDetail = 2000;
         bool mMorph = true, mShading = false;
 

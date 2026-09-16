@@ -6,18 +6,6 @@
 
 namespace engine
 {
-    namespace
-    {
-        // terrain.cpp's Plane::distToPoint via this engine's own Plane -
-        // buildBlockInfo() needs a signed distance from a point to the
-        // triangle plane through 3 corners, same as blitz::Plane(a,b,c)
-        // already gives via its own n/d fields.
-        float distToPlane(const Vector &a, const Vector &b, const Vector &c, const Vector &p)
-        {
-            return Plane(a, b, c).distance(p);
-        }
-    }
-
     unsigned short TerrainRep::heightAt(int x, int z) const
     {
         if (x < 0) x = 0; else if (x > mCellSize) x = mCellSize;
@@ -46,7 +34,8 @@ namespace engine
     TerrainRep::TerrainRep(const TerrainRep &other)
         : mHeights(other.mHeights), mCellSize(other.mCellSize), mCellShift(other.mCellShift),
           mCellMask(other.mCellMask), mBlockSize(other.mBlockSize), mMaxLevel(other.mMaxLevel),
-          mLodThreshold(other.mLodThreshold), mDetail(other.mDetail), mMorph(other.mMorph),
+          mLodPixels(other.mLodPixels), mProjTan(other.mProjTan), mErrorScale(other.mErrorScale),
+          mDistScale(other.mDistScale), mDetail(other.mDetail), mMorph(other.mMorph),
           mShading(other.mShading), mBlockTree(other.mBlockTree), mBlockTreeValid(other.mBlockTreeValid)
     {
     }
@@ -65,17 +54,19 @@ namespace engine
         if (detail < 2) detail = 2;
         if (detail > 60000) detail = 60000;
         mDetail = detail;
-        // Blitz3D's TerrainDetail is a triangle-count target (ROAM's own
-        // budget); Horde3D's meshQuality is a threshold with no such
-        // budget concept - block count roughly doubles per quadtree level
-        // and each block contributes ~2*blockSize^2 triangles, so a
-        // higher requested triangle count should allow deeper subdivision
-        // (a lower threshold). Calibrated, not derived: 2000 (the
-        // original docs' own "typical value") maps to meshQuality 50
-        // (Horde3D's own default), scaled by sqrt(detail) since block
-        // count grows quadratically with subdivision depth.
-        const float meshQuality = 50.0f * std::sqrt((float)mDetail / 2000.0f);
-        mLodThreshold = 1.0f / std::max(meshQuality, 1.0f);
+        // Blitz3D's TerrainDetail was ROAM's triangle budget; what it really
+        // chooses is how much error the picture may show, so it maps onto the
+        // LOD's screen-space budget instead - 2000 (the original docs' own
+        // "typical value") is two pixels of a 600-pixel screen, and the budget
+        // grows with the square root of a request for less detail. The
+        // mapping this replaces (meshQuality = 50*sqrt(detail/2000), then
+        // comparing a perpendicular distance in mixed units against a cell
+        // distance) allowed a 19.6-unit vertical error 30 world units from
+        // the eye on the castle's own terrain - the drawn ground sat most of
+        // a player's height away from the surface it collides with.
+        mLodPixels = 2.0f * std::sqrt(2000.0f / (float)mDetail);
+        if (mLodPixels < 0.5f) mLodPixels = 0.5f;
+        if (mLodPixels > 8.0f) mLodPixels = 8.0f;
     }
 
     int TerrainRep::getSize() const { return mCellSize; }
@@ -191,9 +182,31 @@ namespace engine
 
                         block.minHeight = std::min(block.minHeight, point.y);
                         block.maxHeight = std::max(block.maxHeight, point.y);
-                        const float dist = useTri0 ? distToPlane(corner0, corner1, corner2, point)
-                                                    : distToPlane(corner1, corner2, corner3, point);
-                        block.geoError = std::max(block.geoError, std::fabs(dist));
+                        // Vertical error, not the perpendicular distance to the
+                        // coarse triangle's plane: what has to agree with the
+                        // collision surface (heightAtPoint's own triangulation)
+                        // is the height the mesh draws at a spot, and the
+                        // perpendicular form mixed two different scales (u/v
+                        // span 0..1 over the whole terrain, y spans the whole
+                        // height range), so the LOD test had no way to budget
+                        // what the eye actually sees.
+                        const float pu = minU + u * stepU + uu, pv = minV + v * stepV + vv;
+                        const Vector &tri0 = useTri0 ? corner0 : corner1;
+                        const Vector &tri1 = useTri0 ? corner1 : corner2;
+                        const Vector &tri2 = useTri0 ? corner2 : corner3;
+                        const float den = (tri1.z - tri2.z) * (tri0.x - tri2.x) +
+                                          (tri2.x - tri1.x) * (tri0.z - tri2.z);
+                        float drawn;
+                        if (std::fabs(den) < 1e-20f) drawn = tri0.y;
+                        else
+                        {
+                            const float l0 = ((tri1.z - tri2.z) * (pu - tri2.x) +
+                                              (tri2.x - tri1.x) * (pv - tri2.z)) / den;
+                            const float l1 = ((tri2.z - tri0.z) * (pu - tri2.x) +
+                                              (tri0.x - tri2.x) * (pv - tri2.z)) / den;
+                            drawn = l0 * tri0.y + l1 * tri1.y + (1.0f - l0 - l1) * tri2.y;
+                        }
+                        block.geoError = std::max(block.geoError, std::fabs(drawn - point.y));
 
                         uu += pixelStep;
                     }
@@ -247,7 +260,7 @@ namespace engine
         // Skirt-extended downward the same way terrain.cpp's
         // drawTerrainBlock builds its culling box (bBMin.y = minHeight -
         // skirtHeight).
-        const float skirtHeight = mMorph ? 0.02f : 0.0f;
+        const float skirtHeight = mMorph ? 0.004f : 0.0f;
         Box localBox(Vector(minU * mCellSize, block.minHeight - skirtHeight, minV * mCellSize),
                     Vector(maxU * mCellSize, block.maxHeight, maxV * mCellSize));
         if (!frustum.cull(localBox)) return;
@@ -257,9 +270,19 @@ namespace engine
                                                         (minV + maxV) * 0.5f * mCellSize))
                                         .length(),
                                     0.00001f);
-        const float p = block.geoError / dist;
+        // Draw this block when the error it would show is under the budget at
+        // this distance: mLodPixels pixels of a 600-pixel screen is a world
+        // error of worldDist*2*tan(fovY/2)*(px/600), and the block's own
+        // height deviation (mErrorScale turns the normalised one into world
+        // units) is what has to fit in it. Every subdivision level quarters
+        // that error for four times the vertices, so only the near blocks pay
+        // for detail - which is the whole point: the surface under the player
+        // is drawn at the heightfield's own resolution, so what he stands on
+        // is what he sees.
+        const float allowed = dist * mDistScale * mProjTan * (mLodPixels / 600.0f);
+        const float error = block.geoError * mErrorScale;
 
-        if (p < mLodThreshold || level == mMaxLevel)
+        if (error <= allowed || level == mMaxLevel)
         {
             // Emit this block's (blockSize+2)^2 vertex grid (the +2 is
             // the one-texel skirt ring on every side) and its triangle
@@ -292,10 +315,16 @@ namespace engine
 
                     // Skirt: pull the outer ring down so adjacent blocks
                     // at a different LOD level never show a visible
-                    // crack, smaller near the camera the same way
-                    // terrain.cpp scales it by dist.
+                    // crack. A fixed fraction of the height range, not
+                    // terrain.cpp's skirtHeight*dist: with dist measured in
+                    // cells that term sank the ring by 0.02*dist of the
+                    // whole range - 20 world units on the castle's own
+                    // terrain at 10 blocks of distance, a ditch around every
+                    // drawn block that the collision surface knows nothing
+                    // about. The budgeted LOD error it has to hide is a
+                    // pixel or two, so this is a small fixed slice.
                     if (v == 0 || v == size - 1 || u == 0 || u == size - 1)
-                        y = std::max(y - skirtHeight * dist, 0.0f);
+                        y = std::max(y - skirtHeight, 0.0f);
 
                     DynamicMesh::Vertex vert;
                     vert.coords = Vector(worldU * mCellSize, y, worldV * mCellSize);
@@ -314,18 +343,20 @@ namespace engine
             for (int v = 0; v < size - 1; ++v)
                 for (int u = 0; u < size - 1; ++u)
                 {
-                    // Same {a,c,b}/{b,c,d} winding bb_cmds_world.cpp's
-                    // makeGrid() (CreatePlane/CreateHeightMap, confirmed
-                    // visible) uses for an identical a=(x,z) b=(x+1,z)
-                    // c=(x,z+1) d=(x+1,z+1) grid cell - this engine's
-                    // front-facing winding is not the CCW-from-above the
-                    // naive {i00,i01,i11} order this replaced gave.
+                    // Split along the same diagonal collideBlock() and
+                    // heightAtPoint() do - (p00,p11) - so at the leaf level
+                    // the drawn mesh and the surface the player collides
+                    // with are the same two triangles, not two different
+                    // readings of the same cell. Winding is unchanged from
+                    // the {a,c,b}/{b,c,d} order this replaces: (p00,p01,p11)
+                    // and (p00,p11,p10) face the same way, as the collision
+                    // code's own upward-facing convention has them.
                     const int i00 = firstVertex + v * size + u;
                     const int i10 = firstVertex + v * size + u + 1;
                     const int i01 = firstVertex + (v + 1) * size + u;
                     const int i11 = firstVertex + (v + 1) * size + u + 1;
-                    mMesh.addTriangle((unsigned short)i00, (unsigned short)i01, (unsigned short)i10);
-                    mMesh.addTriangle((unsigned short)i10, (unsigned short)i01, (unsigned short)i11);
+                    mMesh.addTriangle((unsigned short)i00, (unsigned short)i01, (unsigned short)i11);
+                    mMesh.addTriangle((unsigned short)i00, (unsigned short)i11, (unsigned short)i10);
                 }
         }
         else
@@ -358,6 +389,26 @@ namespace engine
         const Transform worldTform = model->getRenderTform();
         Frustum frustum(context.getWorldFrustum(), -worldTform);
         const Vector eye = frustum.getVertex(Frustum::VertEye);
+
+        // The LOD test is in world units and in screen space, and this is
+        // where its inputs come from: the entity's own scale (Y for the error
+        // which is a height, XZ for the distance, which renderBlock measures
+        // in cells) and the camera's projection - the far plane's height over
+        // its own distance is 2*tan(fovY/2), so an error e at distance d
+        // covers e/(2*tan(fov/2)*d) of the screen height.
+        mErrorScale = worldTform.m.j.length();
+        if (mErrorScale <= 0.0f) mErrorScale = 1.0f;
+        mDistScale = 0.5f * (worldTform.m.i.length() + worldTform.m.k.length());
+        if (mDistScale <= 0.0f) mDistScale = 1.0f;
+        // The projection has to come from the *world* frustum: the local one
+        // is the same volume pushed through -worldTform, and a terrain scaled
+        // 7.8 across and 100 up squashes it by that ratio, which would shrink
+        // the error budget to a twelfth of what the camera actually sees.
+        const Frustum &worldFrustum = context.getWorldFrustum();
+        const Vector farTop = worldFrustum.getVertex(Frustum::VertTLFar);
+        const float farHeight = (farTop - worldFrustum.getVertex(Frustum::VertBLFar)).length();
+        const float farDist = (farTop - worldFrustum.getVertex(Frustum::VertEye)).length();
+        mProjTan = farDist > 0.0f ? farHeight / farDist : 1.0f;
 
         mMesh.begin(0, 0);
         renderBlock(0.0f, 0.0f, 1.0f, 1.0f, 0, 1.0f, eye, frustum);
