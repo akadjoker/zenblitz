@@ -37,6 +37,12 @@ public:
     ig::String nativeCppPath;
     ig::String nativeBinaryPath;
 
+    // What has been typed into the Output panel's console row so far. A
+    // running program that asked something (Blitz3D's samples all do, via
+    // start.bb's SetGfx) is answered from there, since the editor has no
+    // terminal of its own to hand it - see Runner::writeInput.
+    ig::String consoleInput;
+
     SymbolPanel symbols;
 
     // Short label for the tab strip: the file's leaf name, or "untitled" for

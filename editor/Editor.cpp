@@ -737,7 +737,16 @@ namespace zed
             const ig::Rect outputBounds(outputOrigin.x, outputOrigin.y, codeWidth, outputHeight);
             if (ui.beginChild("output", outputHeight, true, codeWidth))
             {
-                outputPanel_.draw(ui, tab.lastOutput, tab.hasRunOnce, outputVisible_);
+                ig::String submittedLine;
+                const bool submitted =
+                    outputPanel_.draw(ui, tab.lastOutput, tab.hasRunOnce, outputVisible_,
+                                      tab.isRunning, tab.consoleInput, submittedLine);
+                // Answers whatever this tab is waiting on - a Play run or a
+                // native build's run phase both read their prompts from the
+                // pipe Runner::writeInput writes here (Grass.bb asks "Use
+                // windowed mode?" before it ever opens a window).
+                if (submitted && tab.runHandle)
+                    runner_.writeInput(tab.runHandle, submittedLine);
                 ui.endChild();
             }
             // Opened against the panel's own outer bounds, not inside the

@@ -97,4 +97,55 @@ int main() {
         SDL_Event native; SDL_zero(native); native.type=SDL_KEYDOWN; native.key.keysym.sym=keys[i];
         ig::Event event; assert(ig::sdl2::translateEvent(native,event)); assert(event.key==expected[i]);
     }
+
+    // A run that asks a question is answered through Runner::writeInput: the
+    // child reads a pipe of its own, not a terminal the editor does not have.
+    // Without it a Blitz3D program that asks something (every sample does,
+    // through start.bb's SetGfx) blocks on a prompt nobody can answer, or -
+    // with the run's stdin at end of file - spins on Input returning "" and
+    // floods its own output.
+    {
+        zed::Runner runner("/bin/sh");
+        ct::Vector<ig::String> arguments;
+        arguments.push_back("-c");
+        arguments.push_back(ig::String("read answer; echo got:$answer"));
+        zed::Runner::RunHandle* handle = runner.runAsync("/bin/sh", arguments);
+        assert(handle);
+        assert(runner.writeInput(handle, ig::String("y")));
+        zed::RunResult result;
+        const Uint32 deadline = SDL_GetTicks() + 5000;
+        bool finished = false;
+        while (SDL_GetTicks() < deadline)
+        {
+            if (runner.poll(handle, result)) { finished = true; break; }
+            SDL_Delay(1);
+        }
+        assert(finished);
+        assert(result.output.find("got:y") != ig::String::npos);
+    }
+
+    // The console row appends nothing itself: a newline in the tab's buffer is
+    // the Enter the user pressed inside inputTextMultiline, and draw() hands
+    // the line before it back for the caller to write to the child.
+    {
+        ig::Context context(backend);
+        zed::OutputPanel panel;
+        ig::String output, console("y"), line;
+        bool visible = true;
+        context.beginFrame(ig::FrameInfo(800,600));
+        assert(context.beginMainWindow("console"));
+        assert(!panel.draw(context, output, true, visible, true, console, line));
+        assert(line.empty());
+        console = "y\nnext";
+        assert(panel.draw(context, output, true, visible, true, console, line));
+        assert(line == ig::String("y") && console == ig::String("next"));
+        // Nothing running: a leftover line is dropped instead of being sent to
+        // whatever runs next.
+        context.endWindow(); context.endFrame();
+        context.beginFrame(ig::FrameInfo(800,600));
+        assert(context.beginMainWindow("console"));
+        assert(!panel.draw(context, output, true, visible, false, console, line));
+        assert(console.empty() && line.empty());
+        context.endWindow(); context.endFrame();
+    }
 }

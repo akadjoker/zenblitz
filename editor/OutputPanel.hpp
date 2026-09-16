@@ -13,15 +13,21 @@ namespace zed
 class OutputPanel
 {
 public:
-    // Draws the header row (label + Copy/Clear buttons) and, while
-    // *visible, the log body underneath. `output` is edited in place
-    // (handed straight to inputTextMultiline instead of a fresh per-frame
-    // copy - see .cpp) and Clear empties it directly; Copy puts it on the
-    // clipboard via the same throwaway-CodeEditorState trick the output
-    // context menu already used. `visible` is toggled by the header's
-    // show/hide button so the panel can be collapsed without losing
+    // Draws the header row (label + Copy/Clear buttons), a console input row
+    // while `running`, and (while *visible) the log body underneath. `output`
+    // is edited in place (handed straight to inputTextMultiline instead of a
+    // fresh per-frame copy - see .cpp) and Clear empties it directly; Copy
+    // puts it on the clipboard via the same throwaway-CodeEditorState trick
+    // the output context menu already used. `visible` is toggled by the
+    // header's show/hide button so the panel can be collapsed without losing
     // hasRunOnce/lastOutput state.
-    void draw(ig::Context& ui, ig::String& output, bool hasRunOnce, bool& visible);
+    //
+    // `consoleInput` is the tab's own line buffer. Returns true - filling
+    // `lineOut` with the line and leaving anything typed after it in the
+    // buffer - when the user pressed Enter in the console row; the caller
+    // writes that line to the running program's stdin.
+    bool draw(ig::Context& ui, ig::String& output, bool hasRunOnce, bool& visible, bool running,
+              ig::String& consoleInput, ig::String& lineOut);
 };
 
 } // namespace zed
