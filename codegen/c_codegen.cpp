@@ -887,13 +887,16 @@ namespace bb
         // The VM is happy with a script function nothing calls, and real
         // programs have them (an unused variant of a routine, a leftover
         // helper), so the C++ is told the same: without this an emitted
-        // program fails to compile under -Werror=unused-function.
+        // program fails to compile under -Werror=unused-function. The same
+        // goes for parameters a body does not read - Grass.bb's own SpriteX
+        // takes an x/y/size and only uses two of them, which -Werror turns
+        // into a failed build of a program the VM runs.
         out_ << "static " << return_type << " __attribute__((unused)) z_" << function->ident << "(";
         for (size_t i = 0; i < function->sem_type->params->decls.size(); ++i)
         {
             Decl *decl = function->sem_type->params->decls[i];
             if (i) out_ << ", ";
-            out_ << emit_type(decl->type) << " z_" << decl->name;
+            out_ << emit_type(decl->type) << " __attribute__((unused)) z_" << decl->name;
         }
         out_ << ")\n{\n";
         indent_ = 1;
