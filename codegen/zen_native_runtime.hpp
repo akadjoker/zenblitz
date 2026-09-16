@@ -3,8 +3,52 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdio>
+#include <cstring>
+#include <string>
 #include <utility>
 #include <vector>
+
+#if defined(_WIN32)
+#include <direct.h>
+#else
+#include <unistd.h>
+#endif
+
+/* The emitted program enters the folder of the .bb it was generated from
+   before its first statement runs - the same rule the VM applies to the
+   script it is handed (runtime3d/src/main3d.cpp, chdir_to_program). A script
+   names its media relative to itself (LoadMesh("plane.3ds") sits next to
+   vertex.bb), and without this the native looked for those files under
+   whatever directory the shell happened to be in while the VM looked next to
+   the script, so the two disagreed on every asset load: on the GCUK vertex.bb
+   tutorial the VM reported 'LoadMesh: could not load
+   "tutorials/GCUK_Tuts/plane.3ds"' (its cwd was the script's, /tmp) while the
+   native loaded that very mesh from the repo root. The LoadSound divergence
+   that tools/codegen_probe.sh kept showing was the same thing.
+   The path is the one zencc was given, made absolute at generation time, so
+   the binary behaves like the script wherever it is started from. The text on
+   failure is byte for byte what the VM prints: SDL_LogError prefixes the
+   message with "ERROR: " on Linux. */
+inline void zen_chdir_to_program(const char *path)
+{
+    if (!path) return;
+    const char *slash = std::strrchr(path, '/');
+    const char *backslash = std::strrchr(path, '\\');
+    const char *last = slash > backslash ? slash : backslash;
+    if (!last) return; /* no folder part: the script's folder is cwd already */
+
+    std::string directory(path, (size_t)(last - path) + 1);
+#if defined(_WIN32)
+    const int rc = _chdir(directory.c_str());
+#else
+    const int rc = chdir(directory.c_str());
+#endif
+    if (rc != 0)
+        std::fprintf(stderr,
+                     "ERROR: zenblitz3d: could not enter '%s' - relative media paths may not resolve\n",
+                     directory.c_str());
+}
 
 namespace zen_native
 {

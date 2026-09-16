@@ -25,6 +25,34 @@ namespace bb
         return false;
     }
 
+    /* The emitted program enters the folder of the .bb it came from (see
+       zen_chdir_to_program in zen_native_runtime.hpp). zencc is usually handed
+       a path relative to its own working directory - "game.bb" - which would
+       then resolve against the *runner's* directory at execution time, so the
+       path is made absolute here, once, while the compile-time cwd still says
+       what it meant. */
+    static std::string absolute_source_path(const std::string &path)
+    {
+        char buffer[4096];
+#if defined(_WIN32)
+        if (_fullpath(buffer, path.c_str(), sizeof(buffer))) return std::string(buffer);
+#else
+        if (realpath(path.c_str(), buffer)) return std::string(buffer);
+#endif
+        return path;
+    }
+
+    static std::string c_string_literal(const std::string &text)
+    {
+        std::string result;
+        for (size_t k = 0; k < text.size(); ++k)
+        {
+            if (text[k] == '\\' || text[k] == '"') result += '\\';
+            result += text[k];
+        }
+        return result;
+    }
+
     void CGen::emit_struct(StructDeclNode *structure)
     {
         if (!structure || !structure->sem_type || !structure->sem_type->fields)
@@ -980,6 +1008,11 @@ namespace bb
         out_ << "int main()\n";
         out_ << "{\n";
         indent_ = 1;
+        /* Before anything else: the program runs in the folder of the script it
+           was generated from, exactly like the VM runs the .bb it is given
+           (see zen_chdir_to_program). Relative asset paths, and the files the
+           program writes, then mean the same thing in both runtimes. */
+        line("zen_chdir_to_program(\"" + c_string_literal(absolute_source_path(filename_)) + "\");");
         if (program && program->structs)
             for (size_t i = 0; i < program->structs->decls.size(); ++i)
             {

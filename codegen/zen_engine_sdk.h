@@ -258,7 +258,7 @@ static inline bool z_write_pixel(int64_t handle, int x, int y, unsigned argb)
 
 static inline void z_warn_screen_write(const char *command)
 {
-    std::fprintf(stderr, "%s: can only write to an image or texture buffer, not the screen\n", command);
+    zen_stderr_line(std::string(command) + ": can only write to an image or texture buffer, not the screen");
 }
 
 static inline bool z_pixel_inside_viewport(int x, int y)
@@ -1057,13 +1057,15 @@ inline int64_t zen_load_terrain(const std::string &file, int64_t parent = 0)
     return z_store_entity(terrain, z_entity(parent));
 }
 /* Defined with the rest of the loaders further down; LoadMD2 is LoadMesh for a
-   .md2, which is what engine::MD2Model is picked for by extension. */
-inline int64_t zen_load_mesh(const std::string &file, int64_t parent);
+   .md2, which is what engine::MD2Model is picked for by extension. The command
+   name is a parameter because it is what appears in the "could not load"
+   warning: runtime3d warns for LoadMesh and LoadMD2 and stays quiet for
+   LoadAnimMesh. */
+static inline int64_t z_load_mesh_named(const char *command, const std::string &file, int64_t parent,
+                                        int hint, bool fold);
 inline int64_t zen_load_md2(const std::string &file, int64_t parent = 0)
 {
-    /* zen_load_mesh already routes .md2 to engine::MD2Model and warns on a
-       model that failed to validate. */
-    return zen_load_mesh(file, parent);
+    return z_load_mesh_named("LoadMD2", file, parent, engine::MeshLoader::HintCollapse, false);
 }
 
 /* Brushes and surfaces.
@@ -1555,7 +1557,7 @@ inline void zen_draw_block_rect(int64_t image, int64_t x, int64_t y, int64_t rec
    words the VM uses. */
 static inline void z_warn_load_failed(const char *command, const std::string &file)
 {
-    std::fprintf(stderr, "%s: could not load \"%s\"\n", command, file.c_str());
+    zen_stderr_line(std::string(command) + ": could not load \"" + file + "\"");
 }
 inline int64_t zen_load_sound(const std::string &file)
 {
@@ -1932,7 +1934,7 @@ inline int64_t zen_scan_line() { return 0; }   /* no raster line to report */
    exactly what the VM's commands do. */
 inline int64_t zen_open_movie(const std::string &)
 {
-    std::fprintf(stderr, "OpenMovie: video playback is not supported\n");
+    zen_stderr_line("OpenMovie: video playback is not supported");
     return 0;
 }
 inline int64_t zen_movie_zero(int64_t = 0, int64_t = 0, int64_t = 0, int64_t = 0, int64_t = 0) { return 0; }
@@ -2084,12 +2086,31 @@ inline int64_t zen_joy_wait(int64_t = 0) { return 0; }
 inline int64_t zen_graphics_width() { return z_platform.width(); }
 inline int64_t zen_graphics_height() { return z_platform.height(); }
 
-/* Sprites & images (stubs for now) */
-inline int64_t zen_load_sprite(const std::string &, int64_t texture_flags = 1, int64_t parent = 0)
+/* Sprites & images */
+/* Loaded sprite textures are held for the life of the process, exactly like
+   runtime3d's g_spriteTextures: the Sprite's brush only carries the GPU handle
+   BrushTexture::fromTexture copied out of the engine::Texture, so letting the
+   Texture go would destroy the very GPU texture the sprite binds every frame. */
+static std::vector<engine::Texture *> z_sprite_textures;
+inline int64_t zen_load_sprite(const std::string &file, int64_t texture_flags = 1, int64_t parent = 0)
 {
-    (void)texture_flags;
-    (void)parent;
-    return 0;
+    engine::Texture *tex = engine::Texture::load(file.c_str(), (int)texture_flags);
+    if (!tex)
+    {
+        z_warn_load_failed("LoadSprite", file);
+        return 0;
+    }
+    engine::Sprite *s = new engine::Sprite();
+    s->setTexture(0, engine::BrushTexture::fromTexture(z_platform.device(), tex, 0));
+    s->setFX(engine::FxFullbright);
+    /* bbLoadSprite's blend selection, which only the masked case was
+       carrying over: a masked sprite draws opaque, an alpha one blends and
+       everything else is additive (how the original's flare sprites glow). */
+    if (texture_flags & engine::TexMask) s->setBlend(engine::BlendReplace);
+    else if (texture_flags & engine::TexAlpha) s->setBlend(engine::BlendAlpha);
+    else s->setBlend(engine::BlendAdd);
+    z_sprite_textures.push_back(tex);
+    return z_store_entity(s, z_entity(parent));
 }
 inline int64_t zen_create_image(int64_t width, int64_t height, int64_t frames = 1)
 {
@@ -2661,7 +2682,11 @@ inline int64_t zen_load_texture(const std::string &file, int64_t flags = 1)
 {
     z_world_ensure();
     engine::Texture *t = engine::Texture::load(file.c_str(), (int)flags);
-    if (!t) return 0;
+    if (!t)
+    {
+        z_warn_load_failed("LoadTexture", file);
+        return 0;
+    }
     int64_t h = ++z_next_texture;
     z_texture_list[h] = t;
     return h;
@@ -2715,7 +2740,11 @@ inline int64_t zen_load_brush(const std::string &file, int64_t flags = 1, double
     /* Blitz3D's LoadBrush: load the texture, optionally rescale its UVs, and
        hand back a plain brush carrying it on slot 0. */
     engine::Texture *t = engine::Texture::load(file.c_str(), (int)flags);
-    if (!t) return 0;
+    if (!t)
+    {
+        z_warn_load_failed("LoadBrush", file);
+        return 0;
+    }
     if (u_scale != 1.0 || v_scale != 1.0) t->setScale(1.0f / (float)u_scale, 1.0f / (float)v_scale);
     engine::Brush *b = new engine::Brush();
     b->setTexture(0, engine::BrushTexture::fromTexture(z_platform.device(), t, 0));
@@ -2756,7 +2785,11 @@ inline int64_t zen_load_anim_texture(const std::string &file, int64_t flags = 1,
     z_world_ensure();
     engine::Texture *t = engine::Texture::loadAnim(file.c_str(), (int)flags, (int)frameWidth,
                                                    (int)frameHeight, (int)firstFrame, (int)frameCount);
-    if (!t) return 0;
+    if (!t)
+    {
+        z_warn_load_failed("LoadAnimTexture", file);
+        return 0;
+    }
     int64_t handle = ++z_next_texture;
     z_texture_list[handle] = t;
     return handle;
@@ -2769,7 +2802,11 @@ inline int64_t zen_load_material(const std::string &file, int64_t flags = 1, int
                                  int64_t frameHeight = 0, int64_t firstFrame = 0, int64_t frameCount = 1)
 {
     engine::Texture *texture = engine::Texture::load(file.c_str(), (int)flags);
-    if (!texture) return 0;
+    if (!texture)
+    {
+        z_warn_load_failed("LoadMaterial", file);
+        return 0;
+    }
 
     if (frameWidth < 1) frameWidth = texture->width();
     if (frameHeight < 1) frameHeight = texture->height();
@@ -3111,7 +3148,28 @@ inline int64_t zen_image_rect_collide(int64_t image, int64_t x, int64_t y, int64
 
 /* ================= Mesh loading ================= */
 
-inline int64_t zen_load_mesh(const std::string &file, int64_t parent = 0)
+/* Folds a loaded mesh into one flat MeshModel, the way runtime3d's
+   collapse_mesh does before handing a LoadMesh result back. Without the fold
+   the handle is the loader's frame hierarchy, whose root carries no model at
+   all: CountSurfaces answered 0 for every loaded mesh (so GetSurface and the
+   vertex queries had nothing to work with), while rendering still worked
+   because the frames underneath held the surfaces. The while loop consumes
+   the children - each delete detaches one - which is how the original walks
+   the tree. */
+static void z_collapse_mesh(engine::MeshModel *dest, engine::Entity *e)
+{
+    while (e->children()) z_collapse_mesh(dest, e->children());
+    if (engine::Model *m = e->getModel())
+        if (engine::MeshModel *t = m->getMeshModel())
+        {
+            t->transform(e->getWorldTform());
+            dest->add(*t);
+        }
+    delete e;
+}
+
+static inline int64_t z_load_mesh_named(const char *command, const std::string &file, int64_t parent,
+                                        int hint, bool fold)
 {
     z_world_ensure();
     std::string ext = file.substr(file.find_last_of('.') + 1);
@@ -3128,35 +3186,61 @@ inline int64_t zen_load_mesh(const std::string &file, int64_t parent = 0)
         static const engine::Transform kConv3ds(
             blitz::Matrix(blitz::Vector(1,0,0), blitz::Vector(0,0,1), blitz::Vector(0,1,0)));
         engine::LoaderB3DS loader;
-        e = loader.load(file, kConv3ds, engine::MeshLoader::HintCollapse, &z_platform.device());
+        e = loader.load(file, kConv3ds, hint, &z_platform.device());
     }
     else if (ext == "x")
     {
         engine::LoaderX loader;
-        e = loader.load(file, engine::Transform(), engine::MeshLoader::HintCollapse, &z_platform.device());
+        e = loader.load(file, engine::Transform(), hint, &z_platform.device());
     }
     else if (ext == "gltf" || ext == "glb")
     {
         engine::LoaderGltf loader;
-        e = loader.load(file, engine::Transform(), engine::MeshLoader::HintCollapse, &z_platform.device());
+        e = loader.load(file, engine::Transform(), hint, &z_platform.device());
     }
     else if (ext == "fbx")
     {
         engine::LoaderFbx loader;
-        e = loader.load(file, engine::Transform(), engine::MeshLoader::HintCollapse, &z_platform.device());
+        e = loader.load(file, engine::Transform(), hint, &z_platform.device());
     }
     else
     {
         engine::LoaderB3D loader;
-        e = loader.load(file, engine::Transform(), engine::MeshLoader::HintCollapse, &z_platform.device());
+        e = loader.load(file, engine::Transform(), hint, &z_platform.device());
     }
-    if (!e) return 0;
+    if (!e)
+    {
+        /* runtime3d warns for LoadMesh and LoadMD2 and answers 0 in silence
+           for LoadAnimMesh, so the command name decides. */
+        if (command) z_warn_load_failed(command, file);
+        return 0;
+    }
+    /* MD2 is its own animated model type, not a mesh hierarchy, so it is
+       handed back as-is; LoadMesh folds (LoadAnimMesh keeps the hierarchy,
+       which is what Animate/SetAnimTime walk). */
+    if (fold && (!e->getModel() || !e->getModel()->getMD2Model()))
+    {
+        engine::MeshModel *flat = new engine::MeshModel();
+        while (e->children()) z_collapse_mesh(flat, e->children());
+        if (engine::Model *m = e->getModel())
+            if (engine::MeshModel *t = m->getMeshModel()) flat->add(*t);
+        delete e;
+        e = flat;
+    }
     return z_store_entity(e, z_entity(parent));
 }
 
+inline int64_t zen_load_mesh(const std::string &file, int64_t parent = 0)
+{
+    return z_load_mesh_named("LoadMesh", file, parent, engine::MeshLoader::HintCollapse, true);
+}
+
+/* LoadAnimMesh keeps the frame hierarchy (no HintCollapse, no fold: that is
+   what the Animate commands walk) and answers 0 for a file it cannot load
+   without saying anything, exactly like c_LoadAnimMesh. */
 inline int64_t zen_load_animmesh(const std::string &file, int64_t parent = 0)
 {
-    return zen_load_mesh(file, parent);
+    return z_load_mesh_named(0, file, parent, 0, false);
 }
 
 }  // namespace zen_sdk

@@ -22,8 +22,11 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#if !defined(_WIN32)
+#if defined(_WIN32)
+#include <direct.h>
+#else
 #include <sys/stat.h>
+#include <unistd.h>
 #endif
 
 using namespace zen;
@@ -342,6 +345,37 @@ static void repl()
 ** Main
 ** ========================================================= */
 
+/* Enters the directory part of the program path, the rule the whole family of
+   runtimes follows (zenblitz3d has had it since it grew a script loader; the
+   native codegen emits the same call - zen_chdir_to_program): a .bb script
+   names its media relative to itself, so "plane.3ds" beside vertex.bb has to
+   resolve no matter where the runtime was started from. Without it a 2D
+   script and its native build disagreed about where relative files live, and
+   about where the files they write end up. */
+static void chdir_to_program(const char *path)
+{
+    const char *slash = strrchr(path, '/');
+    const char *backslash = strrchr(path, '\\');
+    const char *last = slash > backslash ? slash : backslash;
+    if (!last) return; /* no folder part: the script is in cwd already */
+
+    const size_t length = (size_t)(last - path) + 1;
+    char *directory = (char *)malloc(length + 1);
+    if (!directory) return;
+    memcpy(directory, path, length);
+    directory[length] = '\0';
+
+#if defined(_WIN32)
+    const int rc = _chdir(directory);
+#else
+    const int rc = chdir(directory);
+#endif
+    if (rc != 0)
+        fprintf(stderr, "zenblitz: could not enter '%s' - relative media paths may not resolve\n",
+                directory);
+    free(directory);
+}
+
 int main(int argc, char **argv)
 {
     {
@@ -436,6 +470,9 @@ int main(int argc, char **argv)
         char *data = read_file(file_path, &size);
         if (!data)
             return 1;
+        /* After the script is in memory (zenblitz3d's order) and before a
+           single statement of it runs. */
+        chdir_to_program(file_path);
         int sa = script_arg_start;
         int result = is_bytecode_buffer((const uint8_t *)data, (size_t)size)
                          ? run_bytecode((const uint8_t *)data, (size_t)size, file_path, argc - sa, argv + sa)

@@ -204,14 +204,33 @@ inline std::string z_read_str()
     if (v.kind == 1) return zen_str(v.f);
     return zen_str(v.i);
 }
+/* Every Print/Write flushes, exactly like the VM's backend_stdio (sb_print and
+   sb_write do too, for the same reason): stdout goes block-buffered as soon as
+   it is redirected to a pipe - the editor's Output panel, or the file
+   tools/codegen_probe.sh diffs the two runtimes through - and output left in
+   the buffer would surface at exit instead, after every warning the program
+   wrote to stderr in the meantime. That alone made the snd2 probe differ from
+   the VM on nothing but ordering. */
 inline void zen_print(const std::string &value)
 {
     std::fputs(value.c_str(), stdout);
     std::fputc('\n', stdout);
+    std::fflush(stdout);
 }
 inline void zen_write(const std::string &value)
 {
     std::fputs(value.c_str(), stdout);
+    std::fflush(stdout);
+}
+
+/* Warnings and errors reach stderr in the order the program produced them,
+   which only holds if stdout is emptied first - the VM's sb_log does the same
+   flush before writing the message. */
+inline void zen_stderr_line(const std::string &message)
+{
+    std::fflush(stdout);
+    std::fputs(message.c_str(), stderr);
+    std::fputc('\n', stderr);
 }
 inline int64_t zen_millisecs()
 {
