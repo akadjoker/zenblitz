@@ -1743,6 +1743,116 @@ inline void zen_emitter_texture(int64_t emitter, int64_t texture, int64_t frameW
     e->setAtlas(columns, rows, (int)firstFrame, (int)frameCount);
 }
 
+/* ================= Gamma and the last mesh builders ================= */
+
+/* Gamma ramps, one 16-bit table per channel, kept here exactly as runtime3d
+   keeps them (an identity ramp to start with) and handed to SDL by
+   UpdateGamma. SetGamma writes the destination value at the source index, and
+   the three queries read one entry back in 0..255. */
+static std::vector<std::uint16_t> z_ramp_r, z_ramp_g, z_ramp_b;
+
+static inline void z_ensure_ramp()
+{
+    if (!z_ramp_r.empty()) return;
+    z_ramp_r.assign(256, 0);
+    z_ramp_g.assign(256, 0);
+    z_ramp_b.assign(256, 0);
+    for (int i = 0; i < 256; ++i)
+        z_ramp_r[(size_t)i] = z_ramp_g[(size_t)i] = z_ramp_b[(size_t)i] = (std::uint16_t)(i * 257);
+}
+inline void zen_set_gamma(int64_t srcRed, int64_t srcGreen, int64_t srcBlue, double destRed,
+                          double destGreen, double destBlue)
+{
+    z_ensure_ramp();
+    auto clamp255 = [](double v) { return v < 0.0 ? 0.0 : (v > 255.0 ? 255.0 : v); };
+    z_ramp_r[(size_t)(srcRed & 255)] = (std::uint16_t)(clamp255(destRed) * 257.0);
+    z_ramp_g[(size_t)(srcGreen & 255)] = (std::uint16_t)(clamp255(destGreen) * 257.0);
+    z_ramp_b[(size_t)(srcBlue & 255)] = (std::uint16_t)(clamp255(destBlue) * 257.0);
+}
+inline double zen_gamma_red(int64_t red)
+{
+    z_ensure_ramp();
+    return z_ramp_r[(size_t)(red & 255)] / 257.0;
+}
+inline double zen_gamma_green(int64_t green)
+{
+    z_ensure_ramp();
+    return z_ramp_g[(size_t)(green & 255)] / 257.0;
+}
+inline double zen_gamma_blue(int64_t blue)
+{
+    z_ensure_ramp();
+    return z_ramp_b[(size_t)(blue & 255)] / 257.0;
+}
+inline void zen_update_gamma(int64_t = 0)
+{
+    z_ensure_ramp();
+    if (!z_graphics_open) return;
+    SDL_SetWindowGammaRamp(SDL_GL_GetCurrentWindow(), z_ramp_r.data(), z_ramp_g.data(),
+                           z_ramp_b.data());
+}
+
+/* runtime3d's makeGrid, ported whole: a grid of rows x columns quads whose
+   heights come from the heightmap's RGB (averaged), with the UVs running 0..1
+   across it and the surface centred on the origin. */
+static inline engine::MeshModel *z_make_grid(int columns, int rows, const engine::Pixmap *heightmap,
+                                             float heightScale, float width, float depth)
+{
+    engine::MeshModel *mesh = new engine::MeshModel();
+    engine::Surface *surface = mesh->createSurface(engine::Brush());
+    engine::Surface::Vertex vertex;
+    for (int z = 0; z <= rows; ++z)
+        for (int x = 0; x <= columns; ++x)
+        {
+            float y = 0.0f;
+            if (heightmap)
+            {
+                const int sx = columns ? x * (heightmap->width - 1) / columns : 0;
+                const int sz = rows ? z * (heightmap->height - 1) / rows : 0;
+                const engine::Color color =
+                    heightmap->get_pixel_color((engine::u32)sx, (engine::u32)sz);
+                y = ((float)color.r() + (float)color.g() + (float)color.b()) *
+                    (heightScale / (255.0f * 3.0f));
+            }
+            vertex.coords =
+                engine::Vector((float)x * width / columns - width * 0.5f, y,
+                               (float)z * depth / rows - depth * 0.5f);
+            vertex.normal = engine::Vector(0, 1, 0);
+            vertex.texCoords[0][0] = (float)x / columns;
+            vertex.texCoords[0][1] = (float)z / rows;
+            surface->addVertex(vertex);
+        }
+    for (int z = 0; z < rows; ++z)
+        for (int x = 0; x < columns; ++x)
+        {
+            const unsigned short a = (unsigned short)(z * (columns + 1) + x);
+            const unsigned short b = (unsigned short)(a + 1);
+            const unsigned short c = (unsigned short)(a + columns + 1);
+            const unsigned short d = (unsigned short)(c + 1);
+            surface->addTriangle(engine::Surface::Triangle{{a, c, b}});
+            surface->addTriangle(engine::Surface::Triangle{{b, c, d}});
+        }
+    return mesh;
+}
+/* CreateHeightMap and CreateHighMap are the same command under two names in the
+   VM's tables, so they map to the same wrapper. */
+inline int64_t zen_create_height_map(int64_t image, double heightScale = 1.0, int64_t parent = 0)
+{
+    engine::Image *img = z_image_of(image);
+    if (!img || img->width() < 2 || img->height() < 2) return 0;
+    int columns = img->width() - 1, rows = img->height() - 1;
+    if (columns > 254) columns = 254;
+    if (rows > 254) rows = 254;
+    engine::MeshModel *mesh = z_make_grid(columns, rows, &img->frame(0).pixels, (float)heightScale,
+                                          (float)(img->width() - 1), (float)(img->height() - 1));
+    return z_store_entity(mesh, z_entity(parent));
+}
+inline int64_t zen_create_voxel_sprite(int64_t slices = 64, int64_t parent = 0)
+{
+    engine::VoxelSprite *voxel = new engine::VoxelSprite((int)slices);
+    return z_store_entity(voxel, z_entity(parent));
+}
+
 /* ================= Mesh editing ================= */
 
 /* AddMesh merges the source into the destination in place, CopyMesh makes a new
