@@ -25,6 +25,15 @@ add_executable(zenblitz-editor
     ${ZEN_NATIVE_FILE_DIALOG_SRC}
 )
 target_link_libraries(zenblitz-editor PRIVATE igui_sdl2 igui)
+# The editor plays scripts through zenblitz3d, and these are the library paths
+# a native build driven from the editor would hand its compiler - but
+# ZEN_BUILD_EDITOR is ON by default while ZEN_BUILD_ENGINE is OFF, so the
+# $<TARGET_FILE:...> expressions only have a target to name when the engine is
+# part of this configuration. Unguarded, they failed the generate step for the
+# whole project (the same trap the tests target at the bottom of this file
+# hit). Nothing under editor/ reads these definitions yet; a 2D-only
+# configuration simply does without them.
+if (TARGET zenblitz_engine AND TARGET gpu_sdl AND TARGET gpu AND TARGET gpu_common AND TARGET SDL2)
 target_compile_definitions(zenblitz-editor PRIVATE
     ZEN_EDITOR_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
     ZEN_EDITOR_BUILD_DIR="${CMAKE_BINARY_DIR}"
@@ -35,6 +44,7 @@ target_compile_definitions(zenblitz-editor PRIVATE
     ZEN_EDITOR_GPU_COMMON_LIBRARY="$<TARGET_FILE:gpu_common>"
     ZEN_EDITOR_SDL_LIBRARY="$<TARGET_FILE:SDL2>"
 )
+endif()
 if (WIN32)
     # SHGetKnownFolderPath needs Shell32 + Ole32 (CoTaskMemFree).
     target_link_libraries(zenblitz-editor PRIVATE Shell32 Ole32)
